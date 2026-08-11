@@ -59,7 +59,7 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
     judge stage executes each widget's SQL and drops empty/weak ones before save.
     """
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     try:
         ctx = await context_builder.build_context(
@@ -278,7 +278,7 @@ async def suggest_dashboards_multi(
     generate-and-save-dashboard pipeline.
     """
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     try:
         ctx = await context_builder.build_context(

@@ -47,7 +47,7 @@ async def reindex_tenant_collection(req: ReindexRequest) -> ReindexResponse:
     (platform-api) decides whether the recall score is high enough to alias the
     target collection as the active tenant collection.
     """
-    payload = req.model_dump(exclude={"signature"})
+    payload = req.model_dump(exclude={"signature"}, exclude_unset=True)
     verify_signature(payload, req.signature)
 
     try:

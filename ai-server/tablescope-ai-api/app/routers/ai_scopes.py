@@ -29,7 +29,7 @@ async def analyze_scopes(req: AnalyzeScopesRequest) -> AnalyzeScopesResponse:
     2. Direction: summarized/aggregated query → detailed/raw query
     """
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     # Build query descriptions for the LLM
     query_descriptions = []

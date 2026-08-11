@@ -112,7 +112,7 @@ async def ask(req: AskRequest) -> AskResponse:
     request_id = str(uuid.uuid4())
 
     # 1. Verify signature
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     # 2. Build permission-aware context
     try:

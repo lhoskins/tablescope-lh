@@ -64,7 +64,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
     rationale, and either a read-only SQL query or a document-based finding.
     """
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     try:
         ctx = await context_builder.build_context(

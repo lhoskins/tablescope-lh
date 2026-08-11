@@ -184,7 +184,7 @@ async def classify_conversation_turn(
     intents and renderer-supported chart configs.
     """
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
     update_activity()
 
     raw = await llm_client.generate(

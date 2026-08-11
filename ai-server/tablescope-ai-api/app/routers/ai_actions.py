@@ -105,7 +105,7 @@ def _normalize_enum(value: str, allowed: tuple[str, ...], default: str) -> str:
 async def draft_action(req: DraftActionRequest) -> DraftActionResponse:
     """Generate a structured project action draft from an insight card."""
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
     update_activity(req.tenant_id)
 
     prompt = _build_action_draft_prompt(req)

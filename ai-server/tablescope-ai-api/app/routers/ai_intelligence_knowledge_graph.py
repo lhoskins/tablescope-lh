@@ -84,7 +84,7 @@ async def knowledge_graph_insights(
     the data sources related to that node.
     """
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     try:
         ctx = await context_builder.build_context(

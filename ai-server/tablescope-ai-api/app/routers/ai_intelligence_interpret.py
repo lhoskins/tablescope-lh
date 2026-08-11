@@ -35,7 +35,7 @@ async def intelligence_interpret(
     an optional callout, and a recommended action.
     """
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     blocks: list[str] = []
     for a in req.analyses:

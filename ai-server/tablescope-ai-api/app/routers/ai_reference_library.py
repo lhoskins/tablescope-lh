@@ -31,7 +31,7 @@ async def summarize_reference_document(req: ReferenceSummarizeRequest) -> Refere
     should know when citing it.
     """
     update_activity(req.user_id, req.tenant_id, req.project_id)
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
     request_id = uuid.uuid4().hex[:12]
     logger.info(
         "[%s] reference-library/summarize doc=%s title=%s", request_id, req.document_id, req.title
@@ -88,7 +88,7 @@ async def suggest_references(req: ReferenceSuggestRequest) -> ReferenceSuggestRe
     not suggest broadly to maximize coverage.
     """
     update_activity(req.user_id, req.tenant_id, req.project_id)
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
     request_id = uuid.uuid4().hex[:12]
 
     candidate_str = ", ".join(req.candidate_domains[:40]) or "(none)"

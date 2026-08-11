@@ -199,7 +199,7 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
     sources so the app can show a friendly clarification.
     """
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     try:
         ctx = await context_builder.build_context(
@@ -352,7 +352,7 @@ async def match_query(req: MatchQueryRequest) -> MatchQueryResponse:
     match_id of the equivalent existing query, or None if none match.
     """
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     if not req.existing_queries:
         return MatchQueryResponse(

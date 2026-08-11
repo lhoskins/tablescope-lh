@@ -35,8 +35,7 @@ async def _post_with_model(
         capability = _CAPABILITY_BY_PATH.get(path)
     if capability:
         model = await resolve_active_model_for_capability(capability)
-        if model:
-            payload = {**payload, "model": model, "capability": capability}
+        payload = {**payload, "model": model, "capability": capability}
     return await _post(path, payload, **kwargs)
 
 

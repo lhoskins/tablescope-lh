@@ -45,7 +45,7 @@ _CAPABILITY_BY_PATH: dict[str, str | None] = {
 
 def _sign_payload(payload: dict[str, Any], secret: str) -> str:
     """Generate HMAC-SHA256 signature for a request payload."""
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hmac.new(
         secret.encode(), canonical.encode(), hashlib.sha256,
     ).hexdigest()
@@ -63,9 +63,8 @@ async def _forward_to_ai(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     capability = _CAPABILITY_BY_PATH.get(path)
     if capability:
         model = await resolve_active_model_for_capability(capability)
-        if model:
-            payload["model"] = model
-            payload["capability"] = capability
+        payload["model"] = model
+        payload["capability"] = capability
 
     payload["timestamp"] = time.time()
     payload["signature"] = _sign_payload(payload, settings.tablescope_ai_signing_secret)

@@ -68,7 +68,7 @@ async def project_insight(req: ProjectInsightRequest) -> ProjectInsightResponse:
     authorized context. Recommended dashboards/queries/KPIs are AI suggestions.
     """
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     best_practices = load_prompt_reference("project_insight_best_practices.md")
     best_practices_block = (

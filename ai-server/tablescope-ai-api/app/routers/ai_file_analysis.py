@@ -21,7 +21,7 @@ router = APIRouter()
 @router.post("/analyze-file", response_model=AnalyzeFileResponse)
 async def analyze_file(req: AnalyzeFileRequest):
     """Analyze a file profile and return structured metadata."""
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     request_id = str(uuid.uuid4())
     logger.info("[%s] File analysis request", request_id)
