@@ -17,6 +17,7 @@ import { ToastViewport, useToasts } from "@/components/ui/toast";
 import { formatLastUpdated } from "@/lib/format-datetime";
 import { HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
 import { IntelligenceWorkspace } from "@/components/tablescope/insights/intelligence-workspace";
+import { IntelligenceStrip } from "@/components/tablescope/home/intelligence-strip";
 import { ExecutiveProjectSummary } from "@/components/tablescope/project-insight/executive-project-summary";
 import { TurnBubble } from "@/components/tablescope/conversation/conversation-turn";
 import { SaveInsightToDashboardModal } from "@/components/tablescope/home/save-insight-to-dashboard-modal";
@@ -401,6 +402,23 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     ],
   );
 
+  const intelligenceToolbar = {
+    projectCount: 1,
+    totalProjectCount: 1,
+    running,
+    lastUpdatedLabel: formatLastUpdated(lastUpdated),
+    onRefresh: handleRefresh,
+    onClearCache: handleClearCache,
+    isClearingCache: clearCache.isPending,
+    granularity,
+    onGranularityChange: handleGranularity,
+    availableProjects: [],
+    selectedProjectIds: new Set([projectId]),
+    onToggleProject: () => {},
+    onSelectAll: () => {},
+    onClear: () => {},
+  };
+
   return (
     <ProjectShell
       projectId={projectId}
@@ -463,6 +481,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
               </div>
             )}
 
+            <IntelligenceStrip {...intelligenceToolbar} scope="project" />
             <ExecutiveProjectSummary summary={insight.executiveSummary} />
 
             <IntelligenceWorkspace
@@ -472,22 +491,8 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
               running={running}
               lastUpdated={lastUpdated}
               snapshotFingerprint={insight.lastUpdatedAt ?? null}
-              toolbar={{
-                projectCount: 1,
-                totalProjectCount: 1,
-                running,
-                lastUpdatedLabel: formatLastUpdated(lastUpdated),
-                onRefresh: handleRefresh,
-                onClearCache: handleClearCache,
-                isClearingCache: clearCache.isPending,
-                granularity,
-                onGranularityChange: handleGranularity,
-                availableProjects: [],
-                selectedProjectIds: new Set([projectId]),
-                onToggleProject: () => {},
-                onSelectAll: () => {},
-                onClear: () => {},
-              }}
+              toolbar={intelligenceToolbar}
+              showToolbar={false}
               actions={{
                 onSaveToDashboard: handleSaveToDashboard,
                 onPin: handlePinInsight,

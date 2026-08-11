@@ -174,24 +174,26 @@ async def refresh_project_insight(
     until the rebuild completes.
     """
     project = await _require_project_access(project_id, session, context)
+    now_iso = datetime.now(UTC).isoformat()
 
     snap = await _get_snapshot(session, context, project_id)
     if snap is None:
+        payload: dict[str, Any] = {
+            "project": {
+                "id": project.id,
+                "name": project.name,
+                "status": project.type or "Active",
+            },
+            "stale": True,
+            "generatedAt": now_iso,
+            "lastUpdatedAt": now_iso,
+        }
         snap = ProjectIntelligenceSnapshot(
             tenant_id=context.tenant_id,
             user_id=context.user_id,
             project_id=project_id,
             suite="project_insight",
-            payload={
-                "project": {
-                    "id": project.id,
-                    "name": project.name,
-                    "status": project.type or "Active",
-                },
-                "stale": True,
-                "generatedAt": datetime.now(UTC).isoformat(),
-                "lastUpdatedAt": datetime.now(UTC).isoformat(),
-            },
+            payload=payload,
             is_stale=True,
         )
         session.add(snap)
@@ -199,6 +201,9 @@ async def refresh_project_insight(
         snap.is_stale = True
         payload = dict(snap.payload)
         payload["stale"] = True
+        payload["lastUpdatedAt"] = now_iso
+        if "generatedAt" not in payload:
+            payload["generatedAt"] = now_iso
         snap.payload = payload
     await session.commit()
 
@@ -206,16 +211,12 @@ async def refresh_project_insight(
         tenant_id=context.tenant_id, project_id=project_id
     )
 
-    payload = dict(snap.payload)
-    payload["stale"] = True
     if "project" not in payload:
         payload["project"] = {
             "id": project.id,
             "name": project.name,
             "status": project.type or "Active",
         }
-    if snap.updated_at:
-        payload["generatedAt"] = snap.updated_at.isoformat()
     return ProjectInsightResponse.model_validate(payload)
 
 

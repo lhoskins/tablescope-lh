@@ -43,6 +43,7 @@ export interface IntelligenceWorkspaceProps {
   empty?: ReactNode;
   analysisChildren?: ReactNode;
   actionsDisclosure?: "always-visible" | "collapsible";
+  showToolbar?: boolean;
 }
 
 export function IntelligenceWorkspace({
@@ -61,6 +62,7 @@ export function IntelligenceWorkspace({
   empty,
   analysisChildren,
   actionsDisclosure,
+  showToolbar = true,
 }: IntelligenceWorkspaceProps) {
   const { risks, trends, opportunities, analysis } = classifyInsightCards(cards);
   const hasCards = cards.length > 0;
@@ -71,7 +73,7 @@ export function IntelligenceWorkspace({
 
   return (
     <div className="space-y-4">
-      <IntelligenceStrip {...toolbar} scope={scope} />
+      {showToolbar && <IntelligenceStrip {...toolbar} scope={scope} />}
 
       {projectIds.length === 0 && !running && (emptySelection ?? empty)}
 
