@@ -6,7 +6,7 @@
 **Recommended branch:** `devin/ai-experience-performance-connectors-home-pinning`
 **Base branch:** `devin/mobile-responsive-voice-input`. This is confirmed, not assumed — it is the branch that produced the shared `AskAnythingComposer` and private voice-input work (see section 0.2), it is what `release/deploy-2026-08-07` was fast-forwarded from for the two most recent shipped fixes (PR #168 `c9467588`, PR #169's insight-card-match confidence-floor fix), and it is the branch the last two live deployments and verifications ran against. Before coding, `git fetch origin devin/mobile-responsive-voice-input` and diff against the SHA recorded here — more PRs may land between this document being written and Devin starting.
 **Repository:** `lhoskins/tablescope-lh`
-**Visual reference:** `Picture48.png` / the attached "Create Data Sources" carousel mockup — see section 0.4 for an important caveat about what this image actually shows.
+**Visual reference:** `Picture48.png` / the attached "Create Data Sources" carousel mockup. Confirmed by the requester: this is a design mockup, not a screenshot of an already-live carousel — see section 0.4.
 
 ---
 
@@ -36,16 +36,11 @@ What is **not** built, confirmed by searching the full commit history (`git log 
 
 `devin/mobile-responsive-voice-input` includes a recent, dense run of Teiid/VDB performance commits: lazy pool creation, warm-connect timeout tuning (45s→60s), per-view capability caching, bounded idle pools, sequential warming to avoid saturation, and non-blocking VDB pre-warm (`6713d0a5`, `7b29141b`, `10d30fdb`, `8c3e1122`'s predecessors, and others — `git log --oneline --grep="perf(teiid)"` on the base branch). This is exactly the kind of pool/translator-latency work section 13-18 asks Devin to investigate. Before instrumenting from zero: diff against these commits, re-run the section 13 baseline against the *current* base branch (not a pre-fix commit), and scope new work to whatever the fresh trace shows is still slow — most likely the Data Sources/Tables **list API** layer (N+1s, pagination, per-row translator health checks) rather than the connection-pool layer this recent work already targeted. If the baseline shows the pool work already closed the gap, say so with evidence rather than re-tuning already-tuned pool settings.
 
-### 0.4 Workstream D: no connector carousel exists anywhere — and the attached image needs one clarification
+### 0.4 Workstream D: no connector carousel exists anywhere — the attached image is the design mockup, confirmed
 
 Searched the full commit history (`git log --all --grep="carousel"`, `"installed connector"`) and the actual code on both `devin/mobile-responsive-voice-input` and the live `release/deploy-2026-08-07` tip: the "Installed connectors" section (`web-ui/components/tablescope/database-connectors/workspace.tsx:154-225`) is a plain responsive CSS grid — `grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4` — with no paging, no arrows, no row cap. There is no partially-built or abandoned carousel attempt anywhere to search for or port; this is fully net-new component work sitting directly on top of the existing `installed` react-query data source in that same file (data fetching does not need to change, only rendering/layout).
 
-One thing to resolve before Devin starts: the image attached alongside this plan shows what looks like an *already-running* two-row carousel — left/right chevrons, cards mid-transition, some visibly overlapping/cropped text. That does not match any code in this repository, on any branch, at any point in its history. Two explanations are consistent with the evidence, and Devin should confirm which one is true rather than guess:
-
-1. **It's the design/target mockup** (the plan's own "Picture48.png" visual reference, possibly literally this same image) — in which case the overlapping/glitchy appearance is an artifact of the mockup tool, not a real bug, and section 20-23's spec is the actual target to build toward.
-2. **It's a real screenshot of `app.tablescope.cloud`'s current live rendering** — in which case a carousel implementation exists somewhere this search didn't reach (a deploy that diverged from tracked branches, or a very recent uncommitted/unpushed change), and Devin's first step must be to load the live Data Source Builder step 1 and compare pixel-for-pixel before writing a single line, because "build fresh from the plain grid" and "fix an already-broken live carousel" are different starting points and different risk profiles.
-
-Do not proceed past this check silently in either direction.
+The image attached alongside this plan shows what looks like an *already-running* two-row carousel — left/right chevrons, cards mid-transition, some visibly overlapping/cropped text — and matches no code found anywhere in this repository's history. **Confirmed by the requester: this is the design mockup**, not a screenshot of an already-live page. The overlapping/cropped appearance is a mockup-tool artifact, not a bug to reproduce. Build fresh from the plain grid at `workspace.tsx:154-225` toward the section 20-23 spec below; do not go looking for a broken live carousel to fix, and do not literally reproduce the mockup's overlap/cropping — those are section 20's explicit non-goals ("no overlapping cards, cropped text").
 
 ### 0.5 Workstream E: a Home pins grid already exists and already has the exact clipping defect described
 
@@ -85,7 +80,7 @@ This work touches separate risk domains. Use one integration branch — **`devin
 |---|---|---|
 | Shared AI composer, cancellation, STT/TTS | `devin/ai-composer-private-voice` | Composer + STT already ship; cancellation and TTS are net-new |
 | Data Sources/Tables performance | `devin/data-source-table-performance` | Teiid pool layer recently hardened; re-baseline before assuming the original complaint still applies at the same layer |
-| Connector carousel | `devin/connector-catalog-carousel` | Fully net-new; confirm the attached image is a mockup, not an already-live carousel (section 0.4) |
+| Connector carousel | `devin/connector-catalog-carousel` | Fully net-new; attached image is the design mockup, confirmed (section 0.4) |
 | Home pin auto-height | `devin/home-pin-auto-height` | Grid infra already exists (`home-pins-grid.tsx`); fix targets the existing `overflow-auto`/fixed-`rowHeight` wrapper, not a new grid |
 
 Before editing:
@@ -508,7 +503,7 @@ Publish a before/after report with traces and query plans. A passing functional 
 
 ## 20. Desktop layout
 
-Refactor **Installed connectors** (`web-ui/components/tablescope/database-connectors/workspace.tsx:154-225` — currently a plain `grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4`, section 0.4) using the attached image as intent, not pixel-perfect source code, and only after resolving the section 0.4 mockup-vs-live question.
+Refactor **Installed connectors** (`web-ui/components/tablescope/database-connectors/workspace.tsx:154-225` — currently a plain `grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4`, section 0.4) using the attached image as intent, not pixel-perfect source code.
 
 At a sufficiently wide desktop container:
 
@@ -822,7 +817,7 @@ Run on Chromium desktop, WebKit/iOS-equivalent, and Android phone viewport:
 - proof that all four pages use the shared composer;
 - STT/TTS model versions, artifact hashes, isolation evidence, and audio-retention validation;
 - Data Sources/Tables before/after p50/p95/p99, pool metrics, query counts, and translator traces, measured against the current base branch (section 0.3);
-- connector screenshots at 7, 14, 15, and 29 items plus mobile layout, and confirmation of which section 0.4 scenario (mockup vs. live) applied;
+- connector screenshots at 7, 14, 15, and 29 items plus mobile layout;
 - Home screenshots for representative insight types proving no vertical internal scrollbar or overlap;
 - unit, API, E2E, accessibility, and performance results;
 - rollback instructions and feature-flag states.
@@ -847,7 +842,7 @@ Devin must not report completion after only implementing visible UI changes. Com
 3. Shared production implementation rather than page-specific copies — already true for composer/voice-input; extend, don't duplicate.
 4. Server-side cancellation and private STT/TTS, not cosmetic controls. STT already exists; TTS and cancellation are the net-new server-side work.
 5. Measured native and translator performance evidence, baselined against the current branch.
-6. Responsive connector and Home-pin visual evidence, including the section 0.4 mockup-vs-live confirmation.
+6. Responsive connector and Home-pin visual evidence.
 7. Passing automated tests and documented manual validation.
 8. A pull request merged into `devin/mobile-responsive-voice-input`, and a successful `release/deploy-2026-08-07` re-deployment following the same process as PRs #168/#169.
 
