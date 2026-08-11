@@ -69,6 +69,10 @@ function AiAssistantPageInner() {
   const [projectId, setProjectId] = useState<number | null>(null);
   const [paramsRead, setParamsRead] = useState(false);
   const [autoStarted, setAutoStarted] = useState(false);
+  // Stores the question seeded from a deep-link (the ?q=... param). We keep it
+  // separate from the live composer input so user typing does not accidentally
+  // trigger the auto-start behaviour on the first keystroke.
+  const [autoStartQuestion, setAutoStartQuestion] = useState<string | null>(null);
   // Set only from a deep link, so "View all project conversations" lands on a
   // list already narrowed to that project.
   const [projectFilter, setProjectFilter] = useState<number | null>(null);
@@ -132,7 +136,10 @@ function AiAssistantPageInner() {
     const q = searchParams.get("q");
     const pid = searchParams.get("projectId");
     const cid = searchParams.get("conversation");
-    if (q) setInput(q);
+    if (q) {
+      setInput(q);
+      setAutoStartQuestion(q);
+    }
     if (pid) {
       const n = Number(pid);
       if (!Number.isNaN(n)) {
@@ -239,12 +246,13 @@ function AiAssistantPageInner() {
   );
 
   // Auto-start a conversation seeded from the deep-link parameters once.
+  // Only the ?q=... param should trigger an automatic send; user typing should
+  // never be auto-submitted on the first keystroke.
   useEffect(() => {
-    if (!paramsRead || autoStarted || !input.trim()) return;
+    if (!paramsRead || autoStarted || !autoStartQuestion?.trim()) return;
     setAutoStarted(true);
-    const question = input.trim();
-    send(question);
-  }, [paramsRead, autoStarted, input, send]);
+    send(autoStartQuestion.trim());
+  }, [paramsRead, autoStarted, autoStartQuestion, send]);
 
   const retryLast = () => {
     if (busy || !sendMutation.variables) return;
