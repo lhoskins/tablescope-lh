@@ -95,6 +95,64 @@ async def _bounded_suggestion(
     }
 
 
+def _suggestions_from_bir(
+    bir: BusinessInsightResult | None, max_per_project: int
+) -> list[dict[str, Any]]:
+    """Convert a cached Business Insight result into query suggestions."""
+    if not bir or not bir.payload:
+        return []
+    insights = bir.payload.get("insights") or []
+    suggestions: list[dict[str, Any]] = []
+    for card in insights[:max_per_project]:
+        sql = (card.get("sql") or "").strip()
+        if not sql:
+            continue
+        suggestions.append(
+            {
+                "title": card.get("title") or "Query",
+                "description": card.get("summary") or "",
+                "sql": sql,
+                "chartType": card.get("chartType") or "",
+                "labelColumn": card.get("labelColumn") or "",
+                "valueColumn": card.get("valueColumn") or "",
+            }
+        )
+    return suggestions
+
+
+def _dashboard_from_bir(
+    bir: BusinessInsightResult | None,
+    project: Project,
+    max_per_project: int,
+) -> dict[str, Any] | None:
+    """Convert a cached Business Insight result into a dashboard preview."""
+    if not bir or not bir.payload:
+        return None
+    insights = (bir.payload.get("insights") or [])[:max_per_project]
+    widgets: list[dict[str, Any]] = []
+    for card in insights:
+        sql = (card.get("sql") or "").strip()
+        chart = card.get("chart")
+        if not sql or not chart:
+            continue
+        widgets.append(
+            {
+                "title": card.get("title") or "Widget",
+                "chartType": card.get("chartType") or chart.get("type") or "bar",
+                "chart": chart,
+                "sql": sql,
+                "labelColumn": card.get("labelColumn") or "",
+                "valueColumn": card.get("valueColumn") or "",
+            }
+        )
+    if not widgets:
+        return None
+    return {
+        "title": _derive_dashboard_title(project.name, widgets),
+        "widgets": widgets,
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Home AI suggestions — the three hero pills (New Query / New Dashboard /
 # Insights & Opportunities). All AI-driven (no hard-coded metrics), run across
@@ -283,8 +341,26 @@ async def home_query_suggestions(
         return {"projects": []}
 
     async def work(project: Project) -> dict[str, Any]:
-        analyses: list[dict[str, Any]] = []
         async with SessionLocal() as session:
+            bir = await session.scalar(
+                select(BusinessInsightResult)
+                .where(
+                    BusinessInsightResult.tenant_id == context.tenant_id,
+                    BusinessInsightResult.project_id == project.id,
+                    BusinessInsightResult.granularity == req.granularity,
+                )
+                .order_by(BusinessInsightResult.updated_at.desc())
+            )
+            if bir and bir.payload:
+                suggestions = _suggestions_from_bir(bir, req.max_per_project)
+                if suggestions:
+                    return {
+                        "projectId": str(project.id),
+                        "projectName": project.name,
+                        "projectColor": hi.project_color(project.id),
+                        "suggestions": suggestions,
+                    }
+            analyses: list[dict[str, Any]] = []
             try:
                 analyses = await _plan_analyses(
                     session,
@@ -351,8 +427,26 @@ async def home_dashboard_suggestions(
         return {"projects": []}
 
     async def work(project: Project) -> dict[str, Any]:
-        widgets: list[dict[str, Any]] = []
         async with SessionLocal() as session:
+            bir = await session.scalar(
+                select(BusinessInsightResult)
+                .where(
+                    BusinessInsightResult.tenant_id == context.tenant_id,
+                    BusinessInsightResult.project_id == project.id,
+                    BusinessInsightResult.granularity == req.granularity,
+                )
+                .order_by(BusinessInsightResult.updated_at.desc())
+            )
+            if bir and bir.payload:
+                dashboard = _dashboard_from_bir(bir, project, req.max_per_project)
+                if dashboard:
+                    return {
+                        "projectId": str(project.id),
+                        "projectName": project.name,
+                        "projectColor": hi.project_color(project.id),
+                        "dashboard": dashboard,
+                    }
+            widgets: list[dict[str, Any]] = []
             runner = _make_runner(session, context, project.id)
             ctx = await hi.gather_project_context(session, project)
             try:
