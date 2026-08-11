@@ -110,6 +110,9 @@ function AiAssistantPageInner() {
   }, [searchParams, projects]);
   const turnCount = turns.length;
   const scrollRef = useRef<HTMLDivElement>(null);
+  // AbortController for the in-flight turn so the user can cancel a long-running
+  // AI request from the composer.
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Read-only: which project the current conversation resolved to. This lets
   // users see (and debug) what the backend chose when a question wasn't
@@ -183,15 +186,16 @@ function AiAssistantPageInner() {
       // from the question itself, the same resolver Business Insights uses.
       pid: number | undefined;
     }): Promise<Conversation | { conversation_id: number }> => {
+      const signal = abortControllerRef.current?.signal;
       if (activeId == null) {
-        const convo = await createConversation({
-          project_id: pid,
-          initial_message: question,
-        });
+        const convo = await createConversation(
+          { project_id: pid, initial_message: question },
+          signal,
+        );
         setActiveId(convo.id);
         return convo;
       }
-      return submitTurn(activeId, { message: question });
+      return submitTurn(activeId, { message: question }, signal);
     },
     onSuccess: (res) => {
       const id = "conversation_id" in res ? res.conversation_id : res.id;
@@ -240,6 +244,7 @@ function AiAssistantPageInner() {
       // A picked project narrows the request; otherwise leave it unset so
       // the backend resolves the project from the question.
       const pid = active?.project_id ?? projectId ?? undefined;
+      abortControllerRef.current = new AbortController();
       sendMutation.mutate({ question, pid });
     },
     [active, projectId, busy, sendMutation],
@@ -256,8 +261,15 @@ function AiAssistantPageInner() {
 
   const retryLast = () => {
     if (busy || !sendMutation.variables) return;
+    abortControllerRef.current = new AbortController();
     sendMutation.mutate(sendMutation.variables);
   };
+
+  const cancelLast = useCallback(() => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    sendMutation.reset();
+  }, [sendMutation]);
 
   const user = identity?.user ?? FALLBACK_USER;
   const tenant = identity?.tenant ?? FALLBACK_TENANT;
@@ -422,6 +434,7 @@ function AiAssistantPageInner() {
               value={input}
               onChange={setInput}
               onSubmit={send}
+              onCancel={busy ? cancelLast : undefined}
               placeholder="Message Tablescope AI…"
               ariaLabel="Message Tablescope AI"
               busy={busy}

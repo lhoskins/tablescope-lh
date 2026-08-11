@@ -136,8 +136,15 @@ export interface RecentConversationsResponse {
   items: RecentConversationItem[];
 }
 
-export function createConversation(data: CreateConversationRequest): Promise<Conversation> {
-  return apiClient.post<Conversation>("/api/conversational-analytics/conversations", data);
+export function createConversation(
+  data: CreateConversationRequest,
+  signal?: AbortSignal,
+): Promise<Conversation> {
+  return apiClient.post<Conversation>(
+    "/api/conversational-analytics/conversations",
+    data,
+    { signal },
+  );
 }
 
 export function listConversations(projectId?: number): Promise<ConversationSummary[]> {
@@ -160,11 +167,13 @@ export function getConversation(conversationId: number): Promise<Conversation> {
 
 export function submitTurn(
   conversationId: number,
-  data: SubmitTurnRequest
+  data: SubmitTurnRequest,
+  signal?: AbortSignal,
 ): Promise<{ conversation_id: number; turn: ConversationTurn }> {
   return apiClient.post<{ conversation_id: number; turn: ConversationTurn }>(
     `/api/conversational-analytics/conversations/${conversationId}/turns`,
-    data
+    data,
+    { signal },
   );
 }
 

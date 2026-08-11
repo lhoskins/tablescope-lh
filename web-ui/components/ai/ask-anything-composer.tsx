@@ -24,9 +24,12 @@ export interface AskAnythingComposerProps {
   value: string;
   onChange: (value: string) => void;
   onSubmit: (value: string) => void;
+  /** Called while the assistant is busy to cancel the in-flight request. */
+  onCancel?: () => void;
   placeholder?: string;
   ariaLabel?: string;
   submitAriaLabel?: string;
+  cancelAriaLabel?: string;
   busy?: boolean;
   disabled?: boolean;
   /** When false the microphone is hidden entirely. */
@@ -46,9 +49,11 @@ export function AskAnythingComposer({
   value,
   onChange,
   onSubmit,
+  onCancel,
   placeholder = "Ask anything…",
   ariaLabel = "Ask anything",
   submitAriaLabel = "Send",
+  cancelAriaLabel = "Stop",
   busy = false,
   disabled = false,
   voiceEnabled = true,
@@ -182,19 +187,31 @@ export function AskAnythingComposer({
           </div>
         )}
 
-        <button
-          type="button"
-          onClick={handleSubmit}
-          disabled={!canSubmit}
-          aria-label={submitAriaLabel}
-          className="flex h-8 w-8 min-h-touch min-w-touch shrink-0 items-center justify-center rounded-lg bg-brand text-brand-fg transition-colors hover:bg-brand-700 disabled:opacity-40"
-        >
-          {busy ? (
-            <IconLoader2 size={16} className="animate-spin" />
-          ) : (
-            <IconArrowUp size={18} />
-          )}
-        </button>
+        {busy && onCancel ? (
+          <button
+            type="button"
+            onClick={onCancel}
+            title={cancelAriaLabel}
+            aria-label={cancelAriaLabel}
+            className="flex h-8 w-8 min-h-touch min-w-touch shrink-0 items-center justify-center rounded-lg bg-danger text-white transition-colors hover:bg-danger/90"
+          >
+            <IconPlayerStop size={18} />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!canSubmit}
+            aria-label={submitAriaLabel}
+            className="flex h-8 w-8 min-h-touch min-w-touch shrink-0 items-center justify-center rounded-lg bg-brand text-brand-fg transition-colors hover:bg-brand-700 disabled:opacity-40"
+          >
+            {busy ? (
+              <IconLoader2 size={16} className="animate-spin" />
+            ) : (
+              <IconArrowUp size={18} />
+            )}
+          </button>
+        )}
       </div>
 
       {(showUnsupported || showDenied || voiceError) && (
