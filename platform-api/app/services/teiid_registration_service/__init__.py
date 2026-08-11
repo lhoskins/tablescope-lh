@@ -10,7 +10,6 @@ from app.services.database_introspection_service import (
     get_db_type_config,
     normalize_db_password,
 )
-from app.services.vdb_warming import warm_vdb
 
 from .naming import _RESERVED as _RESERVED
 from .naming import generate_teiid_names as generate_teiid_names
@@ -64,20 +63,6 @@ class TeiidRegistrationService:
     async def aclose(self) -> None:
         if self._owns_client:
             await self._client.aclose()
-
-    async def _warm_vdb(self, vdb_id: str) -> None:
-        """Best-effort pool warm after a source is registered."""
-        await warm_vdb(
-            vdb_id,
-            vdb_host=self._settings.teiid_pg_host,
-            vdb_port=self._settings.teiid_pg_port,
-            connect_timeout=60.0,
-            timeout=15.0,
-            warm_views=False,
-            max_concurrent_views=1,
-            max_attempts=1,
-            retry_delay=2.0,
-        )
 
     async def register_servicenow_source(
         self,

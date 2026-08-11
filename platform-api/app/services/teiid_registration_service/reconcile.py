@@ -1,8 +1,6 @@
 
 from __future__ import annotations
 
-from app.services.vdb_warming import warm_vdb
-
 from . import TeiidRegistrationService
 from .naming import generate_teiid_names, logger
 from .platform_db import _platform_password_for_source
@@ -165,11 +163,6 @@ async def reconcile_database_sources(session, *, only_id: int | None = None) -> 
     finally:
         await reg.aclose()
 
-    # Warm each distinct VDB once after all sources are re-registered so the
-    # first user query reuses a hot asyncpg pool instead of paying the VDB
-    # metadata/pg_catalog materialization cost.
-    await _warm_vdbs(vdb_by_id.values())
-
     logger.info(
         "DB source reconcile complete: total=%s ok=%s failed=%s skipped=%s",
         results["total"],
@@ -178,24 +171,3 @@ async def reconcile_database_sources(session, *, only_id: int | None = None) -> 
         results["skipped"],
     )
     return results
-
-
-async def _warm_vdbs(vdbs) -> None:
-    """Best-effort warm of the asyncpg pools for the supplied VDBs."""
-    for vdb in vdbs:
-        try:
-            await warm_vdb(
-                vdb.vdb_id,
-                vdb_host=vdb.vdb_host,
-                vdb_port=vdb.vdb_port,
-                vdb_username=vdb.vdb_username,
-                vdb_password=vdb.get_decrypted_password(),
-                connect_timeout=60.0,
-                timeout=15.0,
-                warm_views=False,
-                max_concurrent_views=1,
-                max_attempts=1,
-                retry_delay=2.0,
-            )
-        except Exception as exc:
-            logger.warning("VDB warm failed for %s: %s", vdb.vdb_id, exc)
