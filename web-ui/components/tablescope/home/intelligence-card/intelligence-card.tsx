@@ -43,7 +43,9 @@ import {
 } from "@/lib/insights/export-csv";
 import { exportInsightCardSql, insightSqlFilename } from "@/lib/insights/export-sql";
 import { useToasts, ToastViewport } from "@/components/ui/toast";
-import { CARD_SEVERITY } from "@/lib/ui/insight-tones";import { renderBold } from "./render-bold";
+import { CARD_SEVERITY } from "@/lib/ui/insight-tones";
+import { cn } from "@/lib/cn";
+import { renderBold } from "./render-bold";
 import { calloutLabel } from "./callout-label";
 import { KpiGridView } from "./kpi-grid-view";
 import { IntelligenceCardProps } from "./intelligence-card-props";
@@ -223,24 +225,25 @@ export function IntelligenceCard({
         {renderBold(card.summary)}
       </p>
 
-      {displayCard.chart && (
-        <div className="mt-3">
-          {displayCard.chart.title && displayCard.chart.type !== "kpi_grid" && (
-            <div className="mb-1 text-small text-ink-tertiary">
-              {displayCard.chart.title}
-            </div>
-          )}
-          {displayCard.chart.type === "kpi_grid" && displayCard.chart.data.kpis ? (
-            <KpiGridView kpis={displayCard.chart.data.kpis} />
-          ) : (
-            <InsightTimeSeriesChart
-              card={displayCard}
-              projectId={Number(displayCard.projectId)}
-              onViewChange={setTimeSeriesView}
-            />
-          )}
-        </div>
-      )}
+      <div className={cn("mt-3", frozen && "relative")}>
+        {displayCard.chart && (
+          <>
+            {displayCard.chart.title && displayCard.chart.type !== "kpi_grid" && (
+              <div className="mb-1 text-small text-ink-tertiary">
+                {displayCard.chart.title}
+              </div>
+            )}
+            {displayCard.chart.type === "kpi_grid" && displayCard.chart.data.kpis ? (
+              <KpiGridView kpis={displayCard.chart.data.kpis} />
+            ) : (
+              <InsightTimeSeriesChart
+                card={displayCard}
+                projectId={Number(displayCard.projectId)}
+                onViewChange={setTimeSeriesView}
+              />
+            )}
+          </>
+        )}
 
       {card.callout && (
         <div
@@ -268,6 +271,7 @@ export function IntelligenceCard({
         <InsightCardActionToolbar
           card={displayCard}
           actionsDisclosure={actionsDisclosure}
+          overlay={frozen}
           canCreateAction={canCreateAction}
           onCreateAction={canCreateAction ? onCreateAction : undefined}
           onExplain={() => setExplainOpen(true)}
@@ -296,6 +300,7 @@ export function IntelligenceCard({
           selectedChart={selectedChart}
         />
       )}
+      </div>
 
       <ToastViewport toasts={toasts} onDismiss={dismiss} />
 

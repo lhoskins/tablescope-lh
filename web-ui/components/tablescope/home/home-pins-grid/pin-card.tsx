@@ -44,13 +44,13 @@ export function PinCard({
   onHeightChange?: (pinId: string | number, rows: number) => void;
   isResizing?: boolean;
 }) {
+  const isLive = pin.pin_type === "live_widget";
+  const isInsight = pin.pin_type === "insight_card";
   const { ref: contentRef } = useGridItemAutoHeight(
     pin.id,
     onHeightChange,
-    isResizing,
+    isResizing || !isInsight,
   );
-  const isLive = pin.pin_type === "live_widget";
-  const isInsight = pin.pin_type === "insight_card";
 
   const actions = (
     <div className="flex items-center gap-1">
@@ -84,7 +84,7 @@ export function PinCard({
           <IconGripVertical size={14} className="shrink-0 text-ink-tertiary" />
           {actions}
         </div>
-        <div ref={contentRef} className="min-h-0 flex-1">
+        <div ref={contentRef} className="min-h-0 flex-shrink-0">
           <PinContent
             pin={pin}
             feedback={feedback}

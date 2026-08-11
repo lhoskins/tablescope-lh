@@ -38,6 +38,7 @@ import type {
 export interface InsightCardActionToolbarProps {
   card: InsightCard;
   actionsDisclosure?: "always-visible" | "collapsible";
+  overlay?: boolean;
   canCreateAction: boolean;
   onCreateAction?: () => void;
   onExplain?: () => void;
@@ -267,6 +268,7 @@ export function InsightCardActionToolbar({
   onFeedbackClick,
   feedbackStatus,
   selectedChart,
+  overlay,
 }: InsightCardActionToolbarProps) {
   const insightId = card.insightId || card.id;
   const regionId = useMemo(() => `insight-actions-${insightId}`, [insightId]);
@@ -369,7 +371,11 @@ export function InsightCardActionToolbar({
             <GroundingSourcesDetails card={card} />
 
             <div
-              className="flex flex-wrap items-center justify-end gap-1"
+              className={cn(
+                "flex flex-wrap items-center justify-end gap-1",
+                overlay &&
+                  "absolute right-2 top-10 z-10 rounded-md border border-line-tertiary bg-white/95 p-1 shadow-sm",
+              )}
               data-export-hide
             >
               <IconButton
