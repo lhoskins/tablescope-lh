@@ -65,6 +65,31 @@ router = APIRouter(prefix="/query", tags=["query"])
 # in generated SQL, so a leading digit is safe.
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_$.]*$")
 
+# Extract table/view names referenced in a SQL statement so we can sample only
+# those tables instead of every datasource in the project.
+_TABLE_REF_RE = re.compile(
+    r'(?:FROM|JOIN)\s+(?:\()?("?)([A-Za-z0-9_$.]+)\1',
+    re.IGNORECASE,
+)
+
+
+def _referenced_tables(sql: str | None, fallback: str | None) -> list[str]:
+    """Return the table/view names referenced by ``sql`` or ``fallback``."""
+    if not sql:
+        if fallback and _IDENTIFIER_RE.match(fallback):
+            return [fallback]
+        return []
+
+    names: set[str] = set()
+    for match in _TABLE_REF_RE.finditer(sql):
+        name = match.group(2)
+        if _IDENTIFIER_RE.match(name):
+            names.add(name)
+
+    if not names and fallback and _IDENTIFIER_RE.match(fallback):
+        return [fallback]
+    return list(names)
+
 
 class DatasourceQueryRequest(BaseModel):
     # Optional when an explicit ``sql`` is supplied (e.g. previewing a saved /
@@ -176,9 +201,16 @@ async def query_datasource(
             }
 
     if project_id:
+        # Sample only the tables this query actually references. Sampling every
+        # project datasource on every widget/query call fetches large remote
+        # CSVs repeatedly and saturates the Teiid PG server.
+        tables_to_sample = _referenced_tables(payload.sql, payload.tableName)
+        tables_to_sample = [
+            t for t in tables_to_sample if t in allowed_tables
+        ] or ([payload.tableName] if payload.tableName and payload.tableName in allowed_tables else [])
         column_samples = await _sample_project_columns(
             database=database,
-            tables=allowed_tables,
+            tables=tables_to_sample,
             teiid_host=endpoint.pg_host,
             teiid_port=endpoint.pg_port,
         )
