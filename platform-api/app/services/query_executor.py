@@ -57,7 +57,7 @@ class TeiidQueryExecutor:
     def __init__(
         self,
         *,
-        routing: VDBRoutingService,
+        routing: VDBRoutingService | None = None,
         scopes: ScopeProxyService,
     ) -> None:
         self._routing = routing
@@ -74,14 +74,18 @@ class TeiidQueryExecutor:
         limit: int = 1000,
         teiid_host: str | None = None,
         teiid_port: int | None = None,
+        connection_info: VDBConnectionInfo | None = None,
     ) -> QueryResult:
         _validate_identifier(table_name, kind="table")
         if column_name is not None:
             _validate_identifier(column_name, kind="column")
 
-        connection_info: VDBConnectionInfo = await self._routing.get_connection_info(
-            context=context, project_id=project_id
-        )
+        if connection_info is None:
+            if self._routing is None:
+                raise RuntimeError("VDBRoutingService is required when connection_info is not provided")
+            connection_info = await self._routing.get_connection_info(
+                context=context, project_id=project_id
+            )
 
         drill_target_table: str | None = None
         drill_target_column: str | None = None

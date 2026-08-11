@@ -13,12 +13,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
 from app.auth.membership import require_membership
 from app.auth.rbac import Role, require_role
-from app.database import SessionLocal, get_db
+from app.database import SessionLocal
 from app.routes.query_sql_helpers import (
     _auto_cast_aggregates,
     _cast_timestampdiff,
@@ -79,13 +78,18 @@ class DatasourceQueryRequest(BaseModel):
 @router.post("/fetch", response_model=QueryResponse)
 async def fetch_table_data(
     payload: QueryRequest,
-    session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_membership),
 ) -> QueryResponse:
-    routing = VDBRoutingService(session)
+    # Resolve VDB connection info and tenant Teiid endpoint in a short-lived
+    # session that is closed before the (potentially long) Teiid query.
+    async with SessionLocal() as session:
+        connection_info = await VDBRoutingService(session).get_connection_info(
+            context=context, project_id=payload.projectId
+        )
+        endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+
     scopes = ScopeProxyService()
-    executor = TeiidQueryExecutor(routing=routing, scopes=scopes)
-    endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+    executor = TeiidQueryExecutor(scopes=scopes)
     try:
         result = await executor.fetch_table_data(
             context=context,
@@ -96,6 +100,7 @@ async def fetch_table_data(
             limit=payload.limit,
             teiid_host=endpoint.pg_host,
             teiid_port=endpoint.pg_port,
+            connection_info=connection_info,
         )
     except QueryValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

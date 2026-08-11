@@ -69,6 +69,7 @@ def _build_app(db_engine, *, enforce_membership: bool, monkeypatch):
 
     monkeypatch.setattr(database_module, "SessionLocal", session_factory)
     for _mod_name in (
+        "app.auth.membership",
         "app.routes.internal_file_proxy",
         "app.routes.query",
         "app.routes.dashboards_widget_query",
