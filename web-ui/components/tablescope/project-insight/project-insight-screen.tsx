@@ -146,7 +146,11 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   const clearCache = useMutation({
     mutationFn: () => projectInsightApi.clearCache(projectId),
     onSuccess: () => {
-      queryClient.setQueryData(INSIGHT_KEY(projectId), undefined);
+      // Clearing the cache deletes the snapshot; queue a rebuild so the page
+      // reloads like Business Insight instead of going blank.
+      queryClient.invalidateQueries({ queryKey: INSIGHT_KEY(projectId) });
+      refresh.mutate();
+      insightsQuery.refetch();
       push("Project Insight cache cleared", "success");
     },
     onError: (err: Error) => push(err.message, "error"),
