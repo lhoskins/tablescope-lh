@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -57,6 +58,41 @@ from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ai", tags=["AI Intelligence"])
+
+# Bounded concurrency/timeouts so one slow project (or a cold AI model) cannot
+# hang the Home "New Query / New Dashboard" pills for every project.
+_SUGGESTION_CONCURRENCY = 3
+_QUERY_SUGGESTION_TIMEOUT = 90.0
+_DASHBOARD_SUGGESTION_TIMEOUT = 120.0
+_suggestion_sem = asyncio.Semaphore(_SUGGESTION_CONCURRENCY)
+
+
+async def _bounded_suggestion(
+    project: Project,
+    work: Callable[[Project], Awaitable[dict[str, Any]]],
+    timeout: float,
+    empty_key: str,
+    empty_value: Any,
+) -> dict[str, Any]:
+    """Run a per-project suggestion coroutine with a timeout and semaphore.
+
+    If the work times out or fails, return the project entry with the empty
+    payload so the Home pills still render results for other projects.
+    """
+    async with _suggestion_sem:
+        try:
+            return await asyncio.wait_for(work(project), timeout=timeout)
+        except TimeoutError:
+            logger.warning("Suggestion timed out for project %s", project.id)
+        except Exception as exc:
+            logger.warning("Suggestion failed for project %s: %s", project.id, exc)
+    return {
+        "projectId": str(project.id),
+        "projectName": project.name,
+        "projectColor": hi.project_color(project.id),
+        empty_key: empty_value,
+        "timedOut": True,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -280,7 +316,18 @@ async def home_query_suggestions(
             "suggestions": suggestions,
         }
 
-    results = await asyncio.gather(*(work(p) for p in projects))
+    results = await asyncio.gather(
+        *(
+            _bounded_suggestion(
+                p,
+                work,
+                _QUERY_SUGGESTION_TIMEOUT,
+                "suggestions",
+                [],
+            )
+            for p in projects
+        )
+    )
     return {"projects": list(results)}
 
 
@@ -361,7 +408,18 @@ async def home_dashboard_suggestions(
             ),
         }
 
-    results = await asyncio.gather(*(work(p) for p in projects))
+    results = await asyncio.gather(
+        *(
+            _bounded_suggestion(
+                p,
+                work,
+                _DASHBOARD_SUGGESTION_TIMEOUT,
+                "dashboard",
+                None,
+            )
+            for p in projects
+        )
+    )
     return {"projects": list(results)}
 
 
