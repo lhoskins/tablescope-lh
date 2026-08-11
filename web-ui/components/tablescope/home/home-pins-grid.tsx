@@ -23,22 +23,16 @@ import {
 } from "@/lib/ui/grid-layout";
 import {
   IconLoader2,
-  IconPinnedOff,
   IconRefresh,
-  IconGripVertical,
 } from "@tabler/icons-react";
-import type { WidgetConfig } from "@/components/dashboard/types";
-import { WidgetRenderer } from "@/components/dashboard/WidgetRenderer";
-import { IntelligenceCard } from "./intelligence-card";
-import {
-  getHomePins,
-  deleteHomePin,
-  updateHomePinLayout,
-  refreshAllHomePins,
-  type HomePin,
-} from "@/lib/api/home-pins";
 import type { InsightCard } from "@/lib/api/home-intelligence";
 import type { GovernanceItem, InsightFeedbackRecord } from "@/lib/api/insight-feedback";
+import {
+  deleteHomePin,
+  getHomePins,
+  refreshAllHomePins,
+  updateHomePinLayout,
+} from "@/lib/api/home-pins";
 import { useInsightFeedback } from "@/lib/hooks/use-insight-feedback";
 import {
   CreateActionFromInsightDialog,
@@ -124,6 +118,8 @@ export function HomePinsGrid() {
   const [layoutError, setLayoutError] = useState<string | null>(null);
   const [createActionOpen, setCreateActionOpen] = useState(false);
   const [selectedInsight, setSelectedInsight] = useState<ActionableInsight | null>(null);
+  const [autoHeights, setAutoHeights] = useState<Record<string, number>>({});
+  const [activePinId, setActivePinId] = useState<string | null>(null);
 
   const handleFeedbackRemove = (pin: HomePinItem) => {
     const card = (pin.frozen_payload ?? pin.config ?? {}) as unknown as InsightCard;
@@ -209,6 +205,29 @@ export function HomePinsGrid() {
     return savedLayouts;
   }, [localLayouts, savedLayouts, pins.length]);
 
+  const measuredLayouts = useMemo<ResponsiveLayouts | null>(() => {
+    if (!displayLayouts) return null;
+    const result: ResponsiveLayouts = {};
+    for (const bp of Object.keys(displayLayouts)) {
+      const layout = displayLayouts[bp];
+      if (!layout) continue;
+      result[bp] = layout.map((item) => {
+        const measured = autoHeights[item.i];
+        if (typeof measured !== "number") return item;
+        return { ...item, h: Math.max(item.h, measured), minH: measured };
+      });
+    }
+    return result;
+  }, [displayLayouts, autoHeights]);
+
+  const handleHeightChange = useCallback(
+    (pinId: string | number, rows: number) => {
+      const key = String(pinId);
+      setAutoHeights((prev) => (prev[key] === rows ? prev : { ...prev, [key]: rows }));
+    },
+    [],
+  );
+
   // Reconcile optimistic layout with the server state once the saved layout
   // catches up to what we submitted.
   useEffect(() => {
@@ -260,8 +279,16 @@ export function HomePinsGrid() {
     [currentBreakpoint, savedLayouts],
   );
 
+  const handleDragStart: EventCallback = useCallback(
+    (_layout, oldItem) => {
+      setActivePinId(String(oldItem?.i ?? ""));
+    },
+    [],
+  );
+
   const handleDragStop: EventCallback = useCallback(
     (layout) => {
+      setActivePinId(null);
       const bpLayout = layout as unknown as LayoutItem[];
       updateOptimisticLayouts(bpLayout);
       persistLayout(bpLayout);
@@ -269,8 +296,16 @@ export function HomePinsGrid() {
     [persistLayout, updateOptimisticLayouts],
   );
 
+  const handleResizeStart: EventCallback = useCallback(
+    (_layout, oldItem) => {
+      setActivePinId(String(oldItem?.i ?? ""));
+    },
+    [],
+  );
+
   const handleResizeStop: EventCallback = useCallback(
     (layout) => {
+      setActivePinId(null);
       const bpLayout = layout as unknown as LayoutItem[];
       updateOptimisticLayouts(bpLayout);
       persistLayout(bpLayout);
@@ -315,14 +350,16 @@ export function HomePinsGrid() {
         {mounted && (
           <ResponsiveGridLayout
             className="layout"
-            layouts={displayLayouts}
             breakpoints={GRID_BREAKPOINTS}
             cols={GRID_COLS}
             rowHeight={GRID_ROW_HEIGHT}
             margin={GRID_MARGIN}
             containerPadding={[20, 10]}
+            layouts={measuredLayouts ?? displayLayouts}
             onLayoutChange={handleLayoutChange}
+            onDragStart={handleDragStart}
             onDragStop={handleDragStop}
+            onResizeStart={handleResizeStart}
             onResizeStop={handleResizeStop}
             onBreakpointChange={(bp) =>
               setCurrentBreakpoint(bp as keyof typeof GRID_BREAKPOINTS)
@@ -346,6 +383,8 @@ export function HomePinsGrid() {
                     onFeedbackRespond={handleFeedbackRespond}
                     onCreateAction={handleCreateAction}
                     governance={governanceById[insightId]}
+                    onHeightChange={handleHeightChange}
+                    isResizing={activePinId === String(pin.id)}
                   />
                 </div>
               );
