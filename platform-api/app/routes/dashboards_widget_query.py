@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
-from app.database import get_db
+from app.database import SessionLocal
 from app.models.file_source_meta import FileSourceMeta
 from app.models.user_vdb import UserVDB
 from app.routes.dashboards_crud import _require_project_access
@@ -47,36 +47,41 @@ class SchemaResponse(BaseModel):
 async def get_datasource_schema(
     project_id: int,
     view_name: str,
-    session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> SchemaResponse:
     """Return column names and inferred types for a datasource view.
 
     First checks file_source_meta.column_types (populated on upload).
     Falls back to querying Teiid ``SELECT * ... LIMIT 1`` to infer types.
-    """
-    await _require_project_access(project_id, session, context)
 
-    # Try file_source_meta first (has column_types from upload)
-    meta = await session.scalar(
-        select(FileSourceMeta).where(
-            FileSourceMeta.tenant_id == context.tenant_id,
-            FileSourceMeta.view_name == view_name,
+    The SQLAlchemy session is closed before the Teiid call so the Postgres pool
+    is not tied up while Teiid fetches remote files through the internal proxy.
+    """
+    # Resolve project access and file metadata in a short-lived session.
+    async with SessionLocal() as session:
+        await _require_project_access(project_id, session, context)
+
+        # Try file_source_meta first (has column_types from upload)
+        meta = await session.scalar(
+            select(FileSourceMeta).where(
+                FileSourceMeta.tenant_id == context.tenant_id,
+                FileSourceMeta.view_name == view_name,
+            )
         )
-    )
-    if meta and meta.column_types:
-        columns = [
-            ColumnInfo(name=c["name"], type=_normalize_type(c.get("type", "string")))
-            for c in meta.column_types
-        ]
-        return SchemaResponse(columns=columns)
+        if meta and meta.column_types:
+            columns = [
+                ColumnInfo(name=c["name"], type=_normalize_type(c.get("type", "string")))
+                for c in meta.column_types
+            ]
+            return SchemaResponse(columns=columns)
 
     # Fallback: query Teiid for one row and infer from values
     if not _IDENTIFIER_RE.match(view_name):
         raise HTTPException(status_code=400, detail=f"Invalid view name: {view_name!r}")
 
-    database = await _resolve_vdb(session=session, context=context, project_id=project_id)
-    endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+    async with SessionLocal() as session:
+        database = await _resolve_vdb(session=session, context=context, project_id=project_id)
+        endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
     sql = f'SELECT * FROM "{view_name}" LIMIT 1'
     result = await _run_widget_sql(
         database=database, sql=sql,
@@ -158,7 +163,6 @@ class WidgetQueryResponse(BaseModel):
 async def execute_widget_query(
     project_id: int,
     body: WidgetQueryRequest,
-    session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> WidgetQueryResponse:
     """Execute an aggregation query for a dashboard widget.
@@ -169,34 +173,41 @@ async def execute_widget_query(
     - Optional GROUP BY on a color/series dimension
     - WHERE clause from widget-level + dashboard-level filters
     - ORDER BY and LIMIT
+
+    The SQLAlchemy session is closed before the Teiid query so the Postgres
+    pool is not tied up while Teiid fetches remote files through the internal
+    proxy.
     """
-    await _require_project_access(project_id, session, context)
+    # Resolve project access, datasource list, and VDB metadata in a
+    # short-lived session that is closed before we wait on Teiid.
+    async with SessionLocal() as session:
+        await _require_project_access(project_id, session, context)
 
-    if not _IDENTIFIER_RE.match(body.view_name):
-        raise HTTPException(status_code=400, detail=f"Invalid view name: {body.view_name!r}")
+        if not _IDENTIFIER_RE.match(body.view_name):
+            raise HTTPException(status_code=400, detail=f"Invalid view name: {body.view_name!r}")
 
-    # Defense-in-depth: the requested view must be one of this project's own
-    # datasources. The per-user VDB already isolates tenants, but this rejects
-    # any widget (e.g. an AI-hallucinated one) that references a foreign table.
-    from app.routes.projects_datasources import list_project_datasources
+        # Defense-in-depth: the requested view must be one of this project's own
+        # datasources. The per-user VDB already isolates tenants, but this rejects
+        # any widget (e.g. an AI-hallucinated one) that references a foreign table.
+        from app.routes.projects_datasources import list_project_datasources
 
-    project_sources = await list_project_datasources(
-        project_id=project_id,
-        include_archived=True,
-        session=session,
-        context=context,
-    )
-    allowed_views = {ds.get("viewName") for ds in project_sources}
-    if body.view_name not in allowed_views:
-        raise HTTPException(
-            status_code=403,
-            detail=f"View {body.view_name!r} is not a datasource of this project",
+        project_sources = await list_project_datasources(
+            project_id=project_id,
+            include_archived=True,
+            session=session,
+            context=context,
         )
+        allowed_views = {ds.get("viewName") for ds in project_sources}
+        if body.view_name not in allowed_views:
+            raise HTTPException(
+                status_code=403,
+                detail=f"View {body.view_name!r} is not a datasource of this project",
+            )
+
+        database = await _resolve_vdb(session=session, context=context, project_id=project_id)
+        endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
 
     sql = _build_widget_sql(body)
-
-    database = await _resolve_vdb(session=session, context=context, project_id=project_id)
-    endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
     result = await _run_widget_sql(
         database=database, sql=sql,
         teiid_host=endpoint.pg_host, teiid_port=endpoint.pg_port,

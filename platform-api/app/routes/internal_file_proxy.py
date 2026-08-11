@@ -17,13 +17,12 @@ import struct
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.database import get_db
+from app.database import SessionLocal
 from app.models.file_source_meta import FileSourceMeta
 from app.models.network_file_connection import NetworkFileConnection
 from app.services.safe_remote_fetch import fetch_remote_file
@@ -138,29 +137,49 @@ def _source_allowed(
 async def file_proxy(
     request: Request,
     data_source_id: int,
-    db: AsyncSession = Depends(get_db),
 ) -> Response:
-    """Stream a live remote file to the tenant Teiid container."""
+    """Stream a live remote file to the tenant Teiid container.
+
+    All database metadata is loaded in a short-lived session that is closed
+    before the (potentially slow) remote file fetch, so the Postgres pool
+    is not tied up while Teiid waits for the file bytes.
+    """
     settings = get_settings()
     client_ip = _client_ip(request)
 
-    meta = await db.scalar(
-        select(FileSourceMeta).where(FileSourceMeta.id == data_source_id)
-    )
-    if meta is None or meta.live_source_params is None:
-        raise HTTPException(status_code=404, detail="Live source not found")
-
-    tenant_id = meta.tenant_id
-    source_ip = await get_tenant_source_ip(db, tenant_id)
-    tenant_cidr: str | None = None
-    if source_ip:
-        # Derive the tenant Docker subnet from the bound source IP.
-        from app.models.tenant_data_plane import TenantDataPlane
-
-        plane = await db.scalar(
-            select(TenantDataPlane).where(TenantDataPlane.org_tenant_id == tenant_id)
+    # Load metadata in a short-lived DB session and close it before the
+    # network fetch so the Postgres pool can serve other concurrent requests.
+    async with SessionLocal() as db:
+        meta = await db.scalar(
+            select(FileSourceMeta).where(FileSourceMeta.id == data_source_id)
         )
-        tenant_cidr = plane.docker_subnet_cidr if plane else None
+        if meta is None or meta.live_source_params is None:
+            raise HTTPException(status_code=404, detail="Live source not found")
+
+        tenant_id = meta.tenant_id
+        source_ip = await get_tenant_source_ip(db, tenant_id)
+        tenant_cidr: str | None = None
+        if source_ip:
+            # Derive the tenant Docker subnet from the bound source IP.
+            from app.models.tenant_data_plane import TenantDataPlane
+
+            plane = await db.scalar(
+                select(TenantDataPlane).where(TenantDataPlane.org_tenant_id == tenant_id)
+            )
+            tenant_cidr = plane.docker_subnet_cidr if plane else None
+
+        params: dict[str, Any] = meta.live_source_params
+        source_type = params.get("type")
+
+        connection: NetworkFileConnection | None = None
+        if source_type == "network_path":
+            connection = await db.scalar(
+                select(NetworkFileConnection).where(
+                    NetworkFileConnection.id == params["connection_id"]
+                )
+            )
+            if connection is None:
+                raise HTTPException(status_code=404, detail="Network connection not found")
 
     extra_cidrs = [c.strip() for c in (settings.file_import_network_source_cidrs or "").split(",") if c.strip()]
     if not _source_allowed(client_ip, tenant_cidr, extra_cidrs):
@@ -171,18 +190,9 @@ async def file_proxy(
         )
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    params: dict[str, Any] = meta.live_source_params
-    source_type = params.get("type")
-
     try:
         if source_type == "network_path":
-            connection = await db.scalar(
-                select(NetworkFileConnection).where(
-                    NetworkFileConnection.id == params["connection_id"]
-                )
-            )
-            if connection is None:
-                raise HTTPException(status_code=404, detail="Network connection not found")
+            assert connection is not None
             approved_hosts = [h.strip().lower() for h in (settings.file_import_smb_host_allowlist or [])]
             resolved = resolve_network_path(params["path"], connection, approved_hosts)
             data = await read_network_file(resolved, connection, source_ip=source_ip)

@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.context import RequestContext
 from app.auth.membership import require_membership
 from app.auth.rbac import Role, require_role
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.routes.query_sql_helpers import (
     _auto_cast_aggregates,
     _cast_timestampdiff,
@@ -118,7 +118,6 @@ async def fetch_table_data(
 @router.post("/datasource")
 async def query_datasource(
     payload: DatasourceQueryRequest,
-    session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> dict[str, Any]:
     """Query a datasource (view) from the appropriate VDB.
@@ -130,6 +129,9 @@ async def query_datasource(
     Generated SQL is normalized against the project schema and, if it still
     fails, repaired through the AI ``fix-sql`` endpoint so preview modals render
     rather than surfacing raw Teiid errors.
+
+    The SQLAlchemy session is closed before the (long-running) Teiid query so
+    the Postgres pool is not tied up while Teiid fetches remote files.
     """
     if not payload.sql and not (
         payload.tableName and _IDENTIFIER_RE.match(payload.tableName)
@@ -138,33 +140,37 @@ async def query_datasource(
             status_code=400, detail=f"Invalid table name: {payload.tableName!r}"
         )
 
-    database = await _resolve_vdb_database(
-        session=session, context=context, project_id=payload.project_id
-    )
-
-    endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
-
     table_schema: list[dict[str, Any]] = []
     allowed_tables: list[str] = []
     column_types: dict[str, str] = {}
     column_samples: dict[str, str] = {}
 
+    # Resolve VDB/database and project metadata in a short-lived session that
+    # is closed before we wait on Teiid, which itself calls back into
+    # platform-api for remote file proxies.
     project_id = payload.project_id
-    if project_id:
-        table_schema = await project_table_schema(
-            session, tenant_id=context.tenant_id, project_id=project_id
+    async with SessionLocal() as session:
+        database = await _resolve_vdb_database(
+            session=session, context=context, project_id=project_id
         )
-        allowed_tables = [
-            str(t)
-            for entry in table_schema
-            if (t := entry.get("table")) is not None
-        ]
-        column_types = {
-            str(col.get("name")): str(col.get("type") or "")
-            for entry in table_schema
-            for col in (entry.get("columns") or [])
-            if isinstance(col, dict) and col.get("name")
-        }
+        endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+        if project_id:
+            table_schema = await project_table_schema(
+                session, tenant_id=context.tenant_id, project_id=project_id
+            )
+            allowed_tables = [
+                str(t)
+                for entry in table_schema
+                if (t := entry.get("table")) is not None
+            ]
+            column_types = {
+                str(col.get("name")): str(col.get("type") or "")
+                for entry in table_schema
+                for col in (entry.get("columns") or [])
+                if isinstance(col, dict) and col.get("name")
+            }
+
+    if project_id:
         column_samples = await _sample_project_columns(
             database=database,
             tables=allowed_tables,
