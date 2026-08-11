@@ -268,14 +268,12 @@ async def _warm_all_vdbs_on_startup() -> None:
                     v["vdb_id"],
                     vdb_host=v["host"],
                     vdb_port=v["port"],
-                    vdb_username=v["username"],
-                    vdb_password=v["password"],
                     connect_timeout=60.0,
-                    timeout=15.0,
+                    timeout=60.0,
                     warm_views=True,
                     max_concurrent_views=1,
-                    max_attempts=1,
-                    retry_delay=2.0,
+                    max_attempts=3,
+                    retry_delay=5.0,
                 )
 
         async def _background_warm() -> None:

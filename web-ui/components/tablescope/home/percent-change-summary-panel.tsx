@@ -144,30 +144,16 @@ export function PercentChangeSummaryPanel({
 
     return (
       <div className="space-y-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2">
-            <label htmlFor="pcs-search" className="sr-only">
-              Search insights
-            </label>
-            <input
-              id="pcs-search"
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search title or project"
-              className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-1.5 text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+        {data && (
+          <div className="flex items-center">
+            <PillToggle
+              id="pcs-show-statistics"
+              label="Period statistics"
+              checked={showStatistics}
+              onChange={handleShowStatisticsChange}
             />
-            <select
-              aria-label="Rows per page"
-              value={pageSize}
-              onChange={(e) => handlePageSize(Number(e.target.value))}
-              className="rounded-md border border-line-tertiary bg-bg-primary px-2 py-1.5 text-[13px] text-ink-primary"
-            >
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-            </select>
           </div>
-        </div>
+        )}
         <PercentChangeSummaryTable
           periods={data.periods}
           rows={data.rows}
@@ -207,7 +193,34 @@ export function PercentChangeSummaryPanel({
       count={count}
     >
       <div className="space-y-3">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        {data && data.page.total_eligible > 0 && (
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <label htmlFor="pcs-search" className="sr-only">
+                Search insights
+              </label>
+              <input
+                id="pcs-search"
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search title or project"
+                className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-1.5 text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+              />
+              <select
+                aria-label="Rows per page"
+                value={pageSize}
+                onChange={(e) => handlePageSize(Number(e.target.value))}
+                className="rounded-md border border-line-tertiary bg-bg-primary px-2 py-1.5 text-[13px] text-ink-primary"
+              >
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+              </select>
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
           <TimeSeriesIntervalRangeControls
             interval={interval}
             range={range}
@@ -223,16 +236,6 @@ export function PercentChangeSummaryPanel({
               setCursor(null);
             }}
           />
-          {data && (
-            <div className="flex items-center">
-              <PillToggle
-                id="pcs-show-statistics"
-                label="Period statistics"
-                checked={showStatistics}
-                onChange={handleShowStatisticsChange}
-              />
-            </div>
-          )}
         </div>
 
         {data && (

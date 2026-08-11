@@ -177,7 +177,7 @@ export function ChartSuggestionDialog({
             type="button"
             onClick={handleApply}
             disabled={!selected || saving}
-            className="rounded-md bg-brand-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-brand-300"
+            className="rounded-md bg-brand px-3 py-1.5 text-[13px] font-medium text-brand-fg hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {saving ? "Saving..." : "Apply chart"}
           </button>

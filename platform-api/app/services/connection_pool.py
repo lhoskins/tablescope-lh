@@ -87,7 +87,7 @@ class TeiidConnectionPoolManager:
                 max_size=self._max_size,
                 max_inactive_connection_lifetime=self._max_inactive_connection_lifetime,
                 ssl=False,
-                timeout=30,
+                timeout=60,
                 command_timeout=60,
                 statement_cache_size=0,
                 server_settings={"application_name": "tablescope-platform-api"},

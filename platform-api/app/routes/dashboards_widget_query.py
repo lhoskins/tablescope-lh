@@ -401,16 +401,27 @@ async def _run_widget_sql(
     host = teiid_host or settings.teiid_pg_host
     port = teiid_port or settings.teiid_pg_port
 
-    try:
-        pool = await pool_manager.get_pool(
-            host=host, port=port, database=database,
-            username="test", password="test",
-        )
-        async with pool.acquire() as conn:
-            records = list(await conn.fetch(sql))
-    except Exception as exc:
-        logger.error("Widget query failed: %s | SQL: %s", exc, sql)
-        raise HTTPException(status_code=502, detail=f"Query failed: {exc}") from exc
+    last_exc: Exception | None = None
+    for attempt in range(2):
+        try:
+            pool = await pool_manager.get_pool(
+                host=host, port=port, database=database,
+                username="test", password="test",
+            )
+            async with pool.acquire() as conn:
+                records = list(await conn.fetch(sql))
+            break
+        except Exception as exc:
+            last_exc = exc
+            logger.warning("Widget query attempt %d failed: %s | SQL: %s", attempt + 1, exc, sql)
+            if attempt == 0:
+                await pool_manager.evict_pool(
+                    host=host, port=port, database=database, username="test",
+                )
+                continue
+    else:
+        logger.error("Widget query failed after retries: %s | SQL: %s", last_exc, sql)
+        raise HTTPException(status_code=502, detail=f"Query failed: {last_exc}") from last_exc
 
     if records:
         columns = list(records[0].keys())
