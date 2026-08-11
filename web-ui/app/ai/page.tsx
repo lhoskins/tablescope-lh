@@ -417,7 +417,6 @@ function AiAssistantPageInner() {
               placeholder="Message Tablescope AI…"
               ariaLabel="Message Tablescope AI"
               busy={busy}
-              voiceEnabled={tenant.voiceInputEnabled ?? false}
               projectId={projectId}
               className="mx-auto max-w-3xl"
             />

@@ -65,7 +65,6 @@ export function HomeAskBox({
           ariaLabel="Ask anything across your connected data, documents, and dashboards"
           submitAriaLabel="Ask"
           busy={submitting}
-          voiceEnabled={identity?.tenant.voiceInputEnabled ?? false}
           projectId={projectId}
         />
       </div>

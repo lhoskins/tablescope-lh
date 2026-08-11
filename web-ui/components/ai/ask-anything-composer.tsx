@@ -51,7 +51,7 @@ export function AskAnythingComposer({
   submitAriaLabel = "Send",
   busy = false,
   disabled = false,
-  voiceEnabled = false,
+  voiceEnabled = true,
   projectId,
   className,
 }: AskAnythingComposerProps) {

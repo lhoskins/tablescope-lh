@@ -170,7 +170,6 @@ export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: 
               ariaLabel="Describe the dashboard you want to generate"
               submitAriaLabel="Generate"
               busy={aiDashLoading}
-              voiceEnabled={identity?.tenant.voiceInputEnabled ?? false}
               projectId={projectId}
             />
             {aiDashError && (

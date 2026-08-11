@@ -84,7 +84,6 @@ export function InsightAskBox({
         ariaLabel="Ask your own question about this insight"
         submitAriaLabel="Ask"
         busy={ask.isPending}
-        voiceEnabled={identity?.tenant.voiceInputEnabled ?? false}
         projectId={card.projectId}
       />
 

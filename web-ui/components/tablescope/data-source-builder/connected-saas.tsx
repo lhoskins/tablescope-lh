@@ -6,12 +6,14 @@ import { useQuery } from "@tanstack/react-query";
 import { IconLoader2, IconPlus } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { listSaasCredentials, type SaasCredential } from "@/lib/api/connectors";
+import { BUILDER_QUERY_OPTIONS } from "@/lib/query-options";
 import { useBuilderStore } from "@/lib/stores/data-source-builder-store";
 import { BrandLogo, connectorChip } from "../database-connectors/brand-logo";
 import { SaaSSourceModal } from "./saas-source-modal";
 
 export function ConnectedSaaS({ projectId }: { projectId?: string }) {
   const { data: credentials, isLoading } = useQuery({
+    ...BUILDER_QUERY_OPTIONS,
     queryKey: ["builder", "saas-credentials"],
     queryFn: listSaasCredentials,
   });

@@ -152,7 +152,6 @@ export function AiAssistantScreen({ projectId }: { projectId: string }) {
             placeholder={`Ask about your data, documents, or dashboards in ${project?.name ?? "this project"}…`}
             ariaLabel="Ask about your project"
             busy={busy}
-            voiceEnabled={tenant?.voiceInputEnabled ?? false}
             projectId={projectId}
           />
           <p className="mt-1.5 text-center text-small text-ink-tertiary">
