@@ -137,15 +137,16 @@ class VDBManagementService:
         # Any existing cached pool for this VDB is stale after a (re)deploy.
         await pool_manager.evict_by_vdb_id(vdb_id)
 
-        # Warm the asyncpg pool/connection for this VDB so the first user query
-        # does not pay pool creation + pg_catalog materialization costs.
+        # Warm the asyncpg connection for this VDB so the first user query does
+        # not pay pg_catalog materialization costs. Skip per-view warming to avoid
+        # fetching every remote file on create/redeploy.
         await warm_vdb(
             vdb_id,
             vdb_host=self._pg_host,
             vdb_port=self._pg_port,
             connect_timeout=60.0,
             timeout=15.0,
-            warm_views=True,
+            warm_views=False,
             max_concurrent_views=1,
             max_attempts=1,
             retry_delay=2.0,
@@ -203,7 +204,7 @@ class VDBManagementService:
             vdb_port=self._pg_port,
             connect_timeout=60.0,
             timeout=15.0,
-            warm_views=True,
+            warm_views=False,
             max_concurrent_views=1,
             max_attempts=1,
             retry_delay=2.0,
@@ -274,7 +275,7 @@ class VDBManagementService:
             vdb_port=self._pg_port,
             connect_timeout=60.0,
             timeout=15.0,
-            warm_views=True,
+            warm_views=False,
             max_concurrent_views=1,
             max_attempts=1,
             retry_delay=2.0,

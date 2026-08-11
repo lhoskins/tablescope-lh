@@ -111,7 +111,7 @@ def build_remote_csv_view_ddl(
         f"{select_cols}\n"
         f"FROM\n"
         f"(EXEC RemoteCSVSourceModel.getTextFiles('remote://ds:{data_source_id}')) AS f,\n"
-        f"TEXTTABLE(f.file COLUMNS {texttable_cols} DELIMITER '{escaped_delim}' HEADER) AS A;"
+        f"TEXTTABLE(f.file COLUMNS {texttable_cols} DELIMITER '{escaped_delim}' SKIP 1) AS A;"
     )
 
 

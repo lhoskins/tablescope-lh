@@ -16,6 +16,11 @@ services:
     volumes:
       - teiid_data:/opt/wildfly/teiidfiles/customers
       - teiid_logs:/opt/wildfly/standalone/log
+    environment:
+      # Slow down the self-healing pool/VDB loops so they do not compete with
+      # user queries and remote-file fetches.
+      TEIID_POOL_HEALTH_INTERVAL: "300"
+      TEIID_VDB_RECONCILE_INTERVAL: "1800"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:9990/health"]
       interval: 30s

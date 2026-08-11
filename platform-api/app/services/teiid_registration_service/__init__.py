@@ -73,7 +73,7 @@ class TeiidRegistrationService:
             vdb_port=self._settings.teiid_pg_port,
             connect_timeout=60.0,
             timeout=15.0,
-            warm_views=True,
+            warm_views=False,
             max_concurrent_views=1,
             max_attempts=1,
             retry_delay=2.0,
