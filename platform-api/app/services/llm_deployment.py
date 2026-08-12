@@ -96,6 +96,7 @@ async def preflight_install(
         raise DeploymentError(str(exc)) from exc
 
     # Runtime side: choose the correct adapter for the target runtime type.
+    adapter: VllmAdapter | OllamaAdapter
     if target.runtime_type == "vllm":
         adapter = VllmAdapter(base_url=target.host)
     elif target.runtime_type == "ollama":
@@ -153,6 +154,7 @@ async def install_artifact(
     vault = ModelVault()
     source_path = vault.storage_path(artifact.id, file_row.filename)
 
+    adapter: VllmAdapter | OllamaAdapter
     if target.runtime_type == "vllm":
         adapter = VllmAdapter(base_url=target.host)
         result = await adapter.install(
