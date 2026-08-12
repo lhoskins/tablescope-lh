@@ -418,7 +418,7 @@ async def execute_turn(
             grounding_evidence=grounding_dict,
         )
         turn.assistant_message = (
-            prose
+            prose.get("answer")
             or "I couldn't find a relevant document for that question. Try rephrasing or checking the Reference Library."
         )
         turn.status = "success"
@@ -542,8 +542,8 @@ async def execute_turn(
             project_id=project_id,
             question=question,
         )
-        if prose:
-            turn.assistant_message = prose
+        if prose.get("answer"):
+            turn.assistant_message = prose["answer"]
             turn.chart_config = None
             turn.result_cache = None
             turn.sql = None
