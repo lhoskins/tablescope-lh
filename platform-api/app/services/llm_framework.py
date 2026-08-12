@@ -26,6 +26,7 @@ from app.models.llm_framework import (
 )
 from app.services.llm_catalog_client import CatalogModel, HuggingFaceCatalogClient
 from app.services.llm_ollama_adapter import OllamaAdapter
+from app.services.llm_vllm_adapter import VllmAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -201,16 +202,22 @@ async def register_runtime_target(
 
     is_reachable = False
     last_seen_at = None
-    if runtime_type == "ollama":
-        try:
+    try:
+        if runtime_type == "ollama":
             result = await OllamaAdapter(base_url=host).preflight(
                 artifact_size=0, reserve_bytes=0
             )
-            is_reachable = result.reachable
-            if is_reachable:
-                last_seen_at = datetime.now(UTC)
-        except Exception:
-            logger.warning("Reachability probe failed for new target %s (%s)", name, host)
+        elif runtime_type == "vllm":
+            result = await VllmAdapter(base_url=host).preflight(
+                artifact_size=0, reserve_bytes=0
+            )
+        else:
+            result = None
+        if result and result.reachable:
+            is_reachable = True
+            last_seen_at = datetime.now(UTC)
+    except Exception:
+        logger.warning("Reachability probe failed for new target %s (%s)", name, host)
 
     target = LLMRuntimeTarget(
         name=name,
