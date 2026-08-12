@@ -20,26 +20,60 @@ logger = logging.getLogger(__name__)
 TIMEOUT = httpx.Timeout(180.0, connect=10.0)
 
 
-async def generate(
+def _is_openai_target(target_url: str) -> bool:
+    """Heuristic: vLLM/OpenAI-compatible endpoints expose a /v1 base path."""
+    return target_url.endswith("/v1") or "/v1/" in target_url
+
+
+async def _generate_openai(
     prompt: str,
     system_prompt: str = "",
-    model: str | None = None,
-    ollama_url: str | None = None,
+    model: str = "",
+    target_url: str = "",
+    temperature: float = 0.1,
+    max_tokens: int | None = None,
+    response_format: str | None = None,
+) -> str:
+    """Generate using a vLLM/OpenAI-compatible /v1/chat/completions endpoint."""
+    messages: list[dict[str, str]] = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "stream": False,
+    }
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
+    if response_format == "json":
+        payload["response_format"] = {"type": "json_object"}
+
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.post(
+            f"{target_url}/chat/completions",
+            json=payload,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        message = data["choices"][0]["message"]
+        content = message.get("content") or message.get("reasoning") or ""
+        return str(content)
+
+
+async def _generate_ollama(
+    prompt: str,
+    system_prompt: str = "",
+    model: str = "",
+    target_url: str = "",
     temperature: float = 0.1,
     max_tokens: int | None = None,
     num_ctx: int | None = None,
     response_format: str | None = None,
 ) -> str:
-    """Generate text completion from Ollama.
-
-    ``response_format="json"`` forces Ollama's constrained JSON decoding so the
-    model can only emit a syntactically valid JSON value — use it for any call
-    whose response is parsed as JSON, to stop the model from wrapping output in
-    prose/markdown.
-    """
-    model = model or settings.reasoning_model
-    target_url = (ollama_url or settings.ollama_url).rstrip("/")
-
+    """Generate using an Ollama /api/generate endpoint."""
     options: dict[str, Any] = {"temperature": temperature}
     if max_tokens is not None:
         options["num_predict"] = max_tokens
@@ -64,6 +98,48 @@ async def generate(
         )
         resp.raise_for_status()
         return resp.json()["response"]
+
+
+async def generate(
+    prompt: str,
+    system_prompt: str = "",
+    model: str | None = None,
+    ollama_url: str | None = None,
+    temperature: float = 0.1,
+    max_tokens: int | None = None,
+    num_ctx: int | None = None,
+    response_format: str | None = None,
+) -> str:
+    """Generate text completion from Ollama or a vLLM/OpenAI-compatible target.
+
+    ``response_format="json"`` forces constrained JSON decoding so the model can
+    only emit a syntactically valid JSON value — use it for any call whose
+    response is parsed as JSON.
+    """
+    model = model or settings.reasoning_model
+    target_url = (ollama_url or settings.ollama_url).rstrip("/")
+
+    if _is_openai_target(target_url):
+        return await _generate_openai(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            model=model,
+            target_url=target_url,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format=response_format,
+        )
+
+    return await _generate_ollama(
+        prompt=prompt,
+        system_prompt=system_prompt,
+        model=model,
+        target_url=target_url,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        num_ctx=num_ctx,
+        response_format=response_format,
+    )
 
 
 _TEIID_RULES = (

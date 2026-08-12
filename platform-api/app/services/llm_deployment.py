@@ -28,6 +28,7 @@ from app.models.llm_framework import (
 )
 from app.services.llm_model_vault import ModelVault, VaultError
 from app.services.llm_ollama_adapter import OllamaAdapter
+from app.services.llm_vllm_adapter import VllmAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -94,11 +95,17 @@ async def preflight_install(
     except VaultError as exc:
         raise DeploymentError(str(exc)) from exc
 
-    # Runtime side: Ollama reachable and capacity OK.
-    adapter = OllamaAdapter(
-        base_url=target.host,
-        rollback_slots=settings.llm_ollama_rollback_slots,
-    )
+    # Runtime side: choose the correct adapter for the target runtime type.
+    if target.runtime_type == "vllm":
+        adapter = VllmAdapter(base_url=target.host)
+    elif target.runtime_type == "ollama":
+        adapter = OllamaAdapter(
+            base_url=target.host,
+            rollback_slots=settings.llm_ollama_rollback_slots,
+        )
+    else:
+        raise DeploymentError(f"Unsupported runtime type: {target.runtime_type}")
+
     result = await adapter.preflight(
         artifact_size=artifact_size,
         reserve_bytes=5 * 1024 ** 3,
@@ -146,17 +153,27 @@ async def install_artifact(
     vault = ModelVault()
     source_path = vault.storage_path(artifact.id, file_row.filename)
 
-    adapter = OllamaAdapter(
-        base_url=target.host,
-        install_path=settings.llm_model_install_path,
-        rollback_slots=settings.llm_ollama_rollback_slots,
-    )
-
-    result = await adapter.install(
-        artifact_id=artifact.id,
-        artifact_name=artifact.name,
-        source_gguf_path=str(source_path),
-    )
+    if target.runtime_type == "vllm":
+        adapter = VllmAdapter(base_url=target.host)
+        result = await adapter.install(
+            artifact_id=artifact.id,
+            artifact_name=artifact.name,
+            source_gguf_path=str(source_path),
+            runtime_options=runtime_options,
+        )
+    elif target.runtime_type == "ollama":
+        adapter = OllamaAdapter(
+            base_url=target.host,
+            install_path=settings.llm_model_install_path,
+            rollback_slots=settings.llm_ollama_rollback_slots,
+        )
+        result = await adapter.install(
+            artifact_id=artifact.id,
+            artifact_name=artifact.name,
+            source_gguf_path=str(source_path),
+        )
+    else:
+        raise DeploymentError(f"Unsupported runtime type: {target.runtime_type}")
     if not result.success:
         raise DeploymentError(result.detail or "Ollama install failed")
 
