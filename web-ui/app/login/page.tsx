@@ -35,6 +35,16 @@ function LoginForm() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    // The generic /login page is meant for choosing a tenant. When a tenant is
+    // already supplied, send the user to the dedicated /:tenant/login page,
+    // which has fewer options and avoids the ambiguous "Signing in" message.
+    if (tenantParam && typeof window !== "undefined" && !window.location.hash.includes("access_token")) {
+      const next = nextParam ? `?next=${encodeURIComponent(nextParam)}` : "";
+      router.replace(`/${tenantParam}/login${next}`);
+    }
+  }, [tenantParam, nextParam, router]);
+
+  useEffect(() => {
     const accessToken = readSupabaseTokenFromHash();
     if (!accessToken) return;
     setLoading(true);
@@ -92,7 +102,7 @@ function LoginForm() {
       </h1>
       {tenantParam && (
         <p className="mb-4 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-700">
-          Signing in to tenant: <strong>{tenantParam}</strong>
+          Sign in to tenant: <strong>{tenantParam}</strong>
         </p>
       )}
       <form onSubmit={onSubmit} className="space-y-4">
