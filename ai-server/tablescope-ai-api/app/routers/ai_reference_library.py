@@ -65,6 +65,7 @@ Return ONLY the summary text — no preamble, no headings, no JSON."""
             model=req.model or settings.reasoning_model,
             temperature=0.2,
             max_tokens=400,
+            ollama_url=req.ollama_url,
         )
     except Exception as exc:
         logger.exception("[%s] reference summarize failed: %s", request_id, exc)
@@ -125,6 +126,7 @@ Rules:
             model=req.model or settings.reasoning_model,
             temperature=0.2,
             max_tokens=800,
+            ollama_url=req.ollama_url,
         )
         parsed = _parse_json_response(raw) or {}
     except Exception as exc:

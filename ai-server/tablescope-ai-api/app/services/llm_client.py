@@ -24,6 +24,7 @@ async def generate(
     prompt: str,
     system_prompt: str = "",
     model: str | None = None,
+    ollama_url: str | None = None,
     temperature: float = 0.1,
     max_tokens: int | None = None,
     num_ctx: int | None = None,
@@ -37,6 +38,7 @@ async def generate(
     prose/markdown.
     """
     model = model or settings.reasoning_model
+    target_url = (ollama_url or settings.ollama_url).rstrip("/")
 
     options: dict[str, Any] = {"temperature": temperature}
     if max_tokens is not None:
@@ -57,7 +59,7 @@ async def generate(
 
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         resp = await client.post(
-            f"{settings.ollama_url}/api/generate",
+            f"{target_url}/api/generate",
             json=payload,
         )
         resp.raise_for_status()
@@ -197,6 +199,7 @@ async def generate_sql(
     preferred_sources: list[str] | None = None,
     relevant_columns: list[str] | None = None,
     model: str | None = None,
+    ollama_url: str | None = None,
 ) -> str:
     """Generate SQL using the code-specialized model with semantic discovery."""
     catalog = _catalog_text(allowed_tables, source_catalog)
@@ -227,6 +230,7 @@ async def generate_sql(
         prompt=prompt,
         system_prompt=system_prompt,
         model=model or settings.sql_model,
+        ollama_url=ollama_url,
         temperature=0.0,
     )
 
@@ -241,6 +245,7 @@ async def repair_sql(
     preferred_sources: list[str] | None = None,
     relevant_columns: list[str] | None = None,
     model: str | None = None,
+    ollama_url: str | None = None,
 ) -> str:
     """Ask the model to fix SQL that failed validation, preserving intent."""
     catalog = _catalog_text(allowed_tables, source_catalog)
@@ -273,6 +278,7 @@ async def repair_sql(
         prompt=repair_prompt,
         system_prompt=system_prompt,
         model=model or settings.sql_model,
+        ollama_url=ollama_url,
         temperature=0.0,
     )
 

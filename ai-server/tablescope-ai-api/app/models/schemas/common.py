@@ -13,6 +13,8 @@ class AIBaseRequest(BaseModel):
     # Optional model override and routing capability supplied by the platform
     # LLM Framework. When omitted, the AI server falls back to static config.
     model: str | None = None
+    ollama_url: str | None = None
+    routing_version: int | None = None
     capability: str | None = None
 
 

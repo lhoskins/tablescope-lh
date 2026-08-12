@@ -80,6 +80,7 @@ async def intelligence_interpret(
         model=req.model or settings.reasoning_model,
         temperature=0.2,
         num_ctx=8192,
+        ollama_url=req.ollama_url,
     )
 
     parsed = _parse_json_response(raw)

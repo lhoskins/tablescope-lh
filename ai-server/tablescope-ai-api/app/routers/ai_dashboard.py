@@ -218,6 +218,7 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
         # alongside the project context without truncation.
         num_ctx=24576,
         response_format="json",
+        ollama_url=req.ollama_url,
     )
 
     suggestions: list[dict] = []
@@ -384,6 +385,7 @@ async def suggest_dashboards_multi(
         temperature=0.4,
         num_ctx=24576,
         response_format="json",
+        ollama_url=req.ollama_url,
     )
 
     parsed = _parse_json_response(raw)

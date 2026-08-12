@@ -3,31 +3,12 @@
 
 
 import { useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
-  activateLLMDeployment,
-  approveLLMDeployment,
-  getLLMAuditEvents,
   getLLMCapabilities,
-  getLLMDeployments,
   getLLMFrameworkStatus,
   getLLMInventory,
-  getLLMEmbeddingMigrations,
-  getLLMModelConversions,
-  installLLMArtifact,
-  preflightLLMInstall,
-  registerLLMRuntimeTarget,
-  rollbackLLMDeployment,
-  searchLLMCatalog,
-  stageLLMArtifact,
-  reindexLLMArtifact,
-  convertLLMCatalogEntry,
-  upsertLLMRoutingProfile,
-  type AuditEvent,
-  type CatalogSearchResult,
-  type Deployment,
   type LLMInventory,
-  type RuntimeTarget,
 } from "@/lib/api/llm-framework";import { formatCapability, Section } from "./utils";
 import { TargetsTable, ArtifactsTable, InstallationsTable, RoutingTable } from "./inventory-tables";
 import { RegisterTargetForm, RoutingProfileForm } from "./register-forms";
@@ -226,7 +207,10 @@ export default function LLMFrameworkPage() {
                     />
                   </Section>
                   <Section title="Installations">
-                    <InstallationsTable installations={inventoryQuery.data.installations} />
+                    <InstallationsTable
+                      installations={inventoryQuery.data.installations}
+                      targets={inventoryQuery.data.targets}
+                    />
                   </Section>
                   <Section title="Routing profiles">
                     {statusQuery.data?.dynamic_routing_enabled ? (
@@ -238,14 +222,22 @@ export default function LLMFrameworkPage() {
                           onSuccess={() => inventoryQuery.refetch()}
                         />
                         <div className="mt-4">
-                          <RoutingTable routing_profiles={inventoryQuery.data.routing_profiles} />
+                          <RoutingTable
+                            routing_profiles={inventoryQuery.data.routing_profiles}
+                            installations={inventoryQuery.data.installations}
+                            targets={inventoryQuery.data.targets}
+                          />
                         </div>
                       </>
                     ) : (
                       <>
                         <p className="text-sm text-ink-tertiary">Dynamic routing is disabled in configuration.</p>
                         <div className="mt-4">
-                          <RoutingTable routing_profiles={inventoryQuery.data.routing_profiles} />
+                          <RoutingTable
+                            routing_profiles={inventoryQuery.data.routing_profiles}
+                            installations={inventoryQuery.data.installations}
+                            targets={inventoryQuery.data.targets}
+                          />
                         </div>
                       </>
                     )}

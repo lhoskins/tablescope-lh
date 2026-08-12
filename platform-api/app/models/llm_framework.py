@@ -38,11 +38,22 @@ class LLMRoutingCapability(StrEnum):
     SQL_GENERATION = "sql_generation"
     INSIGHT_INTERPRETATION = "insight_interpretation"
     DASHBOARD_PLANNING = "dashboard_planning"
+    COMPLEX_AGENTIC = "complex_agentic"
+    DEEP_ANALYSIS = "deep_analysis"
 
 
 ROUTING_CAPABILITIES: list[str] = [c.value for c in LLMRoutingCapability]
 
 _CAPABILITY_IN_SQL = ", ".join(f"'{c.value}'" for c in LLMRoutingCapability)
+
+
+class LLMDeploymentMode(StrEnum):
+    """How an artifact is deployed onto a runtime target."""
+
+    INSTALL_ONLY = "install_only"
+    INSTALL_AND_STAGE = "install_and_stage"
+    INSTALL_AND_REQUEST_ACTIVATION = "install_and_request_activation"
+    REPLACE_ACTIVE_MODEL = "replace_active_model"
 
 
 class LLMRuntimeTarget(TimestampMixin, Base):
@@ -58,6 +69,13 @@ class LLMRuntimeTarget(TimestampMixin, Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     max_loaded_models: Mapped[int | None] = mapped_column(Integer, nullable=True)
     keep_alive_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    environment: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    gpu_memory_gb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    system_ram_gb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    disk_gb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_internet_isolated: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    max_concurrency: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    context_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     labels: Mapped[dict] = mapped_column(_JSON, nullable=False, default=dict)
 
     installations: Mapped[list[LLMInstallation]] = relationship(back_populates="target")
@@ -162,6 +180,13 @@ class LLMLicenseApproval(TimestampMixin, Base):
 class LLMInstallation(TimestampMixin, Base):
     __tablename__ = "llm_installations"
 
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('staged', 'installed', 'active', 'rolled_back')",
+            name="ck_llm_installations_status",
+        ),
+    )
+
     id: Mapped[int] = mapped_column(primary_key=True)
     artifact_id: Mapped[int] = mapped_column(
         ForeignKey("llm_model_artifacts.id", ondelete="CASCADE"), nullable=False, index=True
@@ -179,6 +204,8 @@ class LLMInstallation(TimestampMixin, Base):
     previous_installation_id: Mapped[int | None] = mapped_column(
         ForeignKey("llm_installations.id", ondelete="SET NULL"), nullable=True
     )
+    deployment_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    runtime_options: Mapped[dict] = mapped_column(_JSON, nullable=False, default=dict)
 
     artifact: Mapped[LLMModelArtifact] = relationship(back_populates="installations")
     target: Mapped[LLMRuntimeTarget] = relationship(back_populates="installations")
@@ -206,18 +233,55 @@ class LLMRoutingProfile(TimestampMixin, Base):
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     priority: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    previous_routing_profile_id: Mapped[int | None] = mapped_column(
+        ForeignKey("llm_routing_profiles.id", ondelete="SET NULL"), nullable=True
+    )
+    superseded_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("llm_routing_profiles.id", ondelete="SET NULL"), nullable=True
+    )
+    deployment_id: Mapped[int | None] = mapped_column(
+        ForeignKey("llm_deployments.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     config: Mapped[dict] = mapped_column(_JSON, nullable=False, default=dict)
 
     target: Mapped[LLMRuntimeTarget] = relationship(back_populates="routing_profiles")
     installation: Mapped[LLMInstallation | None] = relationship(back_populates="routing_profiles")
+    deployment: Mapped[LLMDeployment | None] = relationship(back_populates="routing_profile")
+    previous_profile: Mapped[LLMRoutingProfile | None] = relationship(
+        "LLMRoutingProfile",
+        foreign_keys=[previous_routing_profile_id],
+        remote_side="LLMRoutingProfile.id",
+        uselist=False,
+    )
+    superseded_by: Mapped[LLMRoutingProfile | None] = relationship(
+        "LLMRoutingProfile",
+        foreign_keys=[superseded_by_id],
+        remote_side="LLMRoutingProfile.id",
+        uselist=False,
+    )
 
 
 class LLMDeployment(TimestampMixin, Base):
     __tablename__ = "llm_deployments"
 
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'approved', 'stabilizing', 'active', 'rolled_back', 'failed')",
+            name="ck_llm_deployments_status",
+        ),
+        CheckConstraint(
+            "deployment_mode IN ('install_only', 'install_and_stage', 'install_and_request_activation', 'replace_active_model')",
+            name="ck_llm_deployments_mode",
+        ),
+    )
+
     id: Mapped[int] = mapped_column(primary_key=True)
     installation_id: Mapped[int] = mapped_column(
         ForeignKey("llm_installations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    target_id: Mapped[int] = mapped_column(
+        ForeignKey("llm_runtime_targets.id", ondelete="CASCADE"), nullable=False, index=True
     )
     requested_by_user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
@@ -226,6 +290,8 @@ class LLMDeployment(TimestampMixin, Base):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    deployment_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="install_only")
+    runtime_options: Mapped[dict] = mapped_column(_JSON, nullable=False, default=dict)
     previous_deployment_id: Mapped[int | None] = mapped_column(
         ForeignKey("llm_deployments.id", ondelete="SET NULL"), nullable=True
     )
@@ -233,6 +299,11 @@ class LLMDeployment(TimestampMixin, Base):
     stabilized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     installation: Mapped[LLMInstallation] = relationship(back_populates="deployments")
+    target: Mapped[LLMRuntimeTarget] = relationship()
+    routing_profile: Mapped[LLMRoutingProfile | None] = relationship(
+        back_populates="deployment",
+        uselist=False,
+    )
     attempts: Mapped[list[LLMDeploymentAttempt]] = relationship(
         back_populates="deployment",
         cascade="all, delete-orphan",

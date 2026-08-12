@@ -23,7 +23,7 @@ from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project, ProjectMember
 from app.models.saved_query import SavedQuery
 from app.services.knowledge_graph_ai_context import collect_knowledge_graph_ai_context
-from app.services.llm_framework import resolve_active_model_for_capability
+from app.services.llm_framework import resolve_active_routing_for_capability
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +62,10 @@ async def _forward_to_ai(path: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     capability = _CAPABILITY_BY_PATH.get(path)
     if capability:
-        model = await resolve_active_model_for_capability(capability)
-        payload["model"] = model
+        routing = await resolve_active_routing_for_capability(capability)
+        payload["model"] = routing.model
+        payload["ollama_url"] = routing.ollama_url
+        payload["routing_version"] = routing.version
         payload["capability"] = capability
 
     payload["timestamp"] = time.time()

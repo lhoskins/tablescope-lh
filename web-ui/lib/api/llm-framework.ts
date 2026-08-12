@@ -25,6 +25,13 @@ export interface RuntimeTarget {
   last_seen_at: string | null;
   max_loaded_models: number | null;
   keep_alive_minutes: number | null;
+  environment: string | null;
+  gpu_memory_gb: number | null;
+  system_ram_gb: number | null;
+  disk_gb: number | null;
+  is_internet_isolated: boolean;
+  max_concurrency: number | null;
+  context_tokens: number | null;
   labels: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -77,6 +84,8 @@ export interface Installation {
   installed_at: string | null;
   activated_at: string | null;
   rolled_back_at: string | null;
+  deployment_mode: string | null;
+  runtime_options: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
@@ -88,6 +97,10 @@ export interface RoutingProfile {
   installation_id: number | null;
   is_active: boolean;
   priority: number;
+  version: number;
+  previous_routing_profile_id: number | null;
+  superseded_by_id: number | null;
+  deployment_id: number | null;
   config: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -103,6 +116,8 @@ export interface Deployment {
   requested_by_user_id: number | null;
   approved_by_user_id: number | null;
   status: string;
+  deployment_mode: string;
+  runtime_options: Record<string, unknown>;
   previous_deployment_id: number | null;
   stabilized_at: string | null;
   created_at: string;
@@ -171,19 +186,44 @@ export interface StageArtifactResponse {
   status: string;
 }
 
+export interface PreflightDetail {
+  ollama_version: string | null;
+  gpu_models: string[];
+  total_vram_bytes: number | null;
+  free_vram_bytes: number | null;
+  system_ram_bytes: number | null;
+  free_disk_bytes: number | null;
+  loaded_models: string[];
+  loaded_model_sizes: Record<string, number>;
+  context_length: number | null;
+  max_concurrency: number | null;
+  format_compatible: boolean;
+  warnings: string[];
+}
+
 export interface PreflightResponse {
   artifact_id: number;
   target_id: number;
   target_reachable: boolean;
   disk_ok: boolean;
   slot_ok: boolean;
+  capacity_ok: boolean;
   detail: string | null;
+  preflight: PreflightDetail | null;
+}
+
+export interface RuntimeOptions {
+  context_tokens?: number | null;
+  max_concurrency?: number | null;
+  vision_enabled?: boolean;
+  speculative_decoding_enabled?: boolean;
 }
 
 export interface InstallResponse {
   installation_id: number;
   deployment_id: number;
   status: string;
+  deployment_mode: string;
   job_id: string | null;
 }
 
@@ -202,12 +242,16 @@ export interface DeploymentResponse {
 export interface ActivateRequest {
   capability: string;
   target_id: number;
+  expected_version?: number | null;
+  priority?: number;
+  runtime_options?: RuntimeOptions;
 }
 
 export interface RoutingProfileRequest {
   capability: string;
   target_id: number;
   installation_id: number;
+  deployment_id?: number | null;
   priority?: number;
   is_active?: boolean;
   expected_version?: number | null;
@@ -220,6 +264,13 @@ export interface RuntimeTargetCreate {
   version?: string | null;
   max_loaded_models?: number | null;
   keep_alive_minutes?: number | null;
+  environment?: string | null;
+  gpu_memory_gb?: number | null;
+  system_ram_gb?: number | null;
+  disk_gb?: number | null;
+  is_internet_isolated?: boolean;
+  max_concurrency?: number | null;
+  context_tokens?: number | null;
   labels?: Record<string, unknown>;
 }
 
@@ -262,16 +313,34 @@ export function releaseLLMArtifactQuarantine(artifactId: number): Promise<{ arti
   );
 }
 
-export function preflightLLMInstall(artifactId: number, targetId: number): Promise<PreflightResponse> {
+export function preflightLLMInstall(
+  artifactId: number,
+  targetId: number,
+  runtimeOptions?: RuntimeOptions
+): Promise<PreflightResponse> {
   return apiClient.post<PreflightResponse>(`/api/llm-framework/artifacts/${artifactId}/preflight`, {
     target_id: targetId,
+    runtime_options: runtimeOptions ?? {},
   });
 }
 
-export function installLLMArtifact(artifactId: number, targetId: number): Promise<InstallResponse> {
-  return apiClient.post<InstallResponse>(`/api/llm-framework/artifacts/${artifactId}/install`, {
-    target_id: targetId,
-  });
+export const LLMDeploymentMode = {
+  INSTALL_ONLY: "install_only",
+  INSTALL_AND_STAGE: "install_and_stage",
+  INSTALL_AND_REQUEST_ACTIVATION: "install_and_request_activation",
+  REPLACE_ACTIVE_MODEL: "replace_active_model",
+} as const;
+
+export type LLMDeploymentModeType = (typeof LLMDeploymentMode)[keyof typeof LLMDeploymentMode];
+
+export interface InstallRequest {
+  target_id: number;
+  deployment_mode: LLMDeploymentModeType;
+  runtime_options?: RuntimeOptions;
+}
+
+export function installLLMArtifact(artifactId: number, request: InstallRequest): Promise<InstallResponse> {
+  return apiClient.post<InstallResponse>(`/api/llm-framework/artifacts/${artifactId}/install`, request);
 }
 
 export function approveLLMDeployment(deploymentId: number): Promise<{ deployment_id: number; status: string }> {
@@ -281,8 +350,17 @@ export function approveLLMDeployment(deploymentId: number): Promise<{ deployment
   );
 }
 
-export function activateLLMDeployment(deploymentId: number, request: ActivateRequest): Promise<{ deployment_id: number; status: string; capability: string; target_id: number }> {
-  return apiClient.post<{ deployment_id: number; status: string; capability: string; target_id: number }>(
+export interface ActivateResponse {
+  deployment_id: number;
+  status: string;
+  capability: string;
+  target_id: number;
+  routing_profile_id: number;
+  version: number;
+}
+
+export function activateLLMDeployment(deploymentId: number, request: ActivateRequest): Promise<ActivateResponse> {
+  return apiClient.post<ActivateResponse>(
     `/api/llm-framework/deployments/${deploymentId}/activate`,
     request
   );

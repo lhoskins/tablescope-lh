@@ -464,6 +464,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         # use on this model.
         num_ctx=24576,
         response_format="json",
+        ollama_url=req.ollama_url,
     )
 
     parsed = _parse_json_response(raw)

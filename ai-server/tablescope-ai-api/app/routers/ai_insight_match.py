@@ -88,6 +88,7 @@ async def select_insight_card(
         max_tokens=200,
         num_ctx=4096,
         response_format="json",
+        ollama_url=req.ollama_url,
     )
     parsed = _parse_json_response(raw or "") or {}
 

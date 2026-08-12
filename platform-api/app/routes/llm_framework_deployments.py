@@ -5,12 +5,14 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
 from app.auth.rbac import require_human_platform_admin, require_platform_admin
 from app.config import get_settings
 from app.database import get_db
+from app.models.llm_framework import LLMRoutingProfile
 from app.routes.llm_framework_inventory import _require_enabled
 from app.schemas.llm_framework import (
     ActivateRequest,
@@ -75,6 +77,8 @@ async def activate_llm_deployment(
             deployment_id=deployment_id,
             capability=capability,
             target_id=request.target_id,
+            expected_version=request.expected_version,
+            priority=request.priority,
         )
     except DeploymentError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -87,11 +91,20 @@ async def activate_llm_deployment(
         details={"capability": capability, "target_id": request.target_id},
     )
     await session.commit()
+    # Fetch the active profile created for this deployment to return version.
+    active_profile = await session.scalar(
+        select(LLMRoutingProfile).where(
+            LLMRoutingProfile.deployment_id == deployment.id,
+            LLMRoutingProfile.is_active.is_(True),
+        )
+    )
     return {
         "deployment_id": deployment.id,
         "status": deployment.status,
         "capability": capability,
         "target_id": request.target_id,
+        "routing_profile_id": active_profile.id if active_profile else 0,
+        "version": active_profile.version if active_profile else 0,
     }
 
 

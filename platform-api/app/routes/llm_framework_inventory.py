@@ -18,6 +18,7 @@ from app.auth.context import RequestContext
 from app.auth.rbac import require_human_platform_admin, require_platform_admin
 from app.config import get_settings
 from app.database import get_db
+from app.models.llm_framework import LLMRuntimeTarget
 from app.schemas.llm_framework import (
     AuditEventSummary,
     CapabilitiesResponse,
@@ -93,6 +94,17 @@ async def get_llm_framework_status(
     }
 
 
+@router.get("/targets", response_model=list[RuntimeTargetSummary])
+async def list_llm_runtime_targets(
+    session: AsyncSession = Depends(get_db),
+    _: RequestContext = Depends(require_platform_admin),
+) -> Any:
+    """Return all authorized runtime targets with capacity and assignment metadata."""
+    _require_enabled()
+    targets = (await session.scalars(select(LLMRuntimeTarget).order_by(LLMRuntimeTarget.name))).all()
+    return targets
+
+
 @router.get("/inventory", response_model=InventoryResponse)
 async def get_llm_inventory(
     session: AsyncSession = Depends(get_db),
@@ -124,6 +136,13 @@ async def create_llm_runtime_target(
             version=request.version,
             max_loaded_models=request.max_loaded_models,
             keep_alive_minutes=request.keep_alive_minutes,
+            environment=request.environment,
+            gpu_memory_gb=request.gpu_memory_gb,
+            system_ram_gb=request.system_ram_gb,
+            disk_gb=request.disk_gb,
+            is_internet_isolated=request.is_internet_isolated,
+            max_concurrency=request.max_concurrency,
+            context_tokens=request.context_tokens,
             labels=request.labels,
         )
     except DuplicateRuntimeTargetError as exc:
@@ -185,8 +204,10 @@ async def upsert_llm_routing_profile(
             capability=request.capability,
             target_id=request.target_id,
             installation_id=request.installation_id,
+            deployment_id=request.deployment_id,
             priority=request.priority,
             is_active=request.is_active,
+            expected_version=request.expected_version,
         )
     except (ValueError, InvalidCapabilityError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

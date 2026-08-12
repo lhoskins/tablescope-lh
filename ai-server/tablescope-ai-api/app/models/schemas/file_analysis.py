@@ -9,7 +9,9 @@ class AnalyzeFileRequest(BaseModel):
     task: str = "file_analysis"
     response_format: str = "json"
     signature: str = ""
-    timestamp: float = 0.0
+    # Optional routing overrides from the LLM Framework.
+    model: str | None = None
+    ollama_url: str | None = None
 
 
 class AnalyzeFileResponse(BaseModel):

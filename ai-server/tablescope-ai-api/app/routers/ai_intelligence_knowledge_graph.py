@@ -185,6 +185,7 @@ async def knowledge_graph_insights(
         temperature=0.2,
         num_ctx=24576,
         response_format="json",
+        ollama_url=req.ollama_url,
     )
 
     parsed = _parse_json_response(raw)

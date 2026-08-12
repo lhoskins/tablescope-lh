@@ -124,9 +124,10 @@ Rules:
     try:
         raw = await llm_client.generate(
             prompt=prompt,
-            model=settings.reasoning_model,
+            model=req.model or settings.reasoning_model,
             temperature=0.1,
             max_tokens=2600,
+            ollama_url=req.ollama_url,
         )
 
         # Parse JSON from response
@@ -301,6 +302,7 @@ Rules:
             model=req.model or settings.reasoning_model,
             temperature=0.2,
             max_tokens=1200,
+            ollama_url=req.ollama_url,
         )
         parsed = _parse_json_response(raw) or {}
     except Exception as exc:

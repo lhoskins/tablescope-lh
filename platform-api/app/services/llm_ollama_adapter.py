@@ -29,13 +29,38 @@ def _sanitize_model_name(name: str) -> str:
 
 
 @dataclass(frozen=True)
+class GpuInfo:
+    name: str | None
+    total_vram: int | None
+    free_vram: int | None
+
+
+@dataclass(frozen=True)
+class LoadedModel:
+    name: str
+    size: int
+    size_vram: int
+
+
+@dataclass(frozen=True)
 class PreflightResult:
     reachable: bool
     version: str | None
     disk_ok: bool
     slot_ok: bool
+    capacity_ok: bool
     current_models: list[str]
     detail: str | None = None
+    gpu_infos: list[GpuInfo] | None = None
+    loaded_models: list[LoadedModel] | None = None
+    total_vram_bytes: int | None = None
+    free_vram_bytes: int | None = None
+    system_ram_bytes: int | None = None
+    free_disk_bytes: int | None = None
+    context_length: int | None = None
+    max_concurrency: int | None = None
+    format_compatible: bool = True
+    warnings: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -92,7 +117,12 @@ class OllamaAdapter:
                     detail=f"Could not reach Ollama at {self.base_url}: {exc}",
                 ) from exc
 
-    async def preflight(self, artifact_size: int, reserve_bytes: int = 5 * 1024 ** 3) -> PreflightResult:
+    async def preflight(
+        self,
+        artifact_size: int = 0,
+        reserve_bytes: int = 5 * 1024 ** 3,
+        expected_context_tokens: int | None = None,
+    ) -> PreflightResult:
         """Check that Ollama is up and the host has enough free capacity."""
         try:
             response = await self._request("GET", "/api/tags")
@@ -105,17 +135,73 @@ class OllamaAdapter:
                 version=None,
                 disk_ok=False,
                 slot_ok=False,
+                capacity_ok=False,
                 current_models=[],
                 detail=str(exc.detail),
             )
+
+        # Probe running models for VRAM use.
+        loaded_models: list[LoadedModel] = []
+        gpu_infos: list[GpuInfo] = []
+        total_vram_bytes: int | None = None
+        free_vram_bytes: int | None = None
+        system_ram_bytes: int | None = None
+        context_length: int | None = None
+        max_concurrency: int | None = None
+        format_compatible = True
+        warnings: list[str] = []
+
+        try:
+            ps_response = await self._request("GET", "/api/ps")
+            ps_payload = ps_response.json()
+            for m in ps_payload.get("models", []):
+                if isinstance(m, dict) and "name" in m:
+                    loaded_models.append(
+                        LoadedModel(
+                            name=m["name"],
+                            size=m.get("size", 0) or 0,
+                            size_vram=m.get("size_vram", 0) or 0,
+                        )
+                    )
+            if isinstance(ps_payload.get("gpu_infos"), list):
+                for g in ps_payload["gpu_infos"]:
+                    if isinstance(g, dict):
+                        gpu_infos.append(
+                            GpuInfo(
+                                name=g.get("name"),
+                                total_vram=g.get("total_vram"),
+                                free_vram=g.get("free_vram"),
+                            )
+                        )
+            # Ollama may expose system info at /api/v1/runtime or in the same payload.
+            system = ps_payload.get("system") or {}
+            total_vram_bytes = system.get("total_vram")
+            free_vram_bytes = system.get("free_vram")
+            system_ram_bytes = system.get("total_memory")
+        except Exception:
+            warnings.append("Could not retrieve running-model / GPU details")
+
+        # Default context length from first model details if available.
+        if models and not context_length:
+            try:
+                tags_response = await self._request("GET", "/api/tags")
+                for m in tags_response.json().get("models", []):
+                    if m.get("name") == models[0]:
+                        context_length = m.get("details", {}).get("context_length")
+                        break
+            except Exception:
+                pass
 
         # Ollama can keep multiple models loaded concurrently. Reserve slots.
         max_loaded = get_settings().llm_ollama_rollback_slots + 1
         slot_ok = len(models) < max_loaded
 
         # Local disk check on the install path's filesystem.
+        free_disk_bytes: int | None = None
+        disk_ok = False
         try:
             usage = shutil.disk_usage(self.install_path)
+            free_disk_bytes = usage.free
             disk_ok = usage.free >= artifact_size + reserve_bytes
         except OSError as exc:
             return PreflightResult(
@@ -123,16 +209,37 @@ class OllamaAdapter:
                 version=version,
                 disk_ok=False,
                 slot_ok=slot_ok,
+                capacity_ok=False,
                 current_models=models,
                 detail=f"Cannot read disk usage: {exc}",
             )
+
+        # Capacity warnings for context/concurrency.
+        if expected_context_tokens and context_length and expected_context_tokens > context_length:
+            warnings.append(
+                f"Requested context {expected_context_tokens} exceeds target context length {context_length}"
+            )
+            format_compatible = False
+
+        capacity_ok = disk_ok and slot_ok and format_compatible
 
         return PreflightResult(
             reachable=True,
             version=version,
             disk_ok=disk_ok,
             slot_ok=slot_ok,
+            capacity_ok=capacity_ok,
             current_models=models,
+            loaded_models=loaded_models,
+            gpu_infos=gpu_infos,
+            total_vram_bytes=total_vram_bytes,
+            free_vram_bytes=free_vram_bytes,
+            system_ram_bytes=system_ram_bytes,
+            free_disk_bytes=free_disk_bytes,
+            context_length=context_length,
+            max_concurrency=max_concurrency,
+            format_compatible=format_compatible,
+            warnings=warnings,
             detail=None,
         )
 

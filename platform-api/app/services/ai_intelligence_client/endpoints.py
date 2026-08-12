@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.config import get_settings
-from app.services.llm_framework import resolve_active_model_for_capability
+from app.services.llm_framework import resolve_active_routing_for_capability
 
 from .transport import _chat_sem, _post
 
@@ -34,8 +34,14 @@ async def _post_with_model(
     if capability is None:
         capability = _CAPABILITY_BY_PATH.get(path)
     if capability:
-        model = await resolve_active_model_for_capability(capability)
-        payload = {**payload, "model": model, "capability": capability}
+        routing = await resolve_active_routing_for_capability(capability)
+        payload = {
+            **payload,
+            "model": routing.model,
+            "ollama_url": routing.ollama_url,
+            "routing_version": routing.version,
+            "capability": capability,
+        }
     return await _post(path, payload, **kwargs)
 
 

@@ -85,6 +85,7 @@ async def intelligence_fix_sql(
         model=req.model or settings.reasoning_model,
         temperature=0.1,
         num_ctx=8192,
+        ollama_url=req.ollama_url,
     )
 
     fixed = _clean_sql(raw or "")

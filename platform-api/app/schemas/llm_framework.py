@@ -20,6 +20,13 @@ class RuntimeTargetSummary(BaseModel):
     last_seen_at: datetime | None
     max_loaded_models: int | None
     keep_alive_minutes: int | None
+    environment: str | None
+    gpu_memory_gb: int | None
+    system_ram_gb: int | None
+    disk_gb: int | None
+    is_internet_isolated: bool
+    max_concurrency: int | None
+    context_tokens: int | None
     labels: dict
     created_at: datetime
     updated_at: datetime
@@ -32,6 +39,13 @@ class RuntimeTargetCreate(BaseModel):
     version: str | None = None
     max_loaded_models: int | None = None
     keep_alive_minutes: int | None = None
+    environment: str | None = None
+    gpu_memory_gb: int | None = None
+    system_ram_gb: int | None = None
+    disk_gb: int | None = None
+    is_internet_isolated: bool = True
+    max_concurrency: int | None = None
+    context_tokens: int | None = None
     labels: dict = {}
 
 
@@ -93,6 +107,8 @@ class InstallationSummary(BaseModel):
     installed_at: datetime | None
     activated_at: datetime | None
     rolled_back_at: datetime | None
+    deployment_mode: str | None
+    runtime_options: dict
     created_at: datetime
     updated_at: datetime
 
@@ -106,6 +122,10 @@ class RoutingProfileSummary(BaseModel):
     installation_id: int | None
     is_active: bool
     priority: int
+    version: int
+    previous_routing_profile_id: int | None
+    superseded_by_id: int | None
+    deployment_id: int | None
     config: dict
     created_at: datetime
     updated_at: datetime
@@ -175,23 +195,51 @@ class StageArtifactResponse(BaseModel):
     status: str
 
 
+class RuntimeOptions(BaseModel):
+    context_tokens: int | None = None
+    max_concurrency: int | None = None
+    vision_enabled: bool = False
+    speculative_decoding_enabled: bool = False
+
+
+class PreflightDetail(BaseModel):
+    ollama_version: str | None
+    gpu_models: list[str]
+    total_vram_bytes: int | None
+    free_vram_bytes: int | None
+    system_ram_bytes: int | None
+    free_disk_bytes: int | None
+    loaded_models: list[str]
+    loaded_model_sizes: dict[str, int]
+    context_length: int | None
+    max_concurrency: int | None
+    format_compatible: bool
+    warnings: list[str]
+
+
 class PreflightResponse(BaseModel):
     artifact_id: int
     target_id: int
     target_reachable: bool
     disk_ok: bool
     slot_ok: bool
+    capacity_ok: bool
     detail: str | None
+    preflight: PreflightDetail | None
 
 
 class InstallRequest(BaseModel):
     target_id: int
+    deployment_mode: str = "install_only"
+    runtime_options: RuntimeOptions = RuntimeOptions()
+    expected_version: int | None = None
 
 
 class InstallResponse(BaseModel):
     installation_id: int
     deployment_id: int
     status: str
+    deployment_mode: str
     job_id: str | None = None
 
 
@@ -215,6 +263,9 @@ class ApproveDeploymentResponse(BaseModel):
 class ActivateRequest(BaseModel):
     capability: str
     target_id: int
+    expected_version: int | None = None
+    priority: int = 1
+    runtime_options: RuntimeOptions = RuntimeOptions()
 
 
 class ActivateResponse(BaseModel):
@@ -222,6 +273,8 @@ class ActivateResponse(BaseModel):
     status: str
     capability: str
     target_id: int
+    routing_profile_id: int
+    version: int
 
 
 class RollbackResponse(BaseModel):
@@ -241,6 +294,8 @@ class DeploymentSummary(BaseModel):
     requested_by_user_id: int | None
     approved_by_user_id: int | None
     status: str
+    deployment_mode: str
+    runtime_options: dict
     previous_deployment_id: int | None
     stabilized_at: datetime | None
     created_at: datetime
@@ -263,9 +318,11 @@ class RoutingProfileRequest(BaseModel):
     capability: str
     target_id: int
     installation_id: int
+    deployment_id: int | None = None
     priority: int = 1
     is_active: bool = True
     expected_version: int | None = None  # optimistic concurrency placeholder
+    runtime_options: RuntimeOptions = RuntimeOptions()
 
 
 class RoutingProfileResponse(RoutingProfileSummary):

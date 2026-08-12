@@ -23,6 +23,10 @@ class DocumentProfileRequest(BaseModel):
     include_family: bool = True
     signature: str = ""
     timestamp: float = 0.0
+    # Optional routing overrides from the LLM Framework.
+    model: str | None = None
+    ollama_url: str | None = None
+    routing_version: int | None = None
 
 
 class DocumentProfileResponse(BaseModel):

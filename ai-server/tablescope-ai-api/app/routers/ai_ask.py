@@ -180,6 +180,7 @@ async def ask(req: AskRequest) -> AskResponse:
         prompt=prompt,
         system_prompt=SYSTEM_PROMPT,
         model=req.model or settings.reasoning_model,
+        ollama_url=req.ollama_url,
     )
 
     # 4. Update activity

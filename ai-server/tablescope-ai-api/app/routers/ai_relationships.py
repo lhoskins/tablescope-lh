@@ -61,6 +61,7 @@ async def generate_relationships(req: GenerateRelationshipsRequest) -> GenerateR
         system_prompt=SYSTEM_PROMPT,
         model=req.model or settings.sql_model,
         temperature=0.0,
+        ollama_url=req.ollama_url,
     )
 
     # Parse relationships from LLM response

@@ -267,6 +267,7 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
         preferred_sources=req.preferred_sources,
         relevant_columns=req.relevant_columns,
         model=req.model,
+        ollama_url=req.ollama_url,
     )
     if _needs_clarification(raw):
         raise _clarify("Model could not find a matching authorized source.")
@@ -304,6 +305,7 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
                 preferred_sources=req.preferred_sources,
                 relevant_columns=req.relevant_columns,
                 model=req.model,
+                ollama_url=req.ollama_url,
             )
             repaired = True
             if _needs_clarification(raw):
@@ -385,6 +387,7 @@ async def match_query(req: MatchQueryRequest) -> MatchQueryResponse:
         ),
         model=req.model or settings.reasoning_model,
         temperature=0.0,
+        ollama_url=req.ollama_url,
     )
 
     match_id: int | None = None
