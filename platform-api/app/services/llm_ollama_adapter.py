@@ -12,10 +12,12 @@ a shared volume between the deployment worker and the Ollama runtime.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import re
 import shutil
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -128,11 +130,23 @@ class OllamaAdapter:
         """Upload ``fs_path`` to the remote Ollama ``/api/blobs`` store and return its digest."""
         digest = self._sha256(fs_path)
         upload_timeout = httpx.Timeout(connect=10.0, read=60.0, write=600.0, pool=5.0)
+
+        async def _stream() -> AsyncIterator[bytes]:
+            loop = asyncio.get_event_loop()
+            with fs_path.open("rb") as f:
+                while True:
+                    chunk = await loop.run_in_executor(None, f.read, 1024 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+
         async with httpx.AsyncClient(timeout=upload_timeout) as client:
             try:
-                with fs_path.open("rb") as f:
-                    response = await client.put(f"{self.base_url}/api/blobs/{digest}", content=f)
-                    response.raise_for_status()
+                response = await client.put(
+                    f"{self.base_url}/api/blobs/{digest}",
+                    content=_stream(),
+                )
+                response.raise_for_status()
             except httpx.HTTPStatusError as exc:
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
