@@ -1,5 +1,5 @@
 # Tablescope AI Server — Docker Compose
-# Runs: FastAPI AI API, Ollama (LLM), Qdrant (Vector DB), AI Worker
+# Runs: FastAPI AI API, Ollama (LLM), Qdrant (Vector DB), AI Worker, vLLM
 
 services:
   tablescope-ai-api:
@@ -19,42 +19,33 @@ services:
         condition: service_started
       qdrant:
         condition: service_healthy
+      vllm:
+        condition: service_started
     restart: unless-stopped
 
   ollama:
     image: ollama/ollama:latest
-    runtime: nvidia
-    volumes:
-      - /mnt/tablescope-ai/ollama:/root/.ollama
+    # vLLM owns the single L40S GPU, so Ollama runs on CPU on this box.
     environment:
-      # Serve several requests at once and keep the model resident so
-      # concurrent project analyses don't queue behind a single slot or pay
-      # repeated model-load latency.
       - OLLAMA_NUM_PARALLEL=4
       - OLLAMA_MAX_LOADED_MODELS=3
       - OLLAMA_KEEP_ALIVE=30m
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+      - OLLAMA_LLM_LIBRARY=cpu_avx2
+    volumes:
+      - /mnt/tablescope-ai/ollama:/root/.ollama
     restart: unless-stopped
-    # NOT exposed outside Docker network — only accessible via AI API
 
   qdrant:
     image: qdrant/qdrant:latest
     volumes:
       - /mnt/tablescope-ai/qdrant:/qdrant/storage
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/6333'"]
+      test: ["CMD-SHELL", "bash -c \"echo > /dev/tcp/localhost/6333\""]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
     restart: unless-stopped
-    # NOT exposed outside Docker network — only accessible via AI API
 
   ai-worker:
     build:
@@ -71,4 +62,46 @@ services:
         condition: service_started
       qdrant:
         condition: service_healthy
+      vllm:
+        condition: service_started
     restart: unless-stopped
+
+  vllm:
+    image: vllm/vllm-openai:muse-glimmer
+    runtime: nvidia
+    ipc: host
+    ports:
+      - "8001:8001"
+    volumes:
+      - /mnt/tablescope-ai/vllm/models/muse-glimmer-w4a16:/models
+    environment:
+      - TRANSFORMERS_OFFLINE=1
+    command:
+      - /models
+      - --served-model-name
+      - muse-glimmer
+      - --generation-config
+      - auto
+      - --tensor-parallel-size
+      - "1"
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - muse_glimmer
+      - --reasoning-parser
+      - muse_glimmer
+      - --no-enable-flashinfer-autotune
+      - --port
+      - "8001"
+      - --max-model-len
+      - "8192"
+      - --gpu-memory-utilization
+      - "0.85"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    # NOT exposed outside the host — only the AI API reaches it.

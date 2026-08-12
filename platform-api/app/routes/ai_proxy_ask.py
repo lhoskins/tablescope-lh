@@ -273,7 +273,7 @@ async def ask(
             logger.info("AI synthesis unavailable for ask data result; using deterministic answer")
         return data_response
 
-    answer = await _forward_prose_answer(
+    prose = await _forward_prose_answer(
         session,
         context,
         project_id=req.project_id,
@@ -284,11 +284,10 @@ async def ask(
         include_dashboard_context=req.include_dashboard_context,
         grounding_evidence=grounding_dict,
     )
-    if not answer:
-        answer = "The AI service is temporarily unavailable. Please try again shortly."
+    answer = prose.get("answer") or "The AI service is temporarily unavailable. Please try again shortly."
     response = {
         "answer": answer,
-        "model_used": "tablescope-prose",
+        "model_used": prose.get("model_used") or "tablescope-prose",
         "request_id": "",
         "context_summary": {},
     }

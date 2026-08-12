@@ -820,7 +820,7 @@ async def _forward_prose_answer(
     include_query_history: bool = True,
     include_dashboard_context: bool = True,
     grounding_evidence: dict[str, Any] | None = None,
-) -> str:
+) -> dict[str, Any]:
     """Free-text answer from the AI server's documents + knowledge-graph path.
 
     Used as a fallback for analytical/document questions that don't map to a
@@ -841,8 +841,11 @@ async def _forward_prose_answer(
             grounding_evidence=grounding_evidence,
         )
     except ai.AIUnavailableError:
-        return ""
-    return _strip_model_markup(str((result or {}).get("answer") or ""))
+        return {}
+    return {
+        "answer": _strip_model_markup(str((result or {}).get("answer") or "")),
+        "model_used": (result or {}).get("model_used", ""),
+    }
 
 
 @router.post("/actions/ask-and-run")
@@ -937,14 +940,15 @@ async def ai_ask_and_run(
             question=req.question,
             grounding_evidence=grounding_manifest,
         )
-        if prose:
+        if prose.get("answer"):
             prose_result: dict[str, Any] = {
                 "question": req.question,
                 "sql": "",
                 "columns": [],
                 "rows": [],
                 "suggestedVisualization": {"type": "table"},
-                "explanation": prose,
+                "explanation": prose["answer"],
+                "model_used": prose.get("model_used", "tablescope-prose"),
                 "dataSourcesUsed": [],
                 "status": "success",
                 "answerType": "text",
