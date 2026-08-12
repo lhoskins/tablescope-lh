@@ -5,7 +5,7 @@ internet. It installs a GGUF that is already present on the local filesystem and
 blocks any operation that would trigger ``ollama pull``.
 
 The upload path works against remote Ollama hosts: the GGUF is staged locally,
-its SHA-256 digest is computed, the blob is PUT to ``/api/blobs/:digest`` on
+its SHA-256 digest is computed, the blob is POSTed to ``/api/blobs/:digest`` on
 the target, and the model is created by digest reference. This avoids requiring
 a shared volume between the deployment worker and the Ollama runtime.
 """
@@ -142,7 +142,7 @@ class OllamaAdapter:
 
         async with httpx.AsyncClient(timeout=upload_timeout) as client:
             try:
-                response = await client.put(
+                response = await client.post(
                     f"{self.base_url}/api/blobs/{digest}",
                     content=_stream(),
                 )
