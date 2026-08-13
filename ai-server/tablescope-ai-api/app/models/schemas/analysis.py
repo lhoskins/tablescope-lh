@@ -5,6 +5,33 @@ from pydantic import BaseModel, Field
 from .common import AIBaseRequest
 
 
+class PlannedAnalysis(BaseModel):
+    id: str
+    category: str = "trend"  # risk | trend | opportunity | relationship
+    title: str = ""
+    rationale: str = ""
+    sql: str = ""
+    chart_type: str = "bar"  # see _ALLOWED_PLAN_CHART_TYPES in routers/ai.py
+    label_column: str = ""
+    value_column: str = ""
+    # Second metric used by dual_line/scatter/bubble/heatmap (color) and as the
+    # target for gauge/bullet. Empty for single-metric charts.
+    value_column_2: str = ""
+    severity_hint: str = "watch"
+    source_documents: list[str] = Field(default_factory=list)
+
+
+class FirstPassResult(BaseModel):
+    """A single first-pass analysis and its real result, sent back to the
+    planner so the model can propose deeper, evidence-based follow-ups."""
+
+    analysis: PlannedAnalysis
+    row_count: int = 0
+    columns: list[str] = Field(default_factory=list)
+    rows: list[dict] = Field(default_factory=list)
+    error: str = ""
+
+
 class IntelligencePlanRequest(AIBaseRequest):
     """Ask the LLM to propose high-value diagnostic analyses for a project.
 
@@ -33,22 +60,10 @@ class IntelligencePlanRequest(AIBaseRequest):
     # prompt as HYPOTHESES the planner should validate/quantify/refute with
     # SQL — never asserted as findings without a query result behind them.
     knowledge_graph_context: dict = Field(default_factory=dict)
-
-
-class PlannedAnalysis(BaseModel):
-    id: str
-    category: str = "trend"  # risk | trend | opportunity | relationship
-    title: str = ""
-    rationale: str = ""
-    sql: str = ""
-    chart_type: str = "bar"  # see _ALLOWED_PLAN_CHART_TYPES in routers/ai.py
-    label_column: str = ""
-    value_column: str = ""
-    # Second metric used by dual_line/scatter/bubble/heatmap (color) and as the
-    # target for gauge/bullet. Empty for single-metric charts.
-    value_column_2: str = ""
-    severity_hint: str = "watch"
-    source_documents: list[str] = Field(default_factory=list)
+    # Results from an earlier planning/execution pass. When present the
+    # planner is asked to go deeper — explain root causes, surface anomalies,
+    # and propose cross-cutting follow-up analyses.
+    first_pass: list[FirstPassResult] = Field(default_factory=list)
 
 
 class IntelligencePlanResponse(BaseModel):

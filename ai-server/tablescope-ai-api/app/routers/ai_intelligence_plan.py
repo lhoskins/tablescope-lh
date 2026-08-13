@@ -9,6 +9,7 @@ from app.core.activity import update_activity
 from app.core.config import settings
 from app.core.security import verify_signature
 from app.models.schemas import (
+    FirstPassResult,
     IntelligencePlanRequest,
     IntelligencePlanResponse,
     PlannedAnalysis,
@@ -49,11 +50,12 @@ def _fit_plan_prompt(
     prompt: str,
     system_prompt: str,
     *,
-    max_model_len: int = 8192,
+    max_model_len: int | None = None,
     max_tokens: int = 2048,
     chars_per_token: float = 3.5,
 ) -> str:
     """Trim the front of the user prompt so system + prompt + output fit vLLM."""
+    max_model_len = max_model_len or settings.vllm_max_model_len
     reserve_tokens = max_tokens + int(len(system_prompt) / chars_per_token) + 40
     token_budget = max(0, max_model_len - reserve_tokens)
     char_budget = int(token_budget * chars_per_token)
@@ -65,6 +67,34 @@ def _fit_plan_prompt(
     if idx != -1 and idx < 120:
         truncated = truncated[idx + 1 :]
     return "[context truncated for length]\n\n" + truncated
+
+
+def _first_pass_lines(first_pass: list[FirstPassResult]) -> str:
+    """Render a compact summary of already-executed first-pass analyses."""
+    if not first_pass:
+        return ""
+    lines: list[str] = [
+        "\nFIRST-PASS RESULTS — analyses already executed and their real data:\n"
+    ]
+    for i, fp in enumerate(first_pass[:12], 1):
+        a = fp.analysis
+        lines.append(f"  Result {i}: {a.title} [{a.category}]")
+        lines.append(f"    Rationale: {a.rationale[:300]}")
+        if fp.error:
+            lines.append(f"    Execution error: {fp.error[:300]}")
+        else:
+            lines.append(f"    Row count: {fp.row_count}")
+            lines.append(f"    Columns: {', '.join(fp.columns[:12])}")
+            for row in fp.rows[:6]:
+                lines.append(f"      {row}")
+        lines.append("")
+    lines.append(
+        "Using the first-pass results above, propose deeper follow-up analyses. "
+        "Look for root causes, anomalies, cross-cutting relationships, and "
+        "opportunities the first-pass results suggest. Do not repeat the same "
+        "analysis; build on it.\n"
+    )
+    return "\n".join(lines)
 
 
 # Chart families the planner may request. These map onto the dashboard's chart
@@ -212,22 +242,48 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
             "and a few more specific, detailed insights."
         )
 
+    first_pass_lines = _first_pass_lines(req.first_pass)
+
     relationship_floor = _build_relationship_floor_line(
         bool(relationship_lines), granularity
     )
+
+    # When we already have first-pass results, ask the model to dig deeper.
+    if first_pass_lines:
+        target_count = max(1, min(req.max_analyses, 4))
+        per_pair = 1
+        depth_guidance = (
+            "Operate at a BALANCED depth. The FIRST-PASS RESULTS show what "
+            "the data already reveals. Your job is to explain why those patterns "
+            "exist, what they imply, and what deeper risks, trends, or "
+            "opportunities are hidden underneath. Propose follow-up analyses, not "
+            "repeats."
+        )
+        task_guidance = (
+            f"Propose up to {target_count} deeper follow-up analyses based on the "
+            "FIRST-PASS RESULTS. Ask 'why' and 'what if'. Look for root causes, "
+            "anomalies, cross-cutting relationships, and next-level opportunities. "
+            "Each follow-up must be answerable from the allowed tables or grounded "
+            "in a listed document."
+        )
+    else:
+        task_guidance = (
+            f"Propose up to {target_count} of the most valuable analyses for this "
+            "project at this level of detail. Cover a mix of risks, trends, "
+            "opportunities, and relationships where the data supports it. "
+        )
 
     # Section order matters: schema and RELATIONSHIP EVIDENCE stay contiguous
     # and the KG hypotheses come after them, closest to the instructions, so
     # advisory graph context can never separate the evidence from the rules
     # that reference it.
     prompt = (
-        f"{context_text}\n{doc_lines}\n{schema_lines}\n{relationship_lines}\n{kg_lines}\n"
+        f"{context_text}\n{doc_lines}\n{schema_lines}\n{relationship_lines}\n"
+        f"{kg_lines}\n{first_pass_lines}\n"
         f"Allowed tables (use ONLY these, exact names): {', '.join(allowed_tables)}\n\n"
         f"{teiid_rules}\n"
         f"{depth_guidance}\n\n"
-        f"Propose up to {target_count} of the most valuable analyses for this "
-        "project at this level of detail. Cover a mix of risks, trends, "
-        "opportunities, and relationships where the data supports it. "
+        f"{task_guidance}"
         f"{relationship_floor}"
         "Each "
         "analysis must be answerable from the allowed tables OR grounded in a "
@@ -475,11 +531,23 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "Begin your response with { and end it with }."
     )
 
-    # The vLLM host is currently limited to 8192 tokens, so trim the prompt
-    # from the front while preserving the output-format instructions at the
-    # tail. Reserve 2048 tokens for the generated JSON plan.
+    # Trim the prompt from the front while preserving the output-format
+    # instructions at the tail. Reserve 2048 tokens for the generated JSON plan.
+    logger.info(
+        "intelligence plan prompt len=%d (pre-fit) tenant=%s project=%s first_pass=%d",
+        len(prompt),
+        req.tenant_id,
+        req.project_id,
+        len(req.first_pass),
+    )
     prompt = _fit_plan_prompt(
-        prompt, _INTEL_SYSTEM_PROMPT, max_model_len=8192, max_tokens=2048
+        prompt, _INTEL_SYSTEM_PROMPT, max_tokens=2048
+    )
+    logger.info(
+        "intelligence plan prompt len=%d (post-fit) tenant=%s project=%s",
+        len(prompt),
+        req.tenant_id,
+        req.project_id,
     )
     raw = await llm_client.generate(
         prompt=prompt,
@@ -487,7 +555,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         model=req.model or settings.reasoning_model,
         temperature=0.2,
         max_tokens=2048,
-        num_ctx=8192,
+        num_ctx=settings.vllm_max_model_len,
         response_format="json",
         ollama_url=req.ollama_url,
     )

@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     reasoning_model: str = "llama3.1:8b"
     embedding_model: str = "nomic-embed-text"
 
+    # vLLM context window; must match the --max-model-len argument in the
+    # vLLM container so the prompt fitter trims to the server's real limit.
+    vllm_max_model_len: int = 12288
+
     # Voice transcription (CPU-based faster-whisper by default)
     voice_transcription_enabled: bool = False
     voice_transcription_model: str = "tiny"  # faster-whisper model size or path

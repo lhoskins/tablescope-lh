@@ -295,49 +295,52 @@ async def run_ai_intelligence(
             }
         )
 
-    # Queries the engine rejected on the first pass — repaired below.
-    to_repair: list[tuple[dict[str, Any], str, str]] = []
-    for a in analyses:
-        sql = (a.get("sql") or "").strip()
-        if sql:
-            sql = normalize_date_casts(sql, date_masks)
-            a["sql"] = sql
-            result, err = await _query_with_error(runner, sql)
-            if result and result.get("rows"):
-                await _execute_and_guard(a, result)
-            elif err:
-                to_repair.append((a, sql, err))
-            # else: ran but returned no rows -> skip, never fabricate
-        else:
-            # Document-grounded finding — supply the doc text for interpretation.
-            titles = a.get("source_documents") or []
-            doc_ctx_parts: list[str] = []
-            for title in titles:
-                d = doc_by_title.get(title)
-                if d and d.ai_summary:
-                    doc_ctx_parts.append(f"{d.title}: {d.ai_summary}")
-            if not doc_ctx_parts:
-                continue
-            executed.append({"analysis": a, "result": None})
-            interpret_inputs.append(
-                {
-                    "id": a["id"],
-                    "category": a.get("category", "trend"),
-                    "title": a.get("title", ""),
-                    "rationale": a.get("rationale", ""),
-                    "chart_type": "none",
-                    "columns": [],
-                    "rows": [],
-                    "row_count": 0,
-                    "document_context": "\n".join(doc_ctx_parts)[:3000],
-                }
-            )
+    async def _execute_plan(plan_analyses: list[dict[str, Any]]) -> None:
+        """Run a set of planned analyses against the project data, repair SQL
+        failures, and append successful/document-grounded results to the
+        executed/interpret_inputs buffers."""
+        to_repair: list[tuple[dict[str, Any], str, str]] = []
+        for a in plan_analyses:
+            sql = (a.get("sql") or "").strip()
+            if sql:
+                sql = normalize_date_casts(sql, date_masks)
+                a["sql"] = sql
+                result, err = await _query_with_error(runner, sql)
+                if result and result.get("rows"):
+                    await _execute_and_guard(a, result)
+                elif err:
+                    to_repair.append((a, sql, err))
+                # else: ran but returned no rows -> skip, never fabricate
+            else:
+                # Document-grounded finding — supply the doc text for interpretation.
+                titles = a.get("source_documents") or []
+                doc_ctx_parts: list[str] = []
+                for title in titles:
+                    d = doc_by_title.get(title)
+                    if d and d.ai_summary:
+                        doc_ctx_parts.append(f"{d.title}: {d.ai_summary}")
+                if not doc_ctx_parts:
+                    continue
+                executed.append({"analysis": a, "result": None})
+                interpret_inputs.append(
+                    {
+                        "id": a["id"],
+                        "category": a.get("category", "trend"),
+                        "title": a.get("title", ""),
+                        "rationale": a.get("rationale", ""),
+                        "chart_type": "none",
+                        "columns": [],
+                        "rows": [],
+                        "row_count": 0,
+                        "document_context": "\n".join(doc_ctx_parts)[:3000],
+                    }
+                )
 
-    # Self-repair: feed each rejected query + its exact engine error back to the
-    # LLM (concurrently), then re-run the corrected SQL. Turns Teiid quirks
-    # (wrong CAST, alias-in-GROUP BY, unsupported function, wrong-table column)
-    # into rendered cards instead of silently dropped analyses.
-    if to_repair:
+        if not to_repair:
+            return
+
+        # Self-repair: feed each rejected query + its exact engine error back to
+        # the LLM (concurrently), then re-run the corrected SQL.
         async def fix_one(sql: str, error: str) -> str | None:
             async with ai_call_sem:
                 return await ai.fix_sql(
@@ -369,22 +372,29 @@ async def run_ai_intelligence(
             if result and result.get("rows"):
                 await _execute_and_guard({**a, "sql": fixed}, result)
 
+    if analyses:
+        await _execute_plan(analyses)
+
     # Deduplicate multi-table analyses by the table pair they join so a
     # model that emits two identical joins does not crowd out other evidence.
-    _seen_pairs: set[frozenset[str]] = set()
-    _deduped: list[dict[str, Any]] = []
-    _deduped_inputs: list[dict[str, Any]] = []
-    for item, inp in zip(executed, interpret_inputs, strict=True):
-        pair_tables = _tables_in_sql(item["analysis"].get("sql", ""), ctx.tables)
-        if len(pair_tables) >= 2:
-            pair = frozenset(pair_tables[:2])
-            if pair in _seen_pairs:
-                continue
-            _seen_pairs.add(pair)
-        _deduped.append(item)
-        _deduped_inputs.append(inp)
-    executed = _deduped
-    interpret_inputs = _deduped_inputs
+    def _deduplicate() -> None:
+        nonlocal executed, interpret_inputs
+        _seen_pairs: set[frozenset[str]] = set()
+        _deduped: list[dict[str, Any]] = []
+        _deduped_inputs: list[dict[str, Any]] = []
+        for item, inp in zip(executed, interpret_inputs, strict=True):
+            pair_tables = _tables_in_sql(item["analysis"].get("sql", ""), ctx.tables)
+            if len(pair_tables) >= 2:
+                pair = frozenset(pair_tables[:2])
+                if pair in _seen_pairs:
+                    continue
+                _seen_pairs.add(pair)
+            _deduped.append(item)
+            _deduped_inputs.append(inp)
+        executed = _deduped
+        interpret_inputs = _deduped_inputs
+
+    _deduplicate()
 
     # Deterministic floor: if the plan didn't produce enough multi-table
     # relationship analyses, synthesize additional ones from the evidence list.
@@ -415,6 +425,47 @@ async def run_ai_intelligence(
         analysis, result = templated
         assert analysis is not None and result is not None
         _record_data_analysis(analysis, result)
+
+    # Multi-step deepen: feed first-pass results back into the planner so it can
+    # ask follow-up questions (root cause, anomalies, cross-cutting insights)
+    # and generate richer, evidence-based analyses.
+    if executed:
+        first_pass: list[dict[str, Any]] = []
+        for item in executed:
+            a = item["analysis"]
+            result = item.get("result")
+            first_pass.append(
+                {
+                    "analysis": a,
+                    "row_count": len(result.get("rows", [])) if result else 0,
+                    "columns": result.get("columns", []) if result else [],
+                    "rows": (result.get("rows", []) or [])[:8] if result else [],
+                    "error": "",
+                }
+            )
+        try:
+            deepen_analyses = await ai.plan(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                project_id=project.id,
+                allowed_tables=allowed_tables,
+                documents=documents,
+                table_schema=table_schema,
+                relationship_hints=relationship_hints,
+                max_analyses=4,
+                granularity=granularity,
+                project_context=project_context or {},
+                knowledge_graph_context=kg_context,
+                first_pass=first_pass,
+            )
+        except Exception as exc:
+            logger.warning(
+                "AI deepen planning failed for project %s: %s", project.id, exc
+            )
+            deepen_analyses = None
+        if deepen_analyses:
+            await _execute_plan(deepen_analyses)
+            _deduplicate()
 
     if not executed:
         return []
