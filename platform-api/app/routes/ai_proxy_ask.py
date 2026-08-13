@@ -290,6 +290,7 @@ async def ask(
         "model_used": prose.get("model_used") or "tablescope-prose",
         "request_id": "",
         "context_summary": {},
+        "answerType": prose.get("answerType") or "text",
     }
     _attach_ask_envelope(response)
     return response

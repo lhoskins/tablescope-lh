@@ -63,7 +63,14 @@ async def _generate_openai(
         data = resp.json()
         message = data["choices"][0]["message"]
         content = message.get("content") or message.get("reasoning") or ""
-        return str(content)
+        text = str(content)
+        # Muse Glimmer emits channel-scoped messages (to=self reasoning,
+        # assistant to=user final answer). When the vLLM parser does not split
+        # them, keep only the final user-facing segment.
+        for marker in ("assistant to=user", " to=user", "to=user"):
+            if marker in text:
+                text = text.split(marker)[-1]
+        return text.strip()
 
 
 async def _generate_ollama(

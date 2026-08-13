@@ -27,6 +27,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _fit_context(text: str, max_model_len: int = 8192, max_tokens: int = 512) -> str:
+    """Truncate context so prompt + max_tokens stays under vLLM max_model_len."""
+    # Approx 3.5 chars per token; reserve tokens for system prompt, question,
+    # answer and overhead.
+    reserve_tokens = max_tokens + 120
+    char_budget = max(0, (max_model_len - reserve_tokens) * 3)
+    if len(text) <= char_budget:
+        return text
+    return text[:char_budget].rstrip() + "\n\n[context truncated for length]"
+
+
 def _format_data_result(question: str, data: dict[str, Any]) -> str:
     """Render an executed query result as a grounded block for the LLM."""
     lines: list[str] = ["LIVE QUERY RESULT", f"User question: {question}", ""]
@@ -151,6 +162,11 @@ async def ask(req: AskRequest) -> AskResponse:
         insight_block = _format_matched_insights(req.question, req.matched_insights)
         grounded_block = f"{grounded_block}\n\n{insight_block}".strip()
 
+    # Prose contexts can be large; reserve token room for the answer and system
+    # prompt so the request fits within the vLLM max_model_len window.
+    prose_max_tokens = 1536
+    context_text = _fit_context(context_text, max_tokens=prose_max_tokens)
+
     if grounded_block:
         # Synthesizing an answer from an already-executed query result needs very
         # little context. Keep the prompt tiny so it fits comfortably on a small
@@ -163,10 +179,10 @@ async def ask(req: AskRequest) -> AskResponse:
         )
         answer_system_prompt = (
             "You are a concise data assistant. Answer using only the provided result. "
-            "Never show chain-of-thought or reasoning."
+            "Never show chain-of-thought or reasoning. Do not repeat the prompt."
         )
-        answer_max_tokens = 256
-        answer_stop = ["\n\n"]
+        answer_max_tokens = 512
+        answer_stop = None
     else:
         prompt = (
             f"{context_text}\n\n{history_text}"
@@ -180,8 +196,12 @@ async def ask(req: AskRequest) -> AskResponse:
             "that is not shown. Keep the answer concise and conversational."
         )
         answer_system_prompt = SYSTEM_PROMPT
-        answer_max_tokens = 512
+        answer_max_tokens = 1536
         answer_stop = None
+
+    # Truncate large prose contexts so prompt + max_tokens fits the vLLM model length.
+    if not grounded_block:
+        context_text = _fit_context(context_text, max_tokens=answer_max_tokens)
 
     answer = await llm_client.generate(
         prompt=prompt,
