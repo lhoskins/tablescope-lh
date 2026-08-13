@@ -25,12 +25,14 @@ services:
 
   ollama:
     image: ollama/ollama:latest
-    # vLLM owns the single L40S GPU, so Ollama runs on CPU on this box.
+    runtime: nvidia
+    # Allow Ollama to share the GPU with vLLM. The smaller models are loaded
+    # on the GPU so SQL generation and embeddings are fast.
     environment:
-      - OLLAMA_NUM_PARALLEL=4
+      - OLLAMA_NUM_PARALLEL=2
       - OLLAMA_MAX_LOADED_MODELS=3
       - OLLAMA_KEEP_ALIVE=30m
-      - OLLAMA_LLM_LIBRARY=cpu_avx2
+      - OLLAMA_CONTEXT_LENGTH=8192
     volumes:
       - /mnt/tablescope-ai/ollama:/root/.ollama
     restart: unless-stopped
@@ -74,7 +76,6 @@ services:
       - "8001:8001"
     volumes:
       - /mnt/tablescope-ai/vllm/models/muse-glimmer-w4a16:/models
-      - /mnt/tablescope-ai/vllm/models/muse-glimmer-dspark:/dspark
     environment:
       - TRANSFORMERS_OFFLINE=1
     command:
@@ -94,14 +95,12 @@ services:
       - '{"reasoning_strength":"low"}'
       - --no-enable-flashinfer-autotune
       - --enable-prefix-caching
-      - --speculative-config
-      - '{"method":"dspark","model":"/dspark","num_speculative_tokens":15}'
       - --port
       - "8001"
       - --max-model-len
-      - "12288"
+      - "8192"
       - --gpu-memory-utilization
-      - "0.78"
+      - "0.75"
     deploy:
       resources:
         reservations:
