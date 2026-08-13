@@ -430,13 +430,29 @@ async def run_ai_intelligence(
     # ask follow-up questions (root cause, anomalies, cross-cutting insights)
     # and generate richer, evidence-based analyses.
     if executed:
+        _analysis_defaults = {
+            "id": "",
+            "category": "trend",
+            "title": "",
+            "rationale": "",
+            "sql": "",
+            "chart_type": "bar",
+            "label_column": "",
+            "value_column": "",
+            "value_column_2": "",
+            "severity_hint": "watch",
+            "source_documents": [],
+        }
         first_pass: list[dict[str, Any]] = []
         for item in executed:
             a = item["analysis"]
             result = item.get("result")
+            normalized_analysis = {
+                k: a.get(k, v) for k, v in _analysis_defaults.items()
+            }
             first_pass.append(
                 {
-                    "analysis": a,
+                    "analysis": normalized_analysis,
                     "row_count": len(result.get("rows", [])) if result else 0,
                     "columns": result.get("columns", []) if result else [],
                     "rows": (result.get("rows", []) or [])[:8] if result else [],
