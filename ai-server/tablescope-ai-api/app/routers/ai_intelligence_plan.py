@@ -86,7 +86,9 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
     rationale, and either a read-only SQL query or a document-based finding.
     """
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
+    verify_signature(
+        req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature
+    )
 
     try:
         ctx = await context_builder.build_context(
@@ -183,7 +185,9 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
     # Granularity (1 executive .. 5 granular) steers count + depth + how
     # aggressively to surface smaller, lower-severity signals.
     granularity = max(1, min(5, req.granularity))
-    target_count = max(1, min(req.max_analyses, {1: 3, 2: 5, 3: 8, 4: 11, 5: 15}[granularity]))
+    target_count = max(
+        1, min(req.max_analyses, {1: 3, 2: 5, 3: 8, 4: 11, 5: 15}[granularity])
+    )
     # Cross-table analyses per evidence pair: executive levels get the single
     # strongest comparison per pair; balanced/granular levels may develop two
     # genuinely different insights on the same verified join.
@@ -240,8 +244,8 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
             "data supports a genuine insight. Cross-table analyses are extra "
             f"— they do NOT count toward the {target_count} limit, and you "
             "must not drop a supportable evidence pair to stay under it.\n\n"
-        ) +
-        "RELATIONSHIP ANALYSES (category \"relationship\"):\n"
+        )
+        + 'RELATIONSHIP ANALYSES (category "relationship"):\n'
         "In addition to single-metric risks/trends/opportunities, actively look "
         "for pairs of columns within ONE allowed table whose relationship to each "
         "other changes over time — not just two values that both move, but a "
@@ -252,7 +256,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "away from its historical band. The two variables may be columns on "
         "the SAME table, or on TWO tables joined per the CROSS-TABLE rules "
         "below.\n"
-        "CROSS-TABLE ANALYSES (category \"relationship\"):\n"
+        'CROSS-TABLE ANALYSES (category "relationship"):\n'
         + (
             "For each pair in the RELATIONSHIP EVIDENCE list above, propose "
             + (
@@ -262,8 +266,8 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
                 "business questions —"
             )
             + " that JOINs exactly that pair on exactly the listed keys. "
-        ) +
-        "Write ONE flat SELECT: JOIN the two tables directly, GROUP BY label "
+        )
+        + "Write ONE flat SELECT: JOIN the two tables directly, GROUP BY label "
         "columns from the entity/master side, and aggregate ONLY numeric "
         "columns from the detail/fact side (never SUM/AVG a master-side "
         "number after the join — row fan-out inflates it). Example shape:\n"
@@ -305,14 +309,14 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "   (b) VERIFIED TWO-TABLE JOIN — when the two metrics live in "
         "DIFFERENT tables and that exact table pair appears in the "
         "RELATIONSHIP EVIDENCE list, write the join EXPLICITLY: FROM "
-        "\"table1\" JOIN \"table2\" ON the exact listed keys. Fully qualify "
+        '"table1" JOIN "table2" ON the exact listed keys. Fully qualify '
         "EVERY column with its table name, aggregate both metrics (AVG/SUM) "
         "grouped by the period expression so a one-to-many join cannot "
         "multiply rows, and reference only columns listed under those two "
         "tables.\n"
         "   NEVER mix the two: a single-table query must not select a column "
         "that belongs to a different table (e.g. do not select "
-        "\"UnitsScrapped\" while selecting FROM a labor table that does not "
+        '"UnitsScrapped" while selecting FROM a labor table that does not '
         "list it) — a column not listed under your FROM/JOIN tables does not "
         "exist for this query. If the pair you want is not in the "
         "RELATIONSHIP EVIDENCE list, change the analysis to columns that "
@@ -342,31 +346,31 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "prior-year metric as value_column_2, so 'this year vs last year' is "
         "visible. With only ONE year of data, do NOT fabricate a prior-year "
         "comparison; trend by month instead.\n"
-        "3. Set label_column to the period alias (e.g. \"Period\"), value_column "
+        '3. Set label_column to the period alias (e.g. "Period"), value_column '
         "to the first metric alias, and value_column_2 to the second metric "
         "alias. All three MUST be aliases that actually appear in your SELECT.\n"
         "4. CAST any text-backed column used in a comparison or CASE, not just in "
-        "arithmetic — e.g. CASE WHEN CAST(\"DefectQty\" AS double) > 0 THEN 1 "
+        'arithmetic — e.g. CASE WHEN CAST("DefectQty" AS double) > 0 THEN 1 '
         "ELSE 0 END. An uncast text column in '> 0' will be rejected.\n"
         "5. Never use DATEDIFF (it is not a Teiid function). For a day count "
-        "between two dates use TIMESTAMPDIFF(SQL_TSI_DAY, CAST(\"d1\" AS "
-        "timestamp), CAST(\"d2\" AS timestamp)).\n"
+        'between two dates use TIMESTAMPDIFF(SQL_TSI_DAY, CAST("d1" AS '
+        'timestamp), CAST("d2" AS timestamp)).\n'
         "Example (two metrics over time, date column whose example is a slash "
         "date like '1/19/2026'):\n"
         "SELECT FORMATTIMESTAMP(PARSETIMESTAMP(\"date_col\", 'M/d/yyyy'), "
         "'yyyy-MM') AS Period, AVG(CAST(\"metric_a\" AS double)) AS MetricA, "
-        "AVG(CAST(\"metric_b\" AS double)) AS MetricB "
-        "FROM \"some_table\" "
+        'AVG(CAST("metric_b" AS double)) AS MetricB '
+        'FROM "some_table" '
         "GROUP BY FORMATTIMESTAMP(PARSETIMESTAMP(\"date_col\", 'M/d/yyyy'), "
         "'yyyy-MM') ORDER BY Period — with label_column=Period, "
         "value_column=MetricA, value_column_2=MetricB, chart_type=dual_line.\n"
         "Example (two metrics from DIFFERENT tables via a verified join from "
         "the RELATIONSHIP EVIDENCE list, ISO month column):\n"
-        "SELECT FORMATTIMESTAMP(CAST(\"t1\".\"Month\" AS timestamp), "
-        "'yyyy-MM') AS Period, AVG(CAST(\"t1\".\"metric_a\" AS double)) AS "
-        "MetricA, AVG(CAST(\"t2\".\"metric_b\" AS double)) AS MetricB "
-        "FROM \"t1\" JOIN \"t2\" ON \"t1\".\"KeyCol\" = \"t2\".\"KeyCol\" "
-        "GROUP BY FORMATTIMESTAMP(CAST(\"t1\".\"Month\" AS timestamp), "
+        'SELECT FORMATTIMESTAMP(CAST("t1"."Month" AS timestamp), '
+        '\'yyyy-MM\') AS Period, AVG(CAST("t1"."metric_a" AS double)) AS '
+        'MetricA, AVG(CAST("t2"."metric_b" AS double)) AS MetricB '
+        'FROM "t1" JOIN "t2" ON "t1"."KeyCol" = "t2"."KeyCol" '
+        'GROUP BY FORMATTIMESTAMP(CAST("t1"."Month" AS timestamp), '
         "'yyyy-MM') ORDER BY Period — every column qualified with its table, "
         "join keys exactly as listed in the evidence, both metrics "
         "aggregated.\n\n"
@@ -381,7 +385,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "ACTUAL metric over time AND carries the document's stated value as a "
         "constant second series, so the reader sees the data tracking against the "
         "policy line. Compute the constant directly in SQL as its own column, "
-        "e.g. SELECT period_expr AS Period, AVG(CAST(\"OnTimeFlag=1\" ...)) AS "
+        'e.g. SELECT period_expr AS Period, AVG(CAST("OnTimeFlag=1" ...)) AS '
         "ActualOnTime, 98.0 AS PolicyTarget ... GROUP BY period_expr. Set "
         "chart_type=dual_line (or line), value_column=ActualOnTime, "
         "value_column_2=PolicyTarget, and ALWAYS list the source document title "
@@ -453,18 +457,18 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "genuinely can't support that many non-empty analyses, return fewer rather "
         "than padding with weak or empty ones.\n\n"
         f"{chart_catalog.planner_chart_digest()}\n\n"
-        "Return ONLY a JSON object: {\"analyses\": [ {\n"
-        "  \"id\": \"a1\",\n"
-        "  \"category\": \"risk|trend|opportunity|relationship\",\n"
-        "  \"title\": \"short headline\",\n"
-        "  \"rationale\": \"why this matters for the business (1 sentence)\",\n"
-        "  \"sql\": \"SELECT ... (empty for document findings)\",\n"
-        f"  \"chart_type\": \"{chart_catalog.plan_chart_type_enum()}\",\n"
-        "  \"label_column\": \"alias used for the category/x axis\",\n"
-        "  \"value_column\": \"alias used for the numeric value (primary metric, or size for bubble)\",\n"
-        "  \"value_column_2\": \"alias for a second metric — used by dual_line, scatter, bubble, heatmap (color value), gauge/bullet (target). Omit/empty otherwise.\",\n"
-        "  \"severity_hint\": \"critical|urgent|watch|opportunity|info\",\n"
-        "  \"source_documents\": [\"doc title\"]\n"
+        'Return ONLY a JSON object: {"analyses": [ {\n'
+        '  "id": "a1",\n'
+        '  "category": "risk|trend|opportunity|relationship",\n'
+        '  "title": "short headline",\n'
+        '  "rationale": "why this matters for the business (1 sentence)",\n'
+        '  "sql": "SELECT ... (empty for document findings)",\n'
+        f'  "chart_type": "{chart_catalog.plan_chart_type_enum()}",\n'
+        '  "label_column": "alias used for the category/x axis",\n'
+        '  "value_column": "alias used for the numeric value (primary metric, or size for bubble)",\n'
+        '  "value_column_2": "alias for a second metric — used by dual_line, scatter, bubble, heatmap (color value), gauge/bullet (target). Omit/empty otherwise.",\n'
+        '  "severity_hint": "critical|urgent|watch|opportunity|info",\n'
+        '  "source_documents": ["doc title"]\n'
         "} ] }\n\n"
         "OUTPUT FORMAT: respond with this JSON object and nothing else — no "
         "prose, no markdown, no headings, no numbered list, no code fences. "
@@ -493,7 +497,8 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         logger.warning(
             "intelligence plan JSON unparseable (len=%s, tail=%r) — "
             "attempting truncation salvage",
-            len(raw), raw[-80:],
+            len(raw),
+            raw[-80:],
         )
     analyses: list[PlannedAnalysis] = []
     # Cross-table analyses are additive: reserve per_pair slots per evidence
@@ -523,9 +528,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
                 sql = _ensure_join_on_clause(
                     sql, req.relationship_hints or [], allowed_tables
                 )
-                sql = _qualify_bare_shared_columns(
-                    sql, req.table_schema or None
-                )
+                sql = _qualify_bare_shared_columns(sql, req.table_schema or None)
                 sql = _ensure_group_by(sql)
                 try:
                     validate_sql(sql, allowed_tables)
