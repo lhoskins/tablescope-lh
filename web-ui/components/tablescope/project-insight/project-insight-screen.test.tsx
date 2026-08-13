@@ -447,7 +447,7 @@ describe("ProjectInsightScreen", () => {
       }),
     );
     const refresh = screen.getByRole("button", {
-      name: /Refresh project insights/i,
+      name: /Analyze project insights/i,
     });
     fireEvent.click(refresh);
     expect(await screen.findByText(/Analyzing this project/)).toBeTruthy();
