@@ -382,41 +382,68 @@ def _sse(event: dict[str, Any]) -> str:
 async def home_intelligence_stream(
     cross_project: bool = True,
     granularity: int = 3,
+    run_id: str | None = None,
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> StreamingResponse:
     """Stream per-project intelligence as Server-Sent Events.
 
     Each project runs in its own DB session so a slow project never blocks the
-    others, and results are enqueued the moment a project finishes.
+    others, and results are enqueued the moment a project finishes. Pass
+    ``run_id`` to reconnect to an in-progress run instead of starting a new one.
     """
 
     async def event_stream() -> AsyncIterator[str]:
-        run_id, project_meta = await _start_home_intelligence_run(
-            context, cross_project, granularity
-        )
-        if not run_id:
-            yield _sse({"type": "done", "projectCount": 0})
-            return
+        project_meta: list[dict[str, Any]] = []
+        active_run_id: str
+        active_cross_project = cross_project
+        if run_id:
+            meta = await q.get_meta(run_id)
+            if (
+                meta is None
+                or meta["tenant_id"] != context.tenant_id
+                or meta["user_id"] != context.user_id
+            ):
+                raise HTTPException(status_code=404, detail="Run not found")
+            active_run_id = run_id
+            active_cross_project = meta["cross_project"]
+            project_meta = meta["projects"]
+        else:
+            active_run_id, project_meta = await _start_home_intelligence_run(
+                context, cross_project, granularity
+            )
+            if not active_run_id:
+                yield _sse({"type": "done", "projectCount": 0})
+                return
 
         yield _sse({"type": "start", "projects": project_meta})
 
         emitted: set[str] = set()
         deadline = asyncio.get_event_loop().time() + _STREAM_DEADLINE_SECONDS
-        async with q.subscribe(run_id) as pubsub:
-            while True:
-                results = await q.get_results(run_id)
-                for pid, result in results.items():
-                    if pid in emitted:
-                        continue
-                    emitted.add(pid)
-                    if "insights" in result:
-                        yield _sse({"type": "project_complete", **result})
-                    else:
-                        yield _sse({"type": "project_error", **result})
 
-                stored, synthesis = await q.get_synthesis(run_id)
+        def _emit_results(results: dict[str, dict[str, Any]]) -> list[str]:
+            events: list[str] = []
+            for pid, result in results.items():
+                if pid in emitted:
+                    continue
+                emitted.add(pid)
+                if "insights" in result:
+                    events.append(_sse({"type": "project_complete", **result}))
+                else:
+                    events.append(_sse({"type": "project_error", **result}))
+            return events
+
+        # Emit any results already written before this connection opened.
+        for sse in _emit_results(await q.get_results(active_run_id)):
+            yield sse
+
+        async with q.subscribe(active_run_id) as pubsub:
+            while True:
+                for sse in _emit_results(await q.get_results(active_run_id)):
+                    yield sse
+
+                stored, synthesis = await q.get_synthesis(active_run_id)
                 if stored:
-                    if cross_project and synthesis is not None:
+                    if active_cross_project and synthesis is not None:
                         yield _sse(
                             {"type": "synthesis_complete", "synthesis": synthesis}
                         )
@@ -425,7 +452,7 @@ async def home_intelligence_stream(
                     logger.warning(
                         "home-intel stream %s timed out after %ss with %s/%s "
                         "projects reported",
-                        run_id,
+                        active_run_id,
                         _STREAM_DEADLINE_SECONDS,
                         len(emitted),
                         len(project_meta),
