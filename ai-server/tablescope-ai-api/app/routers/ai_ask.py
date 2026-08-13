@@ -1,6 +1,7 @@
 """The ``/ai/ask`` endpoint."""
 
 import logging
+import re
 import uuid
 from typing import Any
 
@@ -151,18 +152,21 @@ async def ask(req: AskRequest) -> AskResponse:
         grounded_block = f"{grounded_block}\n\n{insight_block}".strip()
 
     if grounded_block:
+        # Synthesizing an answer from an already-executed query result needs very
+        # little context. Keep the prompt tiny so it fits comfortably on a small
+        # GPU/CPU context window and the model stays concise.
         prompt = (
-            f"{context_text}\n\n{grounded_block}\n\n"
-            f"{history_text}"
+            f"{grounded_block}\n\n"
             f"User question: {req.question}\n\n"
-            "Ground your answer in the live query result and/or matched insight "
-            "card analysis above. Cite specific numbers, trends, and chart series. "
-            "If a live result is present, use it as the primary source; use matched "
-            "insight cards only when they directly address the question's subject. "
-            "You may also use Reference Library documents, KG findings, and other "
-            "context above as supporting material. Do not invent data or SQL that "
-            "is not shown. Keep the answer concise and conversational."
+            "Answer the question in one or two sentences using the live result "
+            "above. Cite specific numbers. Do not show reasoning or SQL."
         )
+        answer_system_prompt = (
+            "You are a concise data assistant. Answer using only the provided result. "
+            "Never show chain-of-thought or reasoning."
+        )
+        answer_max_tokens = 256
+        answer_stop = ["\n\n"]
     else:
         prompt = (
             f"{context_text}\n\n{history_text}"
@@ -175,13 +179,21 @@ async def ask(req: AskRequest) -> AskResponse:
             "answer from that document's summary and cite its title. Do not invent data or SQL "
             "that is not shown. Keep the answer concise and conversational."
         )
+        answer_system_prompt = SYSTEM_PROMPT
+        answer_max_tokens = 512
+        answer_stop = None
 
     answer = await llm_client.generate(
         prompt=prompt,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=answer_system_prompt,
         model=req.model or settings.reasoning_model,
         ollama_url=req.ollama_url,
+        max_tokens=answer_max_tokens,
+        stop=answer_stop,
     )
+
+    # Some models emit a "to=self" artifact or leading whitespace; strip it.
+    answer = re.sub(r"^(to=self\s*)+", "", answer).strip()
 
     # 4. Update activity
     update_activity(req.user_id, req.tenant_id, req.project_id)

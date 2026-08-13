@@ -32,6 +32,7 @@ async def _generate_openai(
     target_url: str = "",
     temperature: float = 0.1,
     max_tokens: int | None = None,
+    stop: list[str] | None = None,
     response_format: str | None = None,
 ) -> str:
     """Generate using a vLLM/OpenAI-compatible /v1/chat/completions endpoint."""
@@ -48,6 +49,8 @@ async def _generate_openai(
     }
     if max_tokens is not None:
         payload["max_tokens"] = max_tokens
+    if stop:
+        payload["stop"] = stop
     if response_format == "json":
         payload["response_format"] = {"type": "json_object"}
 
@@ -70,6 +73,7 @@ async def _generate_ollama(
     target_url: str = "",
     temperature: float = 0.1,
     max_tokens: int | None = None,
+    stop: list[str] | None = None,
     num_ctx: int | None = None,
     response_format: str | None = None,
 ) -> str:
@@ -77,6 +81,8 @@ async def _generate_ollama(
     options: dict[str, Any] = {"temperature": temperature}
     if max_tokens is not None:
         options["num_predict"] = max_tokens
+    if stop:
+        options["stop"] = stop
     if num_ctx is not None:
         options["num_ctx"] = num_ctx
 
@@ -107,6 +113,7 @@ async def generate(
     ollama_url: str | None = None,
     temperature: float = 0.1,
     max_tokens: int | None = None,
+    stop: list[str] | None = None,
     num_ctx: int | None = None,
     response_format: str | None = None,
 ) -> str:
@@ -127,6 +134,7 @@ async def generate(
             target_url=target_url,
             temperature=temperature,
             max_tokens=max_tokens,
+            stop=stop,
             response_format=response_format,
         )
 
@@ -137,6 +145,7 @@ async def generate(
         target_url=target_url,
         temperature=temperature,
         max_tokens=max_tokens,
+        stop=stop,
         num_ctx=num_ctx,
         response_format=response_format,
     )
@@ -287,7 +296,9 @@ async def generate_sql(
         "Generate SQL only using the allowed sources and columns listed below.\n"
         "Do not use SELECT *.\n"
         "Do not generate INSERT, UPDATE, DELETE, DROP, or any write operations.\n"
-        "Return only the SQL query, no explanation.\n"
+        "Return ONLY the final SQL query. Do not explain, reason, or preface. "
+        "Do not wrap the SQL in markdown unless the user explicitly asks for it. "
+        "No chain-of-thought, no commentary, no 'Here is the query' introductions.\n"
         "When a Knowledge Graph context block is present, prioritize SQL that "
         "measures or validates its risks, opportunities, gaps, warnings, "
         "recommended/measured KPIs, documented processes, and entity "
@@ -308,6 +319,8 @@ async def generate_sql(
         model=model or settings.sql_model,
         ollama_url=ollama_url,
         temperature=0.0,
+        max_tokens=1024,
+        stop=[";"],
     )
 
 
@@ -356,6 +369,8 @@ async def repair_sql(
         model=model or settings.sql_model,
         ollama_url=ollama_url,
         temperature=0.0,
+        max_tokens=1024,
+        stop=[";"],
     )
 
 
