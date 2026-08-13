@@ -45,6 +45,28 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _fit_plan_prompt(
+    prompt: str,
+    system_prompt: str,
+    *,
+    max_model_len: int = 8192,
+    max_tokens: int = 2048,
+    chars_per_token: float = 3.5,
+) -> str:
+    """Trim the front of the user prompt so system + prompt + output fit vLLM."""
+    reserve_tokens = max_tokens + int(len(system_prompt) / chars_per_token) + 40
+    token_budget = max(0, max_model_len - reserve_tokens)
+    char_budget = int(token_budget * chars_per_token)
+    if len(prompt) <= char_budget:
+        return prompt
+    # Keep the instruction/output-format tail and drop excess context from the front.
+    truncated = prompt[-char_budget:]
+    idx = truncated.find("\n")
+    if idx != -1 and idx < 120:
+        truncated = truncated[idx + 1 :]
+    return "[context truncated for length]\n\n" + truncated
+
+
 # Chart families the planner may request. These map onto the dashboard's chart
 # catalog downstream (platform-api ``_build_chart``); the result shape can still
 # override the pick (e.g. a single-row aggregate always renders as KPI tiles).
@@ -449,20 +471,19 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "Begin your response with { and end it with }."
     )
 
+    # The vLLM host is currently limited to 8192 tokens, so trim the prompt
+    # from the front while preserving the output-format instructions at the
+    # tail. Reserve 2048 tokens for the generated JSON plan.
+    prompt = _fit_plan_prompt(
+        prompt, _INTEL_SYSTEM_PROMPT, max_model_len=8192, max_tokens=2048
+    )
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt=_INTEL_SYSTEM_PROMPT,
         model=req.model or settings.reasoning_model,
         temperature=0.2,
-        # The window is shared by the prompt AND the generated JSON. The plan
-        # prompt (schema + documents + relationship evidence + knowledge-graph
-        # hypotheses + rules) plus target_count + one-per-evidence-pair
-        # analyses is the largest prompt+output pair in the pipeline. Silent
-        # truncation eats the tail — the relationship rules and output format
-        # — which shows up as projects losing their multi-table/complex
-        # analyses, so run at the same 24576 the heaviest endpoints already
-        # use on this model.
-        num_ctx=24576,
+        max_tokens=2048,
+        num_ctx=8192,
         response_format="json",
         ollama_url=req.ollama_url,
     )
