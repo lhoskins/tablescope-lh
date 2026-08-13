@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _fit_context(text: str, max_model_len: int = 8192, max_tokens: int = 512) -> str:
+def _fit_context(text: str, max_model_len: int = 12288, max_tokens: int = 512) -> str:
     """Truncate context so prompt + max_tokens stays under vLLM max_model_len."""
     # Approx 3.5 chars per token; reserve tokens for system prompt, question,
     # answer and overhead.
@@ -126,35 +126,9 @@ async def ask(req: AskRequest) -> AskResponse:
     # 1. Verify signature
     verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
-    # 2. Build permission-aware context
-    try:
-        ctx = await context_builder.build_context(
-            tenant_id=req.tenant_id,
-            user_id=req.user_id,
-            project_id=req.project_id,
-            scope=req.scope,
-            question=req.question,
-            feature="ask",
-            grounding_evidence=req.grounding_evidence,
-        )
-    except ContextBuildError as e:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Access denied: {e.reason}",
-        )
-
-    # 3. Send ONLY allowed context to LLM
-    context_text = context_builder.context_to_prompt_text(ctx)
-    # Fold in the Knowledge Graph context so prose answers cite validated
-    # risks/gaps/measured KPIs surfaced by the graph (not Reference Library docs).
-    kg_block = format_knowledge_graph_context(req.knowledge_graph_context)
-    if kg_block:
-        context_text = f"{context_text}\n\n{kg_block}"
-    history_text = _format_conversation_history(req.history)
-
-    # Synthesize an answer from a live query result and/or matched insight card(s)
-    # when the app has already done the analytical work. Otherwise fall through
-    # to the normal document/KG-grounded prose path.
+    # 2. Synthesize an answer from a live query result and/or matched insight
+    # card(s) when the app has already done the analytical work. Otherwise fall
+    # through to the normal document/KG-grounded prose path.
     grounded_block = ""
     if req.data_result:
         grounded_block = _format_data_result(req.question, req.data_result)
@@ -162,10 +136,36 @@ async def ask(req: AskRequest) -> AskResponse:
         insight_block = _format_matched_insights(req.question, req.matched_insights)
         grounded_block = f"{grounded_block}\n\n{insight_block}".strip()
 
-    # Prose contexts can be large; reserve token room for the answer and system
-    # prompt so the request fits within the vLLM max_model_len window.
-    prose_max_tokens = 1536
-    context_text = _fit_context(context_text, max_tokens=prose_max_tokens)
+    ctx = None
+    context_text = ""
+    history_text = _format_conversation_history(req.history)
+    if not grounded_block:
+        # Build permission-aware context only when we need the document/KG
+        # grounding. Data-driven questions already carry their own result.
+        try:
+            ctx = await context_builder.build_context(
+                tenant_id=req.tenant_id,
+                user_id=req.user_id,
+                project_id=req.project_id,
+                scope=req.scope,
+                question=req.question,
+                feature="ask",
+                grounding_evidence=req.grounding_evidence,
+            )
+        except ContextBuildError as e:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied: {e.reason}",
+            )
+        context_text = context_builder.context_to_prompt_text(ctx)
+        # Fold in the Knowledge Graph context so prose answers cite validated
+        # risks/gaps/measured KPIs surfaced by the graph (not Reference Library docs).
+        kg_block = format_knowledge_graph_context(req.knowledge_graph_context)
+        if kg_block:
+            context_text = f"{context_text}\n\n{kg_block}"
+        # Prose contexts can be large; reserve token room for the answer and
+        # system prompt so the request fits within the vLLM max_model_len window.
+        context_text = _fit_context(context_text, max_tokens=1536)
 
     if grounded_block:
         # Synthesizing an answer from an already-executed query result needs very
@@ -199,9 +199,7 @@ async def ask(req: AskRequest) -> AskResponse:
         answer_max_tokens = 1536
         answer_stop = None
 
-    # Truncate large prose contexts so prompt + max_tokens fits the vLLM model length.
-    if not grounded_block:
-        context_text = _fit_context(context_text, max_tokens=answer_max_tokens)
+
 
     answer = await llm_client.generate(
         prompt=prompt,
@@ -234,17 +232,18 @@ async def ask(req: AskRequest) -> AskResponse:
             "retrieved_at": req.grounding_evidence.retrieved_at.isoformat(),
         }
 
+    allowed_context = ctx.allowed_context if ctx else {}
     return AskResponse(
         answer=answer,
         model_used=req.model or settings.reasoning_model,
         request_id=request_id,
         context_summary={
-            "metadata_count": len(ctx.allowed_context.get("metadata", [])),
-            "document_count": len(ctx.allowed_context.get("documents", [])),
+            "metadata_count": len(allowed_context.get("metadata", [])),
+            "document_count": len(allowed_context.get("documents", [])),
             "project_document_count": len(
-                ctx.allowed_context.get("project_documents", [])
+                allowed_context.get("project_documents", [])
             ),
-            "query_count": len(ctx.allowed_context.get("queries", [])),
+            "query_count": len(allowed_context.get("queries", [])),
         },
         grounding_manifest=grounding_manifest,
     )

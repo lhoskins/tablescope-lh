@@ -74,6 +74,7 @@ services:
       - "8001:8001"
     volumes:
       - /mnt/tablescope-ai/vllm/models/muse-glimmer-w4a16:/models
+      - /mnt/tablescope-ai/vllm/models/muse-glimmer-dspark:/dspark
     environment:
       - TRANSFORMERS_OFFLINE=1
     command:
@@ -92,12 +93,15 @@ services:
       - --default-chat-template-kwargs
       - '{"reasoning_strength":"low"}'
       - --no-enable-flashinfer-autotune
+      - --enable-prefix-caching
+      - --speculative-config
+      - '{"method":"dspark","model":"/dspark","num_speculative_tokens":15}'
       - --port
       - "8001"
       - --max-model-len
-      - "16384"
+      - "12288"
       - --gpu-memory-utilization
-      - "0.85"
+      - "0.78"
     deploy:
       resources:
         reservations:
