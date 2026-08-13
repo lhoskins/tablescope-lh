@@ -84,11 +84,18 @@ services:
       - auto
       - --tensor-parallel-size
       - "1"
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - muse_glimmer
+      - --reasoning-parser
+      - muse_glimmer
+      - --default-chat-template-kwargs
+      - '{"reasoning_strength":"low"}'
       - --no-enable-flashinfer-autotune
       - --port
       - "8001"
       - --max-model-len
-      - "8192"
+      - "16384"
       - --gpu-memory-utilization
       - "0.85"
     deploy:
