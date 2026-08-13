@@ -150,6 +150,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
       // page shows the existing insight with a "reloading" indicator instead
       // of going blank while the rebuild runs.
       queryClient.setQueryData(INSIGHT_KEY(projectId), fresh);
+      queryClient.removeQueries({ queryKey: ["percent-change-summary"] });
       insightsQuery.refetch();
       push("Project Insight cache cleared", "success");
     },
@@ -157,7 +158,11 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   });
 
   const handleClearCache = () => {
-    if (!window.confirm("Clear cached Project Insight cards?")) return;
+    if (
+      !window.confirm(
+        "Clear cached Project Insight cards and the Percent Change Summary?",
+      )
+    ) return;
     clearCache.mutate();
   };
 

@@ -7,6 +7,7 @@ Split from ``home_intelligence.py``; siblings: ``home_intelligence_suite.py``,
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
@@ -182,6 +183,15 @@ async def _snapshot_payload_dict(
     payload = dict(snap.payload) if isinstance(snap.payload, dict) else {}
     payload.pop("stale", None)
     payload.pop("staleProjects", None)
+    payload.pop("activeRunId", None)
+    payload.pop("activeRunComplete", None)
+
+    active_run = await q.get_current_run_status(context.tenant_id, context.user_id)
+    active_run_id: str | None = None
+    active_run_complete: bool | None = None
+    if active_run:
+        active_run_id = active_run["run_id"]
+        active_run_complete = active_run["complete"]
 
     return {
         "granularity": snap.granularity,
@@ -189,6 +199,8 @@ async def _snapshot_payload_dict(
         **payload,
         "stale": bool(stale_projects),
         "staleProjects": sorted(stale_projects),
+        "activeRunId": active_run_id,
+        "activeRunComplete": active_run_complete,
     }
 
 
@@ -197,7 +209,7 @@ async def get_intelligence_snapshot(
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> dict[str, Any]:
-    """Return the caller's latest persisted run (or ``snapshot: null``).
+    """Return the caller's latest persisted run (or an in-progress run snapshot).
 
     ``stale``/``staleProjects`` flag projects whose data changed (Knowledge
     Graph rebuilt) after this briefing was written, so the UI can nudge a
@@ -208,10 +220,27 @@ async def get_intelligence_snapshot(
             IntelligenceSnapshot.user_id == context.user_id
         )
     )
-    if snap is None:
-        return {"snapshot": None}
+    if snap is not None:
+        return {"snapshot": await _snapshot_payload_dict(session, context, snap)}
 
-    return {"snapshot": await _snapshot_payload_dict(session, context, snap)}
+    active_run = await q.get_current_run_status(context.tenant_id, context.user_id)
+    if active_run:
+        return {
+            "snapshot": {
+                "granularity": active_run["meta"]["granularity"],
+                "updatedAt": None,
+                "generatedAt": None,
+                "projects": active_run["meta"]["projects"],
+                "results": [],
+                "synthesis": None,
+                "stale": True,
+                "staleProjects": [str(p["id"]) for p in active_run["meta"]["projects"]],
+                "activeRunId": active_run["run_id"],
+                "activeRunComplete": active_run["complete"],
+            }
+        }
+
+    return {"snapshot": None}
 
 
 class RefreshHomeIntelligenceRequest(BaseModel):
@@ -277,8 +306,8 @@ async def clear_home_intelligence_cache(
     """Clear Business Insight caches for the caller's tenant.
 
     Deletes the tenant's shared Business Insight result cache, the stream
-    snapshot, and per-user project snapshots used by the Business Insight feed.
-    The next feed refresh regenerates cards with the latest ranking.
+    snapshot, per-user project snapshots, and the Percent Change Summary cache.
+    Any in-progress run is superseded so the next Analyze starts fresh.
     """
     r1 = await session.execute(
         delete(BusinessInsightResult).where(
@@ -309,6 +338,25 @@ async def clear_home_intelligence_cache(
         )
     )
     await session.commit()
+
+    try:
+        redis = q.get_redis()
+        # Supersede any in-progress home-intelligence run so queued jobs exit
+        # instead of writing stale results after the cache is cleared.
+        current_run = await q.get_current_run(context.tenant_id, context.user_id)
+        if current_run:
+            await redis.set(
+                q._current_run_key(context.tenant_id, context.user_id),
+                uuid.uuid4().hex,
+                ex=60,
+            )
+        # Clear the Percent Change Summary Redis cache for this tenant.
+        pcs_keys = await redis.keys(f"pcs:{context.tenant_id}:*")
+        if pcs_keys:
+            await redis.delete(*pcs_keys)
+    except Exception:
+        logger.exception("Failed to clear Redis caches during BI cache clear")
+
     return {
         "deleted": {
             "business_insight_results": business_count,

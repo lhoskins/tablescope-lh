@@ -16,19 +16,21 @@ import type {
  */
 export function streamHomeIntelligence(
   onEvent: (event: IntelligenceEvent) => void,
-  options: { crossProject?: boolean; granularity?: number } = {},
+  options: { crossProject?: boolean; granularity?: number; runId?: string } = {},
 ): AbortController {
   const controller = new AbortController();
   const cross = options.crossProject ?? true;
   const granularity = options.granularity ?? 3;
+  const runId = options.runId;
 
   (async () => {
     let response: Response;
     try {
-      response = await apiClient.stream(
-        `/api/ai/home-intelligence/stream?cross_project=${cross}&granularity=${granularity}`,
-        { signal: controller.signal },
-      );
+      let url = `/api/ai/home-intelligence/stream?cross_project=${cross}&granularity=${granularity}`;
+      if (runId) {
+        url += `&run_id=${encodeURIComponent(runId)}`;
+      }
+      response = await apiClient.stream(url, { signal: controller.signal });
     } catch (err) {
       if (!controller.signal.aborted) {
         onEvent({ type: "project_error", error: String(err) });

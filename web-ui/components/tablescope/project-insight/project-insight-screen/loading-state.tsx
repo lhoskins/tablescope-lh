@@ -40,12 +40,13 @@ import {
 
 export function LoadingState() {
   return (
-    <div className="space-y-4">
-      <div className="h-40 animate-pulse rounded-lg bg-bg-secondary" />
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="h-48 animate-pulse rounded-lg bg-bg-secondary" />
-        <div className="h-48 animate-pulse rounded-lg bg-bg-secondary" />
-      </div>
+    <div className="flex flex-col items-center justify-center gap-3 py-12 text-ink-secondary">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-current border-t-transparent" />
+      <p className="text-sm font-medium">Analyzing project insights…</p>
+      <p className="text-xs text-ink-tertiary">
+        Cards will resurface automatically. You can refresh or leave the page
+        and return; analysis continues in the background.
+      </p>
     </div>
   );
 }

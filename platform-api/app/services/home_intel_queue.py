@@ -125,6 +125,24 @@ async def is_current_run(tenant_id: int, user_id: int, run_id: str) -> bool:
     return current is None or current == run_id
 
 
+async def get_current_run(tenant_id: int, user_id: int) -> str | None:
+    """Return the run_id currently marked as this user's active run, if any."""
+    return await get_redis().get(_current_run_key(tenant_id, user_id))
+
+
+async def get_current_run_status(
+    tenant_id: int, user_id: int,
+) -> dict[str, Any] | None:
+    """Return the active run id, completion status, and metadata for a user."""
+    run_id = await get_current_run(tenant_id, user_id)
+    if not run_id:
+        return None
+    meta = await get_meta(run_id)
+    if meta is None:
+        return None
+    return {"run_id": run_id, "complete": await is_complete(run_id), "meta": meta}
+
+
 async def get_meta(run_id: str) -> dict[str, Any] | None:
     m = await cast(
         "Awaitable[dict[str, str]]", get_redis().hgetall(_k(run_id, "meta"))
