@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _fit_context(text: str, max_model_len: int = 12288, max_tokens: int = 512) -> str:
+def _fit_context(text: str, max_model_len: int = 8192, max_tokens: int = 512) -> str:
     """Truncate context so prompt + max_tokens stays under vLLM max_model_len."""
     # Approx 3.5 chars per token; reserve tokens for system prompt, question,
     # answer and overhead.
