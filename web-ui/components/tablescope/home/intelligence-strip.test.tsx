@@ -45,7 +45,7 @@ describe("IntelligenceStrip", () => {
     expect(screen.getByText("Balanced")).toBeTruthy();
     expect(screen.getByText("Updated just now")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Clear Business Insight cache/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Refresh intelligence/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Analyze business insights/i })).toBeTruthy();
   });
 
   it("displays an analyzing status while running", () => {
@@ -56,7 +56,7 @@ describe("IntelligenceStrip", () => {
 
   it("calls the refresh handler", () => {
     renderStrip();
-    fireEvent.click(screen.getByRole("button", { name: /Refresh intelligence/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Analyze business insights/i }));
     expect(handlers.onRefresh).toHaveBeenCalledTimes(1);
   });
 
