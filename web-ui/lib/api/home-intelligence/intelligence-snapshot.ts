@@ -25,4 +25,8 @@ export interface IntelligenceSnapshot {
   stale?: boolean;
   /** Project IDs whose data changed after this briefing was generated. */
   staleProjects?: string[];
+  /** The run_id of an in-progress Business Insight analysis, if any. */
+  activeRunId?: string | null;
+  /** True when the active run has finished (snapshot is the final result). */
+  activeRunComplete?: boolean | null;
 }

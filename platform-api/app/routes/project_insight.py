@@ -37,6 +37,7 @@ from app.schemas.project_insight import (
     ReviewedInsight,
     ReviewedInsightsResponse,
 )
+from app.services import home_intel_queue as q
 from app.services.project_insight_service import build_project_insight
 from app.tasks.workflows import enqueue_rebuild_project_insight
 
@@ -292,6 +293,14 @@ async def clear_project_insight_cache(
         )
     )
     await session.commit()
+
+    try:
+        redis = q.get_redis()
+        pcs_keys = await redis.keys(f"pcs:{context.tenant_id}:*")
+        if pcs_keys:
+            await redis.delete(*pcs_keys)
+    except Exception:
+        logger.exception("Failed to clear Percent Change Summary cache")
 
     await enqueue_rebuild_project_insight(
         tenant_id=context.tenant_id, project_id=project_id

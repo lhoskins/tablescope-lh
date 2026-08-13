@@ -158,9 +158,9 @@ export function IntelligenceStrip({
 
   const toolbarLabel = isProject ? "Project Insights toolbar" : "Business Insights toolbar";
   const clearCacheLabel = isProject
-    ? "Clear Project Insight cache"
-    : "Clear Business Insight cache";
-  const refreshLabel = isProject ? "Refresh project insights" : "Refresh intelligence";
+    ? "Clear Project Insight cache and Percent Change Summary"
+    : "Clear Business Insight cache and Percent Change Summary";
+  const refreshLabel = isProject ? "Analyze project insights" : "Analyze business insights";
 
   const runningText = isProject
     ? "Analyzing this project…"
@@ -232,12 +232,14 @@ export function IntelligenceStrip({
           onClick={onRefresh}
           aria-label={refreshLabel}
           title={refreshLabel}
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-ink-secondary transition-colors hover:bg-bg-tertiary"
+          disabled={running}
+          className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
         >
           <IconRefresh
             size={15}
             className={running ? "animate-spin" : undefined}
           />
+          <span>Analyze</span>
         </button>
       </div>
     </div>
