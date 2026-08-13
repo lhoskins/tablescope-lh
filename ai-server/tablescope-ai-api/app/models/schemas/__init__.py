@@ -11,6 +11,7 @@ from .actions import (
     DraftActionSuccessCriterion,
 )
 from .analysis import (
+    FirstPassResult,
     IntelligenceFixSQLRequest,
     IntelligenceFixSQLResponse,
     IntelligenceInterpretRequest,
@@ -157,6 +158,7 @@ __all__ = [
     "IntelligenceInterpretResponse",
     "IntelligencePlanRequest",
     "IntelligencePlanResponse",
+    "FirstPassResult",
     "InsightCardCandidate",
     "InterpretAnalysisInput",
     "InterpretedInsight",

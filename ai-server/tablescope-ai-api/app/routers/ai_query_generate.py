@@ -188,12 +188,9 @@ def _remap_tables_to_authorized(
             target = forced
         if target and target.upper() != ref.upper():
             pattern = re.compile(rf'("?)\b{re.escape(ref)}\b("?)')
-            replacement_target = target
-
-            def _replace(match: re.Match[str], t: str = replacement_target) -> str:
-                return f"{match.group(1)}{t}{match.group(2)}"
-
-            remapped = pattern.sub(_replace, remapped)
+            remapped = pattern.sub(
+                lambda m, t=target: f"{m.group(1)}{t}{m.group(2)}", remapped
+            )
     return remapped
 
 
