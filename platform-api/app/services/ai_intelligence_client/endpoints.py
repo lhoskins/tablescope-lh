@@ -1,12 +1,15 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.config import get_settings
 from app.services.llm_framework import resolve_active_routing_for_capability
 
 from .transport import _chat_sem, _post
+
+logger = logging.getLogger(__name__)
 
 _CAPABILITY_BY_PATH: dict[str, str | None] = {
     "/ai/intelligence/plan": "dashboard_planning",
@@ -88,6 +91,12 @@ async def plan(
     )
     if result is None:
         return None
+    logger.info(
+        "AI plan response model_used=%s project=%s tenant=%s",
+        result.get("model_used"),
+        project_id,
+        tenant_id,
+    )
     analyses = result.get("analyses")
     return analyses if isinstance(analyses, list) else []
 
