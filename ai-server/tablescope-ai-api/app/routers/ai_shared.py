@@ -57,9 +57,12 @@ def _fix_teiid_group_by(sql: str) -> str:
         keyword = clause_match.group(1)
         body = clause_match.group(2)
         for alias_upper, expr in aliases.items():
-            # Replace the alias whether it is bare or double-quoted/bracketed.
+            # Replace the alias whether it is bare or double-quoted/bracketed,
+            # but not when it is already table-qualified (e.g. r."RiskTier").
             body = re.sub(
-                rf'(?:"{re.escape(alias_upper)}"|\[{re.escape(alias_upper)}\]|\b{re.escape(alias_upper)}\b)',
+                rf'(?<![\w.])"{re.escape(alias_upper)}"(?![\w.])'
+                rf'|'
+                rf'(?<![\w."]){re.escape(alias_upper)}(?![\w."])',
                 expr,
                 body,
                 flags=re.IGNORECASE,
