@@ -11,6 +11,7 @@ import {
   listSavedConnections,
   type SavedConnection,
 } from "@/lib/api/data-source-builder";
+import { BUILDER_QUERY_OPTIONS } from "@/lib/query-options";
 import { connectorDisplayName } from "@/lib/api/connectors";
 import {
   useBuilderStore,
@@ -35,10 +36,12 @@ function toSourceType(dbType: string): SourceType {
 
 export function ConnectedDatabases({ projectId }: { projectId?: string }) {
   const { data: connections, isLoading } = useQuery({
+    ...BUILDER_QUERY_OPTIONS,
     queryKey: ["builder", "saved-connections"],
     queryFn: listSavedConnections,
   });
   const { data: connectedSources } = useQuery({
+    ...BUILDER_QUERY_OPTIONS,
     queryKey: ["builder", "connected-sources"],
     queryFn: listConnectedSources,
   });

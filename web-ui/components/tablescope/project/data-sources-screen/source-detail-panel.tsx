@@ -12,10 +12,16 @@ import { humanSize } from "./human-size";
 import { VersionHistorySection } from "./version-history-section";
 import { Row } from "./row";
 
-export function SourceDetailPanel({ source }: { source: DataSource | null }) {
+export function SourceDetailPanel({
+  source,
+  collapsible = true,
+}: {
+  source: DataSource | null;
+  collapsible?: boolean;
+}) {
   if (!source) {
     return (
-      <ContextPanel title="Source Detail" askPlaceholder="Ask about this source…">
+      <ContextPanel title="Source Detail" askPlaceholder="Ask about this source…" collapsible={collapsible}>
         <div className="px-1 py-8 text-center text-small text-ink-tertiary">
           Select a source to see its schema and details.
         </div>
@@ -29,7 +35,7 @@ export function SourceDetailPanel({ source }: { source: DataSource | null }) {
   const summary =
     meta && typeof meta.summary === "string" ? meta.summary : null;
   return (
-    <ContextPanel title="Source Detail" askPlaceholder="Ask about this source…">
+    <ContextPanel title="Source Detail" askPlaceholder="Ask about this source…" collapsible={collapsible}>
       {summary && (
         <div className="rounded-lg border border-brand-100 bg-brand-50/60 p-3 text-[13px] leading-relaxed text-ink-primary">
           {summary}

@@ -11,6 +11,7 @@ from .actions import (
     DraftActionSuccessCriterion,
 )
 from .analysis import (
+    FirstPassResult,
     IntelligenceFixSQLRequest,
     IntelligenceFixSQLResponse,
     IntelligenceInterpretRequest,
@@ -73,6 +74,11 @@ from .file_analysis import (
 from .indexing import (
     IndexDocumentRequest,
     IndexReferenceRequest,
+)
+from .insight_card_match import (
+    InsightCardCandidate,
+    SelectInsightCardRequest,
+    SelectInsightCardResponse,
 )
 from .kg import (
     KnowledgeGraphCard,
@@ -152,6 +158,8 @@ __all__ = [
     "IntelligenceInterpretResponse",
     "IntelligencePlanRequest",
     "IntelligencePlanResponse",
+    "FirstPassResult",
+    "InsightCardCandidate",
     "InterpretAnalysisInput",
     "InterpretedInsight",
     "KnowledgeGraphCard",
@@ -170,6 +178,8 @@ __all__ = [
     "ReferenceSummarizeResponse",
     "RelationshipSuggestion",
     "ScopeSuggestion",
+    "SelectInsightCardRequest",
+    "SelectInsightCardResponse",
     "SelectedField",
     "SelectedSource",
     "SourceCatalogEntry",

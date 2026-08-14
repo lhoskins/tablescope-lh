@@ -2,10 +2,13 @@
 
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { IconLoader2, IconSend, IconSparkles } from "@tabler/icons-react";
+import { IconSparkles } from "@tabler/icons-react";
 import { ResultChart, ResultTable } from "@/components/ai/ai-result-view";
+import { MatchedInsightBlock } from "@/components/tablescope/conversation/matched-insight-block";
 import { RAnalyticsBadge } from "./insight-engine-badge";
+import { AskAnythingComposer } from "@/components/ai/ask-anything-composer";
 import { aiActionsApi, type AiCardContext, type AskAndRunResult } from "@/lib/api/ai-actions";
+import { useCurrentUser } from "@/lib/ui/use-shell-data";
 import type { InsightCard, InsightDiagnostic } from "@/lib/api/home-intelligence";
 
 /**
@@ -24,6 +27,7 @@ export function InsightAskBox({
   card: InsightCard;
   suggestions: string[];
 }) {
+  const { data: identity } = useCurrentUser();
   const [question, setQuestion] = useState("");
   const [asked, setAsked] = useState("");
 
@@ -72,33 +76,16 @@ export function InsightAskBox({
         </ul>
       ) : null}
 
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          submit(question);
-        }}
-        className="flex items-center gap-2"
-      >
-        <input
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          placeholder="Ask your own question about this insight…"
-          aria-label="Ask your own question about this insight"
-          className="min-w-0 flex-1 rounded-lg border border-line-tertiary bg-bg-primary px-3 py-2 text-[14px] text-ink-primary placeholder:text-ink-tertiary focus:border-brand-600 focus:outline-none"
-        />
-        <button
-          type="submit"
-          disabled={!question.trim() || ask.isPending}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-[14px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-        >
-          {ask.isPending ? (
-            <IconLoader2 size={15} className="animate-spin" aria-hidden />
-          ) : (
-            <IconSend size={15} aria-hidden />
-          )}
-          Ask
-        </button>
-      </form>
+      <AskAnythingComposer
+        value={question}
+        onChange={setQuestion}
+        onSubmit={submit}
+        placeholder="Ask your own question about this insight…"
+        ariaLabel="Ask your own question about this insight"
+        submitAriaLabel="Ask"
+        busy={ask.isPending}
+        projectId={card.projectId}
+      />
 
       {ask.isPending ? (
         <p className="text-[13px] text-ink-tertiary">Analysing “{asked}”…</p>
@@ -132,8 +119,10 @@ export function InsightAskBox({
                 </div>
               ) : null}
 
-              {/* Charts and tables use the same fit-ranked path as the cards. */}
-              {result.rows?.length ? (
+              {result.matchedInsight ? (
+                <MatchedInsightBlock match={result.matchedInsight} />
+              ) : result.rows?.length ? (
+                /* Charts and tables use the same fit-ranked path as the cards. */
                 <>
                   <div className="mt-3">
                     <ResultChart

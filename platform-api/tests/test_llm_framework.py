@@ -128,8 +128,10 @@ async def _seed_deployment(db_session):
     await db_session.flush()
     deployment = LLMDeployment(
         installation_id=installation.id,
+        target_id=target.id,
         requested_by_user_id=1,
         status="active",
+        deployment_mode="install_only",
     )
     db_session.add(deployment)
     await db_session.flush()

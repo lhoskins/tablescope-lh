@@ -42,7 +42,7 @@ async def intelligence_fix_sql(
     SQL if it can't be fixed.
     """
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     schema_lines = _build_schema_lines(req.table_schema)
     # A failing query that already JOINs two tables is a planner-mandated
@@ -82,9 +82,10 @@ async def intelligence_fix_sql(
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt=_INTEL_SYSTEM_PROMPT,
-        model=settings.reasoning_model,
+        model=req.model or settings.reasoning_model,
         temperature=0.1,
         num_ctx=8192,
+        ollama_url=req.ollama_url,
     )
 
     fixed = _clean_sql(raw or "")
@@ -98,5 +99,5 @@ async def intelligence_fix_sql(
     return IntelligenceFixSQLResponse(
         sql=fixed,
         request_id=request_id,
-        model_used=settings.reasoning_model,
+        model_used=req.model or settings.reasoning_model,
     )

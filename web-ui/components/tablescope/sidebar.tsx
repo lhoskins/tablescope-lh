@@ -47,6 +47,7 @@ export function Sidebar({
   project,
   otherProjects = [],
   counts,
+  className,
 }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -105,6 +106,7 @@ export function Sidebar({
       className={cn(
         "flex shrink-0 flex-col border-r border-line-tertiary bg-bg-primary transition-[width] duration-200",
         collapsed ? "w-14" : "w-sidebar",
+        className,
       )}
     >
       {collapsed ? (

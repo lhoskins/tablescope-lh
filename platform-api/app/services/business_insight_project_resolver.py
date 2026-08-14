@@ -9,6 +9,7 @@ a project.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -65,6 +66,27 @@ async def _authorized_project_ids(
     return [(r.id, r.name) for r in rows]
 
 
+def _project_name_match_score(question: str, project_name: str) -> float:
+    """Return a confidence boost when the question explicitly names a project.
+
+    A direct project-name mention (e.g. "IT backup jobs", "Finance trend")
+    should outweigh source/column heuristics that happen to share filler words
+    like "system" or "cost". Names are normalized to alphanumeric tokens.
+    """
+    q = re.sub(r"[^a-z0-9\s]", " ", question.lower())
+    q_tokens = set(re.findall(r"[a-z0-9]+", q))
+    name = re.sub(r"[^a-z0-9\s]", " ", project_name.lower())
+    name_tokens = set(re.findall(r"[a-z0-9]+", name))
+    if not name_tokens:
+        return 0.0
+
+    # Each project-name word that appears in the question contributes equally.
+    matched = name_tokens & q_tokens
+    if not matched:
+        return 0.0
+    return float(len(matched)) / float(len(name_tokens))
+
+
 async def resolve_business_insight_project(
     session: AsyncSession,
     context: RequestContext,
@@ -83,10 +105,21 @@ async def resolve_business_insight_project(
             reason="You do not have access to any projects.",
         )
 
+    # Fast path: if the question explicitly names one or more projects, prefer
+    # those projects over a purely source-driven guess. This prevents questions
+    # like "Show me IT backup jobs by system" from being routed to Manufacturing
+    # just because one of its tables has a "system" column.
+    name_matches: list[tuple[int, str]] = [
+        (pid, pname)
+        for pid, pname in projects
+        if _project_name_match_score(question, pname) > 0.0
+    ]
+    projects_to_score = name_matches if name_matches else projects
+
     # Reuse the per-project source resolver so Business Insight benefits from the
     # same column/scoring model, while keeping the cross-project decision here.
     scored: list[tuple[int, str, ResolverResult]] = []
-    for pid, pname in projects:
+    for pid, pname in projects_to_score:
         result = await resolve_project_source(
             session,
             tenant_id=context.tenant_id,

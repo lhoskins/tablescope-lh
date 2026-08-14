@@ -38,7 +38,7 @@ def _to_passage(point: dict, *, source_type: str, tier: str = "") -> GroundingPa
 async def grounding_search(req: GroundingSearchRequest) -> GroundingSearchResponse:
     """Embed a question and return the most relevant project + reference passages."""
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     query_embedding = await llm_client.generate_embedding(req.question)
 

@@ -17,6 +17,7 @@ import { ToastViewport, useToasts } from "@/components/ui/toast";
 import { formatLastUpdated } from "@/lib/format-datetime";
 import { HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
 import { IntelligenceWorkspace } from "@/components/tablescope/insights/intelligence-workspace";
+import { IntelligenceStrip } from "@/components/tablescope/home/intelligence-strip";
 import { ExecutiveProjectSummary } from "@/components/tablescope/project-insight/executive-project-summary";
 import { TurnBubble } from "@/components/tablescope/conversation/conversation-turn";
 import { SaveInsightToDashboardModal } from "@/components/tablescope/home/save-insight-to-dashboard-modal";
@@ -144,15 +145,24 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
 
   const clearCache = useMutation({
     mutationFn: () => projectInsightApi.clearCache(projectId),
-    onSuccess: () => {
-      queryClient.setQueryData(INSIGHT_KEY(projectId), undefined);
+    onSuccess: (fresh) => {
+      // The server marks the snapshot stale and queues a rebuild, so the
+      // page shows the existing insight with a "reloading" indicator instead
+      // of going blank while the rebuild runs.
+      queryClient.setQueryData(INSIGHT_KEY(projectId), fresh);
+      queryClient.removeQueries({ queryKey: ["percent-change-summary"] });
+      insightsQuery.refetch();
       push("Project Insight cache cleared", "success");
     },
     onError: (err: Error) => push(err.message, "error"),
   });
 
   const handleClearCache = () => {
-    if (!window.confirm("Clear cached Project Insight cards?")) return;
+    if (
+      !window.confirm(
+        "Clear cached Project Insight cards and the Percent Change Summary?",
+      )
+    ) return;
     clearCache.mutate();
   };
 
@@ -401,6 +411,23 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     ],
   );
 
+  const intelligenceToolbar = {
+    projectCount: 1,
+    totalProjectCount: 1,
+    running,
+    lastUpdatedLabel: formatLastUpdated(lastUpdated),
+    onRefresh: handleRefresh,
+    onClearCache: handleClearCache,
+    isClearingCache: clearCache.isPending,
+    granularity,
+    onGranularityChange: handleGranularity,
+    availableProjects: [],
+    selectedProjectIds: new Set([projectId]),
+    onToggleProject: () => {},
+    onSelectAll: () => {},
+    onClear: () => {},
+  };
+
   return (
     <ProjectShell
       projectId={projectId}
@@ -463,6 +490,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
               </div>
             )}
 
+            <IntelligenceStrip {...intelligenceToolbar} scope="project" />
             <ExecutiveProjectSummary summary={insight.executiveSummary} />
 
             <IntelligenceWorkspace
@@ -472,22 +500,8 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
               running={running}
               lastUpdated={lastUpdated}
               snapshotFingerprint={insight.lastUpdatedAt ?? null}
-              toolbar={{
-                projectCount: 1,
-                totalProjectCount: 1,
-                running,
-                lastUpdatedLabel: formatLastUpdated(lastUpdated),
-                onRefresh: handleRefresh,
-                onClearCache: handleClearCache,
-                isClearingCache: clearCache.isPending,
-                granularity,
-                onGranularityChange: handleGranularity,
-                availableProjects: [],
-                selectedProjectIds: new Set([projectId]),
-                onToggleProject: () => {},
-                onSelectAll: () => {},
-                onClear: () => {},
-              }}
+              toolbar={intelligenceToolbar}
+              showToolbar={false}
               actions={{
                 onSaveToDashboard: handleSaveToDashboard,
                 onPin: handlePinInsight,

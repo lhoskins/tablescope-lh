@@ -61,7 +61,8 @@ async def start_sso(
     base_url = str(request.base_url).rstrip("/")
     callback_url = f"{base_url}/{payload.tenant_slug}/sso/callback"
     if payload.return_path and payload.return_path.startswith("/"):
-        callback_url += f"?next={payload.return_path.lstrip("/")}"
+        next_path = payload.return_path.lstrip("/")
+        callback_url += f"?next={next_path}"
 
     service = SsoProviderService()
     try:

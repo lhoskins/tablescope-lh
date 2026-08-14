@@ -114,7 +114,12 @@ async def run_llm_preflight(
 ) -> dict[str, Any]:
     _require_enabled()
     try:
-        report = await preflight_install(session, artifact_id=artifact_id, target_id=request.target_id)
+        report = await preflight_install(
+            session,
+            artifact_id=artifact_id,
+            target_id=request.target_id,
+            runtime_options=request.runtime_options.model_dump() if request.runtime_options else {},
+        )
     except DeploymentError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
@@ -123,7 +128,9 @@ async def run_llm_preflight(
         "target_reachable": report.target_reachable,
         "disk_ok": report.disk_ok,
         "slot_ok": report.slot_ok,
+        "capacity_ok": report.capacity_ok,
         "detail": report.detail,
+        "preflight": report.preflight,
     }
 
 
@@ -143,10 +150,14 @@ async def install_llm_artifact(
         raise HTTPException(status_code=404, detail="Artifact not found")
     if artifact.status != "verified":
         raise HTTPException(status_code=400, detail="Artifact is not verified")
+
+    runtime_options = request.runtime_options.model_dump() if request.runtime_options else {}
     job_id = await enqueue_deploy_llm_artifact(
         artifact_id=artifact_id,
         target_id=request.target_id,
         requested_by_user_id=context.user_id,
+        deployment_mode=request.deployment_mode,
+        runtime_options=runtime_options,
     )
     await record_llm_audit_event(
         session,
@@ -154,12 +165,18 @@ async def install_llm_artifact(
         action="install",
         entity_type="artifact",
         entity_id=artifact_id,
-        details={"target_id": request.target_id, "job_id": job_id},
+        details={
+            "target_id": request.target_id,
+            "deployment_mode": request.deployment_mode,
+            "runtime_options": runtime_options,
+            "job_id": job_id,
+        },
     )
     return {
         "installation_id": 0,
         "deployment_id": 0,
         "status": "queued",
+        "deployment_mode": request.deployment_mode,
         "job_id": job_id,
     }
 

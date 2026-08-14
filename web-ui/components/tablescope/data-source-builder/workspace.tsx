@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { NewProjectDialog } from "@/components/tablescope/project/new-project-dialog";
 import { listMyDataSources } from "@/lib/api/data-source-builder";
+import { BUILDER_QUERY_OPTIONS } from "@/lib/query-options";
 import { useBuilderStore } from "@/lib/stores/data-source-builder-store";
 import { buildExistingSources } from "./existing-sources";
 import { AvailableSources } from "./available-sources";
@@ -172,6 +173,7 @@ export function DataSourceBuilderWorkspace({
   }, [ensureTenant, tenantName]);
 
   const { data: myDataSources } = useQuery({
+    ...BUILDER_QUERY_OPTIONS,
     queryKey: ["builder", "my-datasources"],
     queryFn: listMyDataSources,
   });

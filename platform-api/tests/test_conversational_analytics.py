@@ -124,6 +124,156 @@ async def test_create_conversation_with_initial_message(client, service_headers,
     assert body["turns"][0]["chart_config"]["type"] == "bar"
 
 
+async def test_generation_error_surfaces_matching_insight_card_over_prose(
+    client, db_session, service_headers, monkeypatch
+):
+    """A question the fresh SQL path can't answer, but that an existing
+    Insight Card already answered, must point back to that card — chart and
+    breadcrumb id included — instead of degrading to unattributed KG prose."""
+    from app.models.business_insight_result import BusinessInsightResult
+
+    tenant, _, project, headers = await _setup(client, service_headers, "conv-insight-match")
+
+    db_session.add(
+        BusinessInsightResult(
+            tenant_id=tenant["id"],
+            project_id=project["id"],
+            granularity=3,
+            payload={
+                "insights": [
+                    {
+                        "insightId": "mat-cost-001",
+                        "projectName": "Conv Project",
+                        "title": "Material cost on the rise",
+                        "summary": "Weekly material cost has increased steadily since January 2026.",
+                        "chart": {"type": "line", "data": {"rows": []}},
+                        "severity": "warning",
+                    }
+                ]
+            },
+        )
+    )
+    await db_session.commit()
+
+    async def _fake_generation_error(*args, **kwargs):
+        return {"status": "generation_error", "sql": "", "error": "no source matched"}
+
+    async def _fail_if_called(*args, **kwargs):
+        raise AssertionError("prose fallback must not run when a card matches")
+
+    async def _fake_select(**kwargs):
+        return {"insight_id": "mat-cost-001", "confidence": 0.9, "reason": "on topic"}
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core",
+        _fake_generation_error,
+    )
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._forward_prose_answer",
+        _fail_if_called,
+    )
+    from app.services import insight_card_match as icm
+
+    monkeypatch.setattr(icm.ai_intelligence_client, "is_enabled", lambda: True)
+    monkeypatch.setattr(icm.ai_intelligence_client, "select_matching_insight_card", _fake_select)
+
+    r = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={
+            "project_id": project["id"],
+            "initial_message": "Why is material cost increasing?",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    turn = r.json()["turns"][0]
+    assert turn["status"] == "success"
+    assert turn["matched_insight"]["insightId"] == "mat-cost-001"
+    assert turn["matched_insight"]["title"] == "Material cost on the rise"
+    assert turn["matched_insight"]["chart"] == {"type": "line", "data": {"rows": []}}
+    assert "Material cost on the rise" in turn["assistant_message"]
+    assert turn["sql"] is None
+    assert turn["chart_config"] is None
+
+    # The failure reason is server-side metadata only; the user-facing message
+    # should be clean and focused on the existing Insight Card answer.
+    assert "couldn't build a live query" not in turn["assistant_message"]
+    assert "I found an existing analysis that answers this" in turn["assistant_message"]
+    assert turn["error_code"] == "live_query_fallback_generation_error"
+    assert turn["result_metadata"]["fallbackError"] == "no source matched"
+
+
+async def test_matched_insight_fallback_surfaces_ai_server_unavailable_detail(
+    client, db_session, service_headers, monkeypatch
+):
+    """_ai_generation_error()'s "friendly" message defaults to a generic
+    string in exactly the AI-server-unavailable case -- the real reason only
+    ever lands in errorDetails.validationError. That must reach the visible
+    message, not just a DB column nobody reads, or an outage looks identical
+    to "no relevant source" and is impossible to tell apart from the UI."""
+    from app.models.business_insight_result import BusinessInsightResult
+
+    tenant, _, project, headers = await _setup(client, service_headers, "conv-ai-down")
+
+    db_session.add(
+        BusinessInsightResult(
+            tenant_id=tenant["id"],
+            project_id=project["id"],
+            granularity=3,
+            payload={
+                "insights": [
+                    {
+                        "insightId": "backup-001",
+                        "projectName": "Conv Project",
+                        "title": "Backup Jobs by System",
+                        "summary": "Backup job counts grouped by system.",
+                        "chart": {"type": "bar", "data": {"rows": []}},
+                        "severity": "info",
+                    }
+                ]
+            },
+        )
+    )
+    await db_session.commit()
+
+    async def _fake_ai_server_down(*args, **kwargs):
+        return {
+            "status": "generation_error",
+            "sql": "",
+            "error": "We could not safely build a query for this question.",
+            "errorDetails": {"validationError": "AI server is unavailable"},
+        }
+
+    async def _fake_select(**kwargs):
+        return {"insight_id": "backup-001", "confidence": 0.9, "reason": "on topic"}
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core",
+        _fake_ai_server_down,
+    )
+    from app.services import insight_card_match as icm
+
+    monkeypatch.setattr(icm.ai_intelligence_client, "is_enabled", lambda: True)
+    monkeypatch.setattr(icm.ai_intelligence_client, "select_matching_insight_card", _fake_select)
+
+    r = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={
+            "project_id": project["id"],
+            "initial_message": "Show me IT backup jobs by system",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    turn = r.json()["turns"][0]
+    assert turn["status"] == "success"
+    assert turn["matched_insight"]["insightId"] == "backup-001"
+    # The AI-server outage detail is surfaced in result_metadata for
+    # troubleshooting, not in the user-facing assistant message.
+    assert "AI server is unavailable" not in turn["assistant_message"]
+    assert turn["result_metadata"]["fallbackErrorDetails"]["validationError"] == "AI server is unavailable"
+
+
 async def test_list_and_get_conversations(client, service_headers, monkeypatch):
     _, _, project, headers = await _setup(client, service_headers, "conv-list")
 

@@ -144,14 +144,16 @@ export function PercentChangeSummaryPanel({
 
     return (
       <div className="space-y-3">
-        <div className="flex items-center">
-          <PillToggle
-            id="pcs-show-statistics"
-            label="Period statistics"
-            checked={showStatistics}
-            onChange={handleShowStatisticsChange}
-          />
-        </div>
+        {data && (
+          <div className="flex items-center">
+            <PillToggle
+              id="pcs-show-statistics"
+              label="Period statistics"
+              checked={showStatistics}
+              onChange={handleShowStatisticsChange}
+            />
+          </div>
+        )}
         <PercentChangeSummaryTable
           periods={data.periods}
           rows={data.rows}
@@ -191,22 +193,7 @@ export function PercentChangeSummaryPanel({
       count={count}
     >
       <div className="space-y-3">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <TimeSeriesIntervalRangeControls
-            interval={interval}
-            range={range}
-            supportCounts={supportCounts}
-            comparisonLabel={data?.comparison_label}
-            loading={isFetching}
-            onIntervalChange={(iv) => {
-              setInterval(iv);
-              setCursor(null);
-            }}
-            onRangeChange={(r) => {
-              setRange(r);
-              setCursor(null);
-            }}
-          />
+        {data && data.page.total_eligible > 0 && (
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
               <label htmlFor="pcs-search" className="sr-only">
@@ -231,6 +218,24 @@ export function PercentChangeSummaryPanel({
               </select>
             </div>
           </div>
+        )}
+
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+          <TimeSeriesIntervalRangeControls
+            interval={interval}
+            range={range}
+            supportCounts={supportCounts}
+            comparisonLabel={data?.comparison_label}
+            loading={isFetching}
+            onIntervalChange={(iv) => {
+              setInterval(iv);
+              setCursor(null);
+            }}
+            onRangeChange={(r) => {
+              setRange(r);
+              setCursor(null);
+            }}
+          />
         </div>
 
         {data && (

@@ -52,6 +52,26 @@ bash deploy_feat.sh
 
 `deploy_feat.sh` builds `platform-api` and `web-ui`, recreates `platform-api`, `platform-api-worker`, and `web-ui`, and runs `alembic upgrade head`.
 
+### GPU AI-server image deploy
+
+The GPU AI server (`i-0d938409d1b57ff12`, `32.186.54.52`) has no outbound internet, so build the `ai-server` images on the app EC2 and transfer them to the GPU host:
+
+```bash
+# On app EC2 (13.57.117.13)
+cd /home/ubuntu/tablescope/ai-server
+docker compose build tablescope-ai-api ai-worker
+docker save ai-server-tablescope-ai-api:latest ai-server-ai-worker:latest | gzip > /tmp/ai-images.tar.gz
+
+# Transfer to the GPU host and load/recreate
+scp /tmp/ai-images.tar.gz ubuntu@32.186.54.52:/home/ubuntu/ai-images.tar.gz
+ssh ubuntu@32.186.54.52 '
+  cd /home/ubuntu/tablescope/ai-server
+  docker load -i /home/ubuntu/ai-images.tar.gz
+  docker compose up -d --no-deps tablescope-ai-api ai-worker
+  curl -s http://localhost:8000/health
+'
+```
+
 ## Authenticating for UI tests
 
 The live environment enforces Twilio SMS MFA for admin-tier roles. The simplest test harness is to mint a short-lived JWT inside the `platform-api` container using the runtime `JWT_SECRET_KEY`:
@@ -122,6 +142,26 @@ INSERT INTO llm_runtime_targets (name, runtime_type, host, version, status, is_r
 VALUES ('Test Target', 'ollama', 'http://ollama:11434', '0.0.1', 'active', true, 1, 5, '{}');
 SQL
 ```
+
+## Testing Ask Anything / conversational analytics
+
+- Use deep-link URLs to exercise exact prompts reliably, because typing long questions into the AI Assistant composer can be truncated or submitted early:
+  ```
+  https://app.tablescope.cloud/ai?projectId=<PROJECT_ID>&q=<URL_ENCODED_QUESTION>
+  https://app.tablescope.cloud/business-insight?q=<URL_ENCODED_QUESTION>
+  ```
+- The Business Insight Ask Anything flow is synchronous; the "TableScope is thinking…" state can last 60–180 seconds. Wait for a response before interacting again.
+- If a turn stays in "Working on it…" or "TableScope is thinking…" indefinitely, check the `platform-api` logs and `analytics_conversation_turns`:
+  ```bash
+  docker compose logs --tail=50 platform-api
+  docker compose exec -T db psql -U tablescope -d tablescope -c "SELECT id, conversation_id, status, error_code, LEFT(assistant_message, 120) FROM analytics_conversation_turns ORDER BY id DESC LIMIT 10;"
+  ```
+- `Object of type datetime is not JSON serializable` in `platform-api` means a query returned `datetime`/`date` columns and `result_cache` could not be persisted; this should now be handled by JSON-safe row serialization, but if it recurs, rephrase the question to avoid raw date columns (e.g., ask for counts or sums grouped by string columns).
+- Reference Library grounding reaches the model through `reference_documents` in the prompt; verify the response names a Reference Library document title. If the answer instead cites insight cards, the reference-doc context may not be rendered.
+- Fallback turns expose `error_code` and failure details in `result_metadata`/`result_cache` rather than the user message. If user-facing prose cites an unrelated insight card, the insight-card scorer may be over-matching on generic terms like "cost" or "rate".
+- To verify that `datetime`/`date` columns serialize correctly after the `result_profiling.py` fix, ask a question that is known to return date/time values, e.g. `Show me the latest backup start time for each IT system` (project 44). Check `result_metadata.datetimeColumns` is populated and the turn status is `success` with no `Object of type datetime is not JSON serializable` traceback.
+- If the Reference Library question returns a fallback with `error_code = live_query_fallback_generation_error` and `fallbackErrorDetails` mentioning an AI server 422, the user-facing prose may still cite Reference Library documents when the fallback prompt includes them; verify by checking that the assistant message names a document title and does not rely solely on unrelated insight cards.
+- Phase D document Q&A: verify `turn.intent_type = 'document_qa'`, `error_code IS NULL`, `sql IS NULL`, and `result_metadata->'documentQa'->>'referenceDocumentCount'` is >0. If `referenceDocumentCount` is 0 but the answer mentions documents, the Postgres `plainto_tsquery` in `_reference_documents_for_question` may be over-constrained by filler words ("List", "What does", "Tell me more about"). A title-only or keyword-only phrasing should return a positive count and a correctly grounded answer.
 
 ## Cleanup checklist
 

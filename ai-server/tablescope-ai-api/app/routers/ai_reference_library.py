@@ -31,7 +31,7 @@ async def summarize_reference_document(req: ReferenceSummarizeRequest) -> Refere
     should know when citing it.
     """
     update_activity(req.user_id, req.tenant_id, req.project_id)
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
     request_id = uuid.uuid4().hex[:12]
     logger.info(
         "[%s] reference-library/summarize doc=%s title=%s", request_id, req.document_id, req.title
@@ -40,7 +40,7 @@ async def summarize_reference_document(req: ReferenceSummarizeRequest) -> Refere
     text_preview = (req.extracted_text or "").strip()[:8000]
     if not text_preview:
         return ReferenceSummarizeResponse(
-            summary="", request_id=request_id, model_used=settings.reasoning_model
+            summary="", request_id=request_id, model_used=req.model or settings.reasoning_model
         )
 
     prompt = f"""You are summarizing a reference document (standard, regulation, framework, or policy) for use as AI grounding context.
@@ -62,9 +62,10 @@ Return ONLY the summary text — no preamble, no headings, no JSON."""
     try:
         raw = await llm_client.generate(
             prompt=prompt,
-            model=settings.reasoning_model,
+            model=req.model or settings.reasoning_model,
             temperature=0.2,
             max_tokens=400,
+            ollama_url=req.ollama_url,
         )
     except Exception as exc:
         logger.exception("[%s] reference summarize failed: %s", request_id, exc)
@@ -76,7 +77,7 @@ Return ONLY the summary text — no preamble, no headings, no JSON."""
     return ReferenceSummarizeResponse(
         summary=(raw or "").strip(),
         request_id=request_id,
-        model_used=settings.reasoning_model,
+        model_used=req.model or settings.reasoning_model,
     )
 
 
@@ -88,7 +89,7 @@ async def suggest_references(req: ReferenceSuggestRequest) -> ReferenceSuggestRe
     not suggest broadly to maximize coverage.
     """
     update_activity(req.user_id, req.tenant_id, req.project_id)
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
     request_id = uuid.uuid4().hex[:12]
 
     candidate_str = ", ".join(req.candidate_domains[:40]) or "(none)"
@@ -122,9 +123,10 @@ Rules:
     try:
         raw = await llm_client.generate(
             prompt=prompt,
-            model=settings.reasoning_model,
+            model=req.model or settings.reasoning_model,
             temperature=0.2,
             max_tokens=800,
+            ollama_url=req.ollama_url,
         )
         parsed = _parse_json_response(raw) or {}
     except Exception as exc:
@@ -148,5 +150,5 @@ Rules:
     return ReferenceSuggestResponse(
         suggestions=suggestions,
         request_id=request_id,
-        model_used=settings.reasoning_model,
+        model_used=req.model or settings.reasoning_model,
     )

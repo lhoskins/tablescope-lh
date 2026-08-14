@@ -84,7 +84,7 @@ async def knowledge_graph_insights(
     the data sources related to that node.
     """
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     try:
         ctx = await context_builder.build_context(
@@ -181,10 +181,11 @@ async def knowledge_graph_insights(
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt=_KG_SYSTEM_PROMPT,
-        model=settings.reasoning_model,
+        model=req.model or settings.reasoning_model,
         temperature=0.2,
         num_ctx=24576,
         response_format="json",
+        ollama_url=req.ollama_url,
     )
 
     parsed = _parse_json_response(raw)
@@ -268,5 +269,5 @@ async def knowledge_graph_insights(
     return KnowledgeGraphInsightResponse(
         cards=cards,
         request_id=request_id,
-        model_used=settings.reasoning_model,
+        model_used=req.model or settings.reasoning_model,
     )

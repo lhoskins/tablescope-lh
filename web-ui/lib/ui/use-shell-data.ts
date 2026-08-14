@@ -19,6 +19,7 @@ interface CurrentUserResponse {
   tenant_slug: string | null;
   avatar_url: string | null;
   company_logo_url: string | null;
+  voice_input_enabled: boolean;
   permissions: string[] | null;
 }
 
@@ -85,6 +86,7 @@ export function useCurrentUser() {
           slug: me.tenant_slug ?? "",
           initials: initials(me.tenant_name),
           logoUrl: absoluteUrl(me.company_logo_url),
+          voiceInputEnabled: me.voice_input_enabled,
         },
       };
     },

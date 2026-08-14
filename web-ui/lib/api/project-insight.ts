@@ -223,7 +223,7 @@ export const projectInsightApi = {
       {},
     ),
   clearCache: (projectId: string) =>
-    apiClient.post<{ deleted: { project_intelligence_snapshots: number; business_insight_results: number } }>(
+    apiClient.post<ProjectInsight>(
       `/api/projects/${projectId}/insight/clear-cache`,
       {},
     ),

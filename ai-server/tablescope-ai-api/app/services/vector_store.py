@@ -21,6 +21,7 @@ from qdrant_client.models import (
 )
 
 from app.core.config import settings
+from app.services import llm_client
 
 
 class VectorStoreError(Exception):

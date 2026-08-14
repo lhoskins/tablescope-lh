@@ -237,10 +237,13 @@ async def deploy_llm_artifact(
     artifact_id: int,
     target_id: int,
     requested_by_user_id: int,
+    deployment_mode: str = "install_only",
+    runtime_options: dict | None = None,
 ) -> dict[str, Any]:
     """Install a verified artifact on a runtime target and create a deployment.
 
-    The deployment is left inactive; activation and canary are Phase 4.
+    The deployment is left inactive unless ``deployment_mode`` requests activation;
+    activation and canary are Phase 4.
     """
     settings = get_settings()
     if not settings.llm_framework_enabled or not settings.llm_deployment_enabled:
@@ -259,16 +262,22 @@ async def deploy_llm_artifact(
                 artifact_id=artifact_id,
                 target_id=target_id,
                 requested_by_user_id=requested_by_user_id,
+                deployment_mode=deployment_mode,
+                runtime_options=runtime_options,
             )
             deployment = await create_deployment(
                 session,
                 installation_id=installation.id,
+                target_id=target_id,
                 requested_by_user_id=requested_by_user_id,
+                deployment_mode=deployment_mode,
+                runtime_options=runtime_options,
             )
             await session.commit()
             return {
                 "installation_id": installation.id,
                 "deployment_id": deployment.id,
+                "deployment_mode": deployment_mode,
                 "status": installation.status,
             }
     except DeploymentError as exc:

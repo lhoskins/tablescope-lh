@@ -37,6 +37,7 @@ async def reconcile_database_sources(session, *, only_id: int | None = None) -> 
         "skipped": 0,
         "errors": [],
     }
+    vdb_by_id: dict[str, object] = {}
     if not sources:
         return results
 
@@ -56,6 +57,7 @@ async def reconcile_database_sources(session, *, only_id: int | None = None) -> 
             if user_vdb is None:
                 results["skipped"] += 1
                 continue
+            vdb_by_id[user_vdb.vdb_id] = user_vdb
 
             cols = list(
                 (

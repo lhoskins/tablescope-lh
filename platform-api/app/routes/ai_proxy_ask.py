@@ -15,6 +15,9 @@ from app.auth.rbac import Role, require_role
 from app.database import get_db
 from app.models.project import Project, ProjectMember
 from app.models.saved_query import SavedQuery
+from app.services import ai_intelligence_client
+from app.services.ai_grounding import gather_grounding_evidence
+from app.services.ai_intelligence_client import AIUnavailableError
 from app.services.business_insight_project_resolver import resolve_business_insight_project
 from app.services.presentation_engine import PresentationMode
 from app.services.presentation_engine import describe as describe_presentation
@@ -195,7 +198,7 @@ async def _ask_data_first(
         "audit_id": None,
         "presentation": run.get("presentation"),
         "envelope": run.get("envelope"),
-        "answerType": run.get("answerType"),
+        "answerType": run.get("answerType") or "data",
         "retrievedFromInsight": run.get("retrievedFromInsight"),
         "sql": run.get("sql") if is_retrieval else None,
         "columns": run.get("columns"),
@@ -224,17 +227,53 @@ async def ask(
         _attach_ask_envelope(response)
         return response
 
+    # Gather proactive grounding once for the prose path. The data path below
+    # reuses the executed result plus these references for synthesis.
+    grounding = await gather_grounding_evidence(
+        session,
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        project_id=req.project_id,
+        question=req.question,
+    )
+    grounding_dict = grounding.model_dump() if grounding else None
+
     # Data-first backbone (same as the conversations chat): a question the
     # resolver can ground on a source is answered with a real executed result —
     # chart + table + hidden SQL — rather than a prose answer that merely prints
     # the SQL. Anything the resolver can't ground falls through to prose below.
-    data_response = await _ask_data_first(
-        session, context, project_id=req.project_id, question=req.question
+    # Document/reference-library questions bypass SQL generation entirely.
+    from app.services.conversational_analytics.intent_classification import (
+        _is_document_question,
     )
+
+    data_response = None
+    if not _is_document_question(req.question):
+        data_response = await _ask_data_first(
+            session, context, project_id=req.project_id, question=req.question
+        )
     if data_response is not None:
+        # Synthesize a natural-language answer from the executed result, falling
+        # back to the deterministic short answer if the AI server is unavailable.
+        try:
+            synthesized = await ai_intelligence_client.ask(
+                tenant_id=context.tenant_id,
+                user_id=context.user_id,
+                project_id=req.project_id,
+                question=req.question,
+                scope=req.scope,
+                history=req.history,
+                grounding_evidence=grounding_dict,
+                data_result=data_response,
+            )
+            if synthesized and synthesized.get("answer"):
+                data_response["answer"] = str(synthesized["answer"]).strip()
+                data_response["model_used"] = synthesized.get("model_used", data_response.get("model_used", "tablescope-synthesized"))
+        except AIUnavailableError:
+            logger.info("AI synthesis unavailable for ask data result; using deterministic answer")
         return data_response
 
-    answer = await _forward_prose_answer(
+    prose = await _forward_prose_answer(
         session,
         context,
         project_id=req.project_id,
@@ -243,14 +282,15 @@ async def ask(
         scope=req.scope,
         include_query_history=req.include_query_history,
         include_dashboard_context=req.include_dashboard_context,
+        grounding_evidence=grounding_dict,
     )
-    if not answer:
-        answer = "The AI service is temporarily unavailable. Please try again shortly."
+    answer = prose.get("answer") or "The AI service is temporarily unavailable. Please try again shortly."
     response = {
         "answer": answer,
-        "model_used": "tablescope-prose",
+        "model_used": prose.get("model_used") or "tablescope-prose",
         "request_id": "",
         "context_summary": {},
+        "answerType": prose.get("answerType") or "text",
     }
     _attach_ask_envelope(response)
     return response

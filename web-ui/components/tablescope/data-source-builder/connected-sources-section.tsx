@@ -5,6 +5,7 @@ import { IconLoader2, IconPlus, IconServer } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { listConnectedSources, type ConnectedSource } from "@/lib/api/data-source-catalog";
+import { BUILDER_QUERY_OPTIONS } from "@/lib/query-options";
 import { connectorDisplayName } from "@/lib/api/connectors";
 import { useBuilderStore, type SessionSource } from "@/lib/stores/data-source-builder-store";
 import { BrandLogo, connectorChip } from "../database-connectors/brand-logo";
@@ -124,6 +125,7 @@ function ConnectedSourceCard({
 
 export function ConnectedSourcesSection() {
   const { data, isLoading } = useQuery({
+    ...BUILDER_QUERY_OPTIONS,
     queryKey: ["connected-sources"],
     queryFn: listConnectedSources,
   });

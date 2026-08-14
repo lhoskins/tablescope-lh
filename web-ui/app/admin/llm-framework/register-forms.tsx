@@ -4,27 +4,8 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
-  activateLLMDeployment,
-  approveLLMDeployment,
-  getLLMAuditEvents,
-  getLLMCapabilities,
-  getLLMDeployments,
-  getLLMFrameworkStatus,
-  getLLMInventory,
-  getLLMEmbeddingMigrations,
-  getLLMModelConversions,
-  installLLMArtifact,
-  preflightLLMInstall,
   registerLLMRuntimeTarget,
-  rollbackLLMDeployment,
-  searchLLMCatalog,
-  stageLLMArtifact,
-  reindexLLMArtifact,
-  convertLLMCatalogEntry,
   upsertLLMRoutingProfile,
-  type AuditEvent,
-  type CatalogSearchResult,
-  type Deployment,
   type LLMInventory,
   type RuntimeTarget,
 } from "@/lib/api/llm-framework";import { formatCapability } from "./utils";
@@ -38,6 +19,12 @@ export function RegisterTargetForm({ onSuccess }: { onSuccess: () => void }) {
   const [version, setVersion] = useState("");
   const [maxModels, setMaxModels] = useState("");
   const [keepAlive, setKeepAlive] = useState("");
+  const [environment, setEnvironment] = useState("");
+  const [gpuMemoryGb, setGpuMemoryGb] = useState("");
+  const [systemRamGb, setSystemRamGb] = useState("");
+  const [diskGb, setDiskGb] = useState("");
+  const [maxConcurrency, setMaxConcurrency] = useState("");
+  const [contextTokens, setContextTokens] = useState("");
 
   const mutation = useMutation({
     mutationFn: registerLLMRuntimeTarget,
@@ -47,13 +34,19 @@ export function RegisterTargetForm({ onSuccess }: { onSuccess: () => void }) {
       setVersion("");
       setMaxModels("");
       setKeepAlive("");
+      setEnvironment("");
+      setGpuMemoryGb("");
+      setSystemRamGb("");
+      setDiskGb("");
+      setMaxConcurrency("");
+      setContextTokens("");
       onSuccess();
     },
   });
 
   return (
     <form
-      className="grid gap-3 sm:grid-cols-6"
+      className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6"
       onSubmit={(e) => {
         e.preventDefault();
         mutation.mutate({
@@ -63,6 +56,12 @@ export function RegisterTargetForm({ onSuccess }: { onSuccess: () => void }) {
           version: version || null,
           max_loaded_models: maxModels ? Number(maxModels) : null,
           keep_alive_minutes: keepAlive ? Number(keepAlive) : null,
+          environment: environment || null,
+          gpu_memory_gb: gpuMemoryGb ? Number(gpuMemoryGb) : null,
+          system_ram_gb: systemRamGb ? Number(systemRamGb) : null,
+          disk_gb: diskGb ? Number(diskGb) : null,
+          max_concurrency: maxConcurrency ? Number(maxConcurrency) : null,
+          context_tokens: contextTokens ? Number(contextTokens) : null,
         });
       }}
     >
@@ -91,6 +90,13 @@ export function RegisterTargetForm({ onSuccess }: { onSuccess: () => void }) {
       />
       <input
         type="text"
+        placeholder="Environment"
+        value={environment}
+        onChange={(e) => setEnvironment(e.target.value)}
+        className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-sm text-ink-primary"
+      />
+      <input
+        type="text"
         placeholder="Version"
         value={version}
         onChange={(e) => setVersion(e.target.value)}
@@ -105,12 +111,47 @@ export function RegisterTargetForm({ onSuccess }: { onSuccess: () => void }) {
       />
       <input
         type="number"
+        placeholder="GPU memory (GB)"
+        value={gpuMemoryGb}
+        onChange={(e) => setGpuMemoryGb(e.target.value)}
+        className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-sm text-ink-primary"
+      />
+      <input
+        type="number"
+        placeholder="System RAM (GB)"
+        value={systemRamGb}
+        onChange={(e) => setSystemRamGb(e.target.value)}
+        className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-sm text-ink-primary"
+      />
+      <input
+        type="number"
+        placeholder="Disk (GB)"
+        value={diskGb}
+        onChange={(e) => setDiskGb(e.target.value)}
+        className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-sm text-ink-primary"
+      />
+      <input
+        type="number"
+        placeholder="Max concurrency"
+        value={maxConcurrency}
+        onChange={(e) => setMaxConcurrency(e.target.value)}
+        className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-sm text-ink-primary"
+      />
+      <input
+        type="number"
+        placeholder="Context tokens"
+        value={contextTokens}
+        onChange={(e) => setContextTokens(e.target.value)}
+        className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-sm text-ink-primary"
+      />
+      <input
+        type="number"
         placeholder="Keep alive (min)"
         value={keepAlive}
         onChange={(e) => setKeepAlive(e.target.value)}
         className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-sm text-ink-primary"
       />
-      <div className="sm:col-span-6 flex items-center gap-2">
+      <div className="sm:col-span-3 lg:col-span-6 flex items-center gap-2">
         <button
           type="submit"
           disabled={!name || !host || mutation.isPending}
@@ -141,6 +182,7 @@ export function RoutingProfileForm({
   const [installationId, setInstallationId] = useState("");
   const [priority, setPriority] = useState("1");
   const [isActive, setIsActive] = useState(true);
+  const [expectedVersion, setExpectedVersion] = useState("");
 
   const mutation = useMutation({
     mutationFn: upsertLLMRoutingProfile,
@@ -148,6 +190,7 @@ export function RoutingProfileForm({
       setTargetId("");
       setInstallationId("");
       setPriority("1");
+      setExpectedVersion("");
       onSuccess();
     },
   });
@@ -164,6 +207,7 @@ export function RoutingProfileForm({
           installation_id: Number(installationId),
           priority: Number(priority),
           is_active: isActive,
+          expected_version: expectedVersion ? Number(expectedVersion) : null,
         });
       }}
     >
@@ -202,7 +246,7 @@ export function RoutingProfileForm({
         <option value="">Installation</option>
         {installations.map((i) => (
           <option key={i.id} value={i.id}>
-            {i.artifact_id} on {i.target_id}
+            {i.artifact_id} on {i.target_id} ({i.deployment_mode || "unknown"})
           </option>
         ))}
       </select>
@@ -211,6 +255,13 @@ export function RoutingProfileForm({
         placeholder="Priority"
         value={priority}
         onChange={(e) => setPriority(e.target.value)}
+        className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-sm text-ink-primary"
+      />
+      <input
+        type="number"
+        placeholder="Expected version (opt.)"
+        value={expectedVersion}
+        onChange={(e) => setExpectedVersion(e.target.value)}
         className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-sm text-ink-primary"
       />
       <label className="flex items-center gap-2 text-sm text-ink-primary">

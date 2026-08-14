@@ -20,6 +20,7 @@ import {
   listProjectDataSources,
   type ProjectDataSourceRow,
 } from "@/lib/api/data-source-builder";
+import { BUILDER_QUERY_OPTIONS } from "@/lib/query-options";
 import { connectorIcon } from "./util";
 import { flattenCreated } from "./flatten";
 
@@ -73,6 +74,7 @@ export function ProjectCard({ project }: { project: ProjectAssignment }) {
   const selectedCount = selectedItems.length;
 
   const { data: existingRows } = useQuery({
+    ...BUILDER_QUERY_OPTIONS,
     queryKey: ["builder", "project-datasources", project.projectId],
     queryFn: () => listProjectDataSources(project.projectId),
     enabled: expanded,

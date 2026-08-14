@@ -41,9 +41,16 @@ class PoolKey:
 class TeiidConnectionPoolManager:
     """Maintains per-VDB asyncpg pools with bounded size."""
 
-    def __init__(self, *, min_size: int = 1, max_size: int = 10) -> None:
+    def __init__(
+        self,
+        *,
+        min_size: int = 1,
+        max_size: int = 10,
+        max_inactive_connection_lifetime: float = 120.0,
+    ) -> None:
         self._min_size = min_size
         self._max_size = max_size
+        self._max_inactive_connection_lifetime = max_inactive_connection_lifetime
         self._pools: dict[PoolKey, asyncpg.Pool] = {}
         self._lock = asyncio.Lock()
 
@@ -65,6 +72,11 @@ class TeiidConnectionPoolManager:
             if pool is not None:
                 return pool
             logger.info("Creating new Teiid asyncpg pool for %s@%s:%s/%s", username, host, port, database)
+            # Teiid's PG wire does not support SSL; disable it to avoid a
+            # negotiation hang and cap the initial connection handshake.
+            # min_size=0 makes pool creation instant; connections are created
+            # lazily by the first pool.fetch, which happens during background
+            # warming so real user queries reuse an already-hot pool.
             pool = await asyncpg.create_pool(
                 host=host,
                 port=port,
@@ -73,6 +85,9 @@ class TeiidConnectionPoolManager:
                 password=password,
                 min_size=self._min_size,
                 max_size=self._max_size,
+                max_inactive_connection_lifetime=self._max_inactive_connection_lifetime,
+                ssl=False,
+                timeout=60,
                 command_timeout=60,
                 statement_cache_size=0,
                 server_settings={"application_name": "tablescope-platform-api"},
@@ -92,6 +107,16 @@ class TeiidConnectionPoolManager:
                 logger.info("Evicting stale Teiid pool %s", key)
                 await pool.close()
 
+    async def evict_by_vdb_id(self, vdb_id: str) -> None:
+        """Close all cached pools for a VDB (e.g. after a VDB redeploy)."""
+        database = f"{vdb_id}.1"
+        async with self._lock:
+            for key in list(self._pools.keys()):
+                if key.database == database:
+                    pool = self._pools.pop(key)
+                    logger.info("Evicting stale Teiid pool %s", key)
+                    await pool.close()
+
     async def close_all(self) -> None:
         async with self._lock:
             for key, pool in list(self._pools.items()):
@@ -102,6 +127,7 @@ class TeiidConnectionPoolManager:
 
 _settings = get_settings()
 pool_manager = TeiidConnectionPoolManager(
-    min_size=max(1, _settings.database_pool_min_size // 4),
-    max_size=_settings.database_pool_max_size,
+    min_size=0,
+    max_size=min(_settings.database_pool_max_size, 5),
+    max_inactive_connection_lifetime=120.0,
 )

@@ -7,6 +7,7 @@ own endpoints and several sibling route modules depend on these directly.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any
@@ -135,8 +136,21 @@ async def _run_sql(
         except Exception as exc:
             last_exc = exc
             err_msg = str(exc)
-            if "TEIID4004" in err_msg and attempt == 0:
-                logger.warning("Stale Teiid session, evicting pool and retrying")
+            is_connection_timeout = isinstance(
+                exc, TimeoutError | asyncio.TimeoutError | ConnectionError | OSError
+            )
+            should_retry = (
+                attempt == 0
+                and (
+                    "TEIID4004" in err_msg
+                    or is_connection_timeout
+                    or "timeout" in err_msg.lower()
+                )
+            )
+            if should_retry:
+                logger.warning(
+                    "Teiid query failed, evicting pool and retrying: %s", exc
+                )
                 await pool_manager.evict_pool(
                     host=teiid_host,
                     port=teiid_port,

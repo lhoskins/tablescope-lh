@@ -21,6 +21,8 @@ from dataclasses import dataclass
 import httpx
 
 from app.config import get_settings
+from app.services.connection_pool import pool_manager
+from app.services.vdb_warming import warm_vdb
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +134,24 @@ class VDBManagementService:
 
         logger.info("User VDB created and deployed: vdb_id=%s", vdb_id)
 
+        # Any existing cached pool for this VDB is stale after a (re)deploy.
+        await pool_manager.evict_by_vdb_id(vdb_id)
+
+        # Warm the asyncpg connection for this VDB so the first user query does
+        # not pay pg_catalog materialization costs. Skip per-view warming to avoid
+        # fetching every remote file on create/redeploy.
+        await warm_vdb(
+            vdb_id,
+            vdb_host=self._pg_host,
+            vdb_port=self._pg_port,
+            connect_timeout=60.0,
+            timeout=15.0,
+            warm_views=False,
+            max_concurrent_views=1,
+            max_attempts=1,
+            retry_delay=2.0,
+        )
+
         # Sync VDB file to S3 if enabled
         self._sync_vdb_to_s3(org_id, vdb_id, vdb_type="user", user_id=user_id)
 
@@ -175,6 +195,20 @@ class VDBManagementService:
             )
 
         logger.info("Shared VDB created and deployed: vdb_id=%s", vdb_id)
+
+        await pool_manager.evict_by_vdb_id(vdb_id)
+
+        await warm_vdb(
+            vdb_id,
+            vdb_host=self._pg_host,
+            vdb_port=self._pg_port,
+            connect_timeout=60.0,
+            timeout=15.0,
+            warm_views=False,
+            max_concurrent_views=1,
+            max_attempts=1,
+            retry_delay=2.0,
+        )
 
         # Sync VDB file to S3 if enabled
         self._sync_vdb_to_s3(org_id, vdb_id, vdb_type="shared")
@@ -232,6 +266,20 @@ class VDBManagementService:
                 f"Teiid redeploy failed for {vdb_id}: {response.status_code} {response.text}"
             )
         logger.info("VDB redeployed: vdb_id=%s", vdb_id)
+
+        await pool_manager.evict_by_vdb_id(vdb_id)
+
+        await warm_vdb(
+            vdb_id,
+            vdb_host=self._pg_host,
+            vdb_port=self._pg_port,
+            connect_timeout=60.0,
+            timeout=15.0,
+            warm_views=False,
+            max_concurrent_views=1,
+            max_attempts=1,
+            retry_delay=2.0,
+        )
 
     async def delete_vdb(
         self,

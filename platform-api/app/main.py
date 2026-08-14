@@ -23,6 +23,7 @@ from app.routes import ai_asset_metadata as ai_asset_metadata_routes
 from app.routes import ai_governance as ai_governance_routes
 from app.routes import ai_proxy as ai_proxy_routes
 from app.routes import ai_reference_catalog as ai_reference_catalog_routes
+from app.routes import ai_speech as ai_speech_routes
 from app.routes import analytical_methods as analytical_methods_routes
 from app.routes import auth as auth_routes
 from app.routes import auth_sso as auth_sso_routes
@@ -120,6 +121,18 @@ from app.services.project_context import ProjectContextConcurrencyError
 logger = logging.getLogger(__name__)
 
 
+def _reconcile_errors_are_permanent(result: dict) -> bool:
+    """Return True if every reconcile failure is a non-retryable VDB state."""
+    errors = result.get("errors", [])
+    if not errors:
+        return False
+    permanent_markers = ("VDB file not found", "Invalid null Session")
+    return all(
+        any(marker in e.get("error", "") for marker in permanent_markers)
+        for e in errors
+    )
+
+
 async def _reconcile_db_sources_on_startup() -> None:
     """Re-register DB-table sources in Teiid after a (re)start.
 
@@ -138,6 +151,14 @@ async def _reconcile_db_sources_on_startup() -> None:
                 result = await reconcile_database_sources(session)
             logger.info("Startup DB-source reconcile: %s", result)
             if result.get("failed", 0) == 0:
+                return
+            # A missing VDB file is not fixed by retrying; don't keep redeploying
+            # the healthy VDBs just to fail on the same broken source.
+            if _reconcile_errors_are_permanent(result):
+                logger.warning(
+                    "Startup DB-source reconcile has permanent failures; stopping retries: %s",
+                    result,
+                )
                 return
         except Exception as exc:  # pragma: no cover - best effort
             logger.warning(
@@ -190,6 +211,56 @@ async def _seed_reference_catalogs() -> None:
 
 
 MAX_KG_PIPELINE_VERSION_CHECK_PROJECTS = 50
+
+
+async def _warm_all_vdbs_on_startup() -> None:
+    """Pre-warm asyncpg pools for every active VDB.
+
+    This moves the first-connection cost (PG-wire handshake + pg_catalog
+    materialization) out of the first user query and into startup.
+    """
+    from sqlalchemy import or_, select
+
+    from app.database import SessionLocal
+    from app.models.shared_vdb import SharedVDB
+    from app.models.user_vdb import UserVDB
+
+    try:
+        async with SessionLocal() as session:
+            result = await session.execute(
+                select(UserVDB).where(
+                    UserVDB.is_active.is_(True),
+                    or_(
+                        UserVDB.health_status.in_(["deployed", "active", "healthy"]),
+                        UserVDB.health_status.is_(None),
+                    ),
+                )
+            )
+            user_vdbs = list(result.scalars().all())
+
+            result = await session.execute(
+                select(SharedVDB).where(SharedVDB.is_active.is_(True))
+            )
+            shared_vdbs = list(result.scalars().all())
+
+        vdbs = [
+            {
+                "vdb_id": v.vdb_id,
+                "host": v.vdb_host,
+                "port": v.vdb_port,
+                "username": v.vdb_username,
+                "password": v.get_decrypted_password(),
+            }
+            for v in user_vdbs + shared_vdbs
+        ]
+        logger.info("Pre-warming %d active VDB pools", len(vdbs))
+
+        # Pre-warming every VDB's pg_catalog was serializing connections to the
+        # single Teiid PG port and making user queries time out. Pools are now
+        # warmed lazily on first use by pool_manager; skip the startup storm.
+        logger.info("Skipping VDB pool pre-warm; %d pools will warm lazily", len(vdbs))
+    except Exception as exc:
+        logger.warning("VDB pool pre-warm failed: %s", exc)
 
 
 async def _check_kg_snapshot_pipeline_version_on_startup() -> None:
@@ -311,11 +382,21 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         get_engine_mode().value,
     )
     reconcile_task = asyncio.create_task(_reconcile_db_sources_on_startup())
+
+    async def _warm_after_reconcile() -> None:
+        # Don't race the DB-source reconciler, which redeploys VDBs.
+        try:
+            await reconcile_task
+        except Exception:
+            pass
+        await _warm_all_vdbs_on_startup()
+
     llm_target_task = asyncio.create_task(_ensure_primary_llm_runtime_target())
     seed_task = asyncio.create_task(_seed_reference_catalogs())
     kg_pipeline_check_task = asyncio.create_task(
         _check_kg_snapshot_pipeline_version_on_startup()
     )
+    warm_vdbs_task = asyncio.create_task(_warm_after_reconcile())
     try:
         yield
     finally:
@@ -323,6 +404,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         llm_target_task.cancel()
         seed_task.cancel()
         kg_pipeline_check_task.cancel()
+        warm_vdbs_task.cancel()
         await pool_manager.close_all()
         logger.info("Platform API shutdown complete")
 
@@ -439,6 +521,7 @@ def create_app() -> FastAPI:
     app.include_router(dashboards_crud_routes.router, prefix=api_prefix)
     app.include_router(dashboards_widget_query_routes.router, prefix=api_prefix)
     app.include_router(ai_proxy_routes.router, prefix=api_prefix)
+    app.include_router(ai_speech_routes.router, prefix=api_prefix)
     app.include_router(ai_governance_routes.router, prefix=api_prefix)
     app.include_router(ai_reference_catalog_routes.router, prefix=api_prefix)
     app.include_router(analytical_methods_routes.router, prefix=api_prefix)

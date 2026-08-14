@@ -29,7 +29,7 @@ async def analyze_scopes(req: AnalyzeScopesRequest) -> AnalyzeScopesResponse:
     2. Direction: summarized/aggregated query → detailed/raw query
     """
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     # Build query descriptions for the LLM
     query_descriptions = []
@@ -64,8 +64,9 @@ async def analyze_scopes(req: AnalyzeScopesRequest) -> AnalyzeScopesResponse:
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt="You are a data analyst that identifies drill-down relationships between SQL queries. Return only valid JSON.",
-        model=settings.reasoning_model,
+        model=req.model or settings.reasoning_model,
         temperature=0.0,
+        ollama_url=req.ollama_url,
     )
 
     # Parse scopes from LLM response
@@ -88,5 +89,5 @@ async def analyze_scopes(req: AnalyzeScopesRequest) -> AnalyzeScopesResponse:
     return AnalyzeScopesResponse(
         scopes=scopes,
         request_id=request_id,
-        model_used=settings.reasoning_model,
+        model_used=req.model or settings.reasoning_model,
     )

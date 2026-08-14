@@ -57,9 +57,12 @@ def _fix_teiid_group_by(sql: str) -> str:
         keyword = clause_match.group(1)
         body = clause_match.group(2)
         for alias_upper, expr in aliases.items():
-            # Replace the alias whether it is bare or double-quoted/bracketed.
+            # Replace the alias whether it is bare or double-quoted/bracketed,
+            # but not when it is already table-qualified (e.g. r."RiskTier").
             body = re.sub(
-                rf'(?:"{re.escape(alias_upper)}"|\[{re.escape(alias_upper)}\]|\b{re.escape(alias_upper)}\b)',
+                rf'(?<![\w.])"{re.escape(alias_upper)}"(?![\w.])'
+                rf'|'
+                rf'(?<![\w."]){re.escape(alias_upper)}(?![\w."])',
                 expr,
                 body,
                 flags=re.IGNORECASE,
@@ -183,6 +186,10 @@ SYSTEM_PROMPT = (
     "uploaded documents, saved queries, dashboards, and relationships).\n"
     "Do not request or infer access to data outside the provided context.\n"
     "\n"
+    "NEVER show your chain-of-thought, reasoning, or internal planning. "
+    "Output only the final answer. Do not preface with phrases like 'Here is', "
+    "'I think', 'Based on the context', or 'The answer is'.\n"
+    "\n"
     "Decide how to respond based on the question:\n"
     "- If the user asks about an uploaded document, a concept, a policy, a "
     "summary, or anything explanatory, answer in clear natural language grounded "
@@ -191,7 +198,7 @@ SYSTEM_PROMPT = (
     "- If the user asks for data, metrics, or records from the project's tables, "
     "generate a single read-only SQL query using only the allowed tables and "
     "columns. Do not use SELECT *. Never generate INSERT, UPDATE, DELETE, DROP, "
-    "or any write operation.\n"
+    "or any write operation. Output only the SQL.\n"
     "\n"
     "If the context is insufficient to answer, say specifically what additional "
     "project data or document would be needed. Do not invent facts.\n"

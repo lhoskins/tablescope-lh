@@ -28,6 +28,7 @@ Keys (all namespaced by ``run_id`` and TTL'd):
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator, Awaitable
@@ -46,17 +47,17 @@ _TENANT_SLOT_TTL_SECONDS = 900
 
 _KEY_PREFIX = "home-intel"
 
-_redis: redis.Redis | None = None
+_redis_clients: dict[int, redis.Redis] = {}
 
 
 def get_redis() -> redis.Redis:
-    """Return a process-wide Redis client (text mode). Patchable in tests."""
-    global _redis
-    if _redis is None:
-        _redis = redis.from_url(
-            get_settings().redis_url, decode_responses=True
-        )
-    return _redis
+    """Return a Redis client bound to the current event loop."""
+    loop = asyncio.get_running_loop()
+    client = _redis_clients.get(id(loop))
+    if client is None:
+        client = redis.from_url(get_settings().redis_url, decode_responses=True)
+        _redis_clients[id(loop)] = client
+    return client
 
 
 def _ttl() -> int:
@@ -83,6 +84,7 @@ def _current_run_key(tenant_id: int, user_id: int) -> str:
 # Run lifecycle
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 async def create_run(
     *,
     run_id: str,
@@ -95,7 +97,7 @@ async def create_run(
     """Register a run: its metadata and the set of project ids to expect."""
     r = get_redis()
     ttl = _ttl()
-    meta = {
+    meta: dict[Any, Any] = {
         "tenant_id": str(tenant_id),
         "user_id": str(user_id),
         "granularity": str(granularity),
@@ -125,10 +127,27 @@ async def is_current_run(tenant_id: int, user_id: int, run_id: str) -> bool:
     return current is None or current == run_id
 
 
+async def get_current_run(tenant_id: int, user_id: int) -> str | None:
+    """Return the run_id currently marked as this user's active run, if any."""
+    return await get_redis().get(_current_run_key(tenant_id, user_id))
+
+
+async def get_current_run_status(
+    tenant_id: int,
+    user_id: int,
+) -> dict[str, Any] | None:
+    """Return the active run id, completion status, and metadata for a user."""
+    run_id = await get_current_run(tenant_id, user_id)
+    if not run_id:
+        return None
+    meta = await get_meta(run_id)
+    if meta is None:
+        return None
+    return {"run_id": run_id, "complete": await is_complete(run_id), "meta": meta}
+
+
 async def get_meta(run_id: str) -> dict[str, Any] | None:
-    m = await cast(
-        "Awaitable[dict[str, str]]", get_redis().hgetall(_k(run_id, "meta"))
-    )
+    m = await cast("Awaitable[dict[str, str]]", get_redis().hgetall(_k(run_id, "meta")))
     if not m:
         return None
     return {
@@ -141,15 +160,11 @@ async def get_meta(run_id: str) -> dict[str, Any] | None:
 
 
 async def get_expected(run_id: str) -> set[str]:
-    members = await cast(
-        "Awaitable[set[str]]", get_redis().smembers(_k(run_id, "expected"))
-    )
+    members = await cast("Awaitable[set[str]]", get_redis().smembers(_k(run_id, "expected")))
     return set(members)
 
 
-async def write_result(
-    run_id: str, project_id: int | str, result: dict[str, Any]
-) -> None:
+async def write_result(run_id: str, project_id: int | str, result: dict[str, Any]) -> None:
     """Persist one project's terminal result and wake any SSE subscriber."""
     r = get_redis()
     ttl = _ttl()
@@ -161,9 +176,7 @@ async def write_result(
 
 
 async def get_results(run_id: str) -> dict[str, dict[str, Any]]:
-    raw = await cast(
-        "Awaitable[dict[str, str]]", get_redis().hgetall(_k(run_id, "results"))
-    )
+    raw = await cast("Awaitable[dict[str, str]]", get_redis().hgetall(_k(run_id, "results")))
     return {pid: json.loads(v) for pid, v in raw.items()}
 
 
@@ -172,9 +185,7 @@ async def is_complete(run_id: str) -> bool:
     expected = await get_expected(run_id)
     if not expected:
         return False
-    keys = await cast(
-        "Awaitable[list[str]]", get_redis().hkeys(_k(run_id, "results"))
-    )
+    keys = await cast("Awaitable[list[str]]", get_redis().hkeys(_k(run_id, "results")))
     finished = set(keys)
     return expected <= finished
 
@@ -182,6 +193,7 @@ async def is_complete(run_id: str) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 # Per-tenant fairness tokens
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 async def acquire_tenant_slot(tenant_id: int, *, cap: int) -> bool:
     """Try to take one of the tenant's ``cap`` concurrency tokens.
@@ -217,15 +229,14 @@ async def release_tenant_slot(tenant_id: int) -> None:
 # Finalization (exactly-once) + completion signal
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 async def try_claim_finalize(run_id: str) -> bool:
     """Atomically claim the right to finalize a run (synthesis + snapshot).
 
     Only the first caller after completion wins, so synthesis/snapshot run once
     even when several projects finish near-simultaneously across workers.
     """
-    ok = await get_redis().set(
-        _k(run_id, "finalized"), "1", nx=True, ex=_ttl()
-    )
+    ok = await get_redis().set(_k(run_id, "finalized"), "1", nx=True, ex=_ttl())
     return bool(ok)
 
 
@@ -251,6 +262,7 @@ async def get_synthesis(run_id: str) -> tuple[bool, dict[str, Any] | None]:
 # results hash, so a missed message only delays a poll tick, never drops data).
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @asynccontextmanager
 async def subscribe(run_id: str) -> AsyncIterator[Any]:
     r = get_redis()
@@ -261,7 +273,7 @@ async def subscribe(run_id: str) -> AsyncIterator[Any]:
     finally:
         try:
             await pubsub.unsubscribe(channel(run_id))
-            await pubsub.aclose()
+            await pubsub.close()
         except Exception:  # pragma: no cover - best-effort cleanup
             pass
 

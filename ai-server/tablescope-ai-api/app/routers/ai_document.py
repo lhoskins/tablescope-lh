@@ -27,7 +27,7 @@ router = APIRouter()
 async def profile_document(req: DocumentProfileRequest):
     """Profile an uploaded document — extract summary, tags, entities, KPIs, relationships."""
     update_activity()
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
     request_id = uuid.uuid4().hex[:12]
     logger.info("[%s] document/profile file=%s type=%s", request_id, req.filename, req.asset_type)
 
@@ -124,9 +124,10 @@ Rules:
     try:
         raw = await llm_client.generate(
             prompt=prompt,
-            model=settings.reasoning_model,
+            model=req.model or settings.reasoning_model,
             temperature=0.1,
             max_tokens=2600,
+            ollama_url=req.ollama_url,
         )
 
         # Parse JSON from response
@@ -243,7 +244,7 @@ async def summarize_family(req: FamilySummarizeRequest) -> FamilySummarizeRespon
     processes, suggested dashboards, and gap analysis for a family node.
     """
     update_activity(req.user_id, req.tenant_id, req.project_id)
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
     request_id = uuid.uuid4().hex[:12]
 
     docs_str = "\n".join(
@@ -298,9 +299,10 @@ Rules:
     try:
         raw = await llm_client.generate(
             prompt=prompt,
-            model=settings.reasoning_model,
+            model=req.model or settings.reasoning_model,
             temperature=0.2,
             max_tokens=1200,
+            ollama_url=req.ollama_url,
         )
         parsed = _parse_json_response(raw) or {}
     except Exception as exc:
@@ -324,5 +326,5 @@ Rules:
         missing_documents=_strlist(parsed.get("missing_documents")),
         suggested_questions=_strlist(parsed.get("suggested_questions")),
         request_id=request_id,
-        model_used=settings.reasoning_model,
+        model_used=req.model or settings.reasoning_model,
     )

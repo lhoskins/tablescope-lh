@@ -23,15 +23,29 @@ from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project, ProjectMember
 from app.models.saved_query import SavedQuery
 from app.services.knowledge_graph_ai_context import collect_knowledge_graph_ai_context
+from app.services.llm_framework import resolve_active_routing_for_capability
 
 logger = logging.getLogger(__name__)
 
 TIMEOUT = httpx.Timeout(300.0, connect=10.0)
 
+# Map AI server paths to LLM Framework routing capabilities so proxy endpoints
+# also use the active model when one is deployed.
+_CAPABILITY_BY_PATH: dict[str, str | None] = {
+    "/ai/project/scopes/analyze": "sql_generation",
+    "/ai/dashboard/suggest": "dashboard_planning",
+    "/ai/dashboard/suggest-multi": "dashboard_planning",
+    "/ai/query/generate": "sql_generation",
+    "/ai/query/match": "sql_generation",
+    "/ai/project/relationships/generate": "sql_generation",
+    "/ai/index/document": None,
+    "/ai/index/reference": None,
+}
+
 
 def _sign_payload(payload: dict[str, Any], secret: str) -> str:
     """Generate HMAC-SHA256 signature for a request payload."""
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hmac.new(
         secret.encode(), canonical.encode(), hashlib.sha256,
     ).hexdigest()
@@ -45,6 +59,14 @@ async def _forward_to_ai(path: str, payload: dict[str, Any]) -> dict[str, Any]:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="AI server is not configured",
         )
+
+    capability = _CAPABILITY_BY_PATH.get(path)
+    if capability:
+        routing = await resolve_active_routing_for_capability(capability)
+        payload["model"] = routing.model
+        payload["ollama_url"] = routing.ollama_url
+        payload["routing_version"] = routing.version
+        payload["capability"] = capability
 
     payload["timestamp"] = time.time()
     payload["signature"] = _sign_payload(payload, settings.tablescope_ai_signing_secret)

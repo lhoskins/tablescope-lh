@@ -14,7 +14,6 @@ chokepoint enforcing tenant isolation for authenticated routes.
 from __future__ import annotations
 
 from fastapi import Depends, HTTPException, Request, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext, get_request_context
 from app.auth.mfa_errors import MfaRequiredError
@@ -23,7 +22,7 @@ from app.auth.mfa_policy import (
     session_has_mfa,
 )
 from app.config import get_settings
-from app.database import get_db
+from app.database import SessionLocal
 from app.models.tenant import Tenant
 from app.models.user import User
 
@@ -44,51 +43,54 @@ def _is_mfa_exempt(path: str) -> bool:
 async def require_membership(
     request: Request,
     context: RequestContext = Depends(get_request_context),
-    session: AsyncSession = Depends(get_db),
 ) -> RequestContext:
     """Verify the caller is an active member of the request's tenant.
 
     Service callers (trusted machine-to-machine) bypass this check. For user
     tokens we confirm the membership row exists in the current tenant and is
     active, then pin the context role to the membership's role.
+
+    The database session is opened and closed inside this dependency so the
+    Postgres connection is not held for the entire request lifecycle.
     """
     if context.is_service:
         return context
 
-    user = await session.get(User, context.user_id)
-    # No membership row, or the token's tenant doesn't match the user's tenant
-    # membership → the caller is not a member of this tenant.
-    if user is None or user.tenant_id != context.tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not a member of this tenant",
-        )
-    if not user.is_active or (user.status or "active") != "active":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your access to this tenant is inactive",
-        )
+    async with SessionLocal() as session:
+        user = await session.get(User, context.user_id)
+        # No membership row, or the token's tenant doesn't match the user's tenant
+        # membership → the caller is not a member of this tenant.
+        if user is None or user.tenant_id != context.tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not a member of this tenant",
+            )
+        if not user.is_active or (user.status or "active") != "active":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your access to this tenant is inactive",
+            )
 
-    # Resolve the effective role from the membership, so role changes take
-    # effect immediately rather than waiting for the token to expire.
-    if user.role and context.claims.role != user.role:
-        context.claims.role = user.role
+        # Resolve the effective role from the membership, so role changes take
+        # effect immediately rather than waiting for the token to expire.
+        if user.role and context.claims.role != user.role:
+            context.claims.role = user.role
 
-    # Twilio SMS MFA: admin-tier roles must hold an aal2 session for any route
-    # that is not on the MFA-exempt allowlist (identity + MFA setup/challenge).
-    # Gated behind a master switch so the feature can ship without locking out
-    # admins before Twilio Verify is provisioned. When the tenant has turned on
-    # enforce_2fa, every member is required to complete MFA, not just admins.
-    tenant = await session.get(Tenant, context.tenant_id)
-    tenant_enforce_2fa = bool(tenant.enforce_2fa if tenant else False)
-    role_requires_effective = (
-        get_settings().mfa_enforcement_enabled and role_requires_mfa(user.role)
-    )
-    if (
-        not _is_mfa_exempt(request.url.path)
-        and not session_has_mfa(context.aal)
-        and (tenant_enforce_2fa or role_requires_effective)
-    ):
-        raise MfaRequiredError
+        # Twilio SMS MFA: admin-tier roles must hold an aal2 session for any route
+        # that is not on the MFA-exempt allowlist (identity + MFA setup/challenge).
+        # Gated behind a master switch so the feature can ship without locking out
+        # admins before Twilio Verify is provisioned. When the tenant has turned on
+        # enforce_2fa, every member is required to complete MFA, not just admins.
+        tenant = await session.get(Tenant, context.tenant_id)
+        tenant_enforce_2fa = bool(tenant.enforce_2fa if tenant else False)
+        role_requires_effective = (
+            get_settings().mfa_enforcement_enabled and role_requires_mfa(user.role)
+        )
+        if (
+            not _is_mfa_exempt(request.url.path)
+            and not session_has_mfa(context.aal)
+            and (tenant_enforce_2fa or role_requires_effective)
+        ):
+            raise MfaRequiredError
 
     return context

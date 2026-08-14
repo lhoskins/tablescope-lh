@@ -1,6 +1,41 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import type { InsightCard, InsightDiagnostic } from "@/lib/api/home-intelligence";
-import { cardContext } from "./insight-ask-box";
+import { cardContext, InsightAskBox } from "./insight-ask-box";
+
+const { askAndRun } = vi.hoisted(() => ({ askAndRun: vi.fn() }));
+
+vi.mock("@/components/dashboard/WidgetRenderer", () => ({
+  WidgetRenderer: () => <div data-testid="widget" />,
+}));
+
+vi.mock("@/lib/insights/export-png", () => ({
+  exportInsightCardPng: vi.fn(),
+  insightPngFilename: () => "insight.png",
+}));
+
+vi.mock("@/lib/ui/use-shell-data", () => ({
+  useCurrentUser: () => ({ data: undefined }),
+}));
+
+vi.mock("@/lib/api/ai-actions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api/ai-actions")>();
+  return {
+    ...actual,
+    aiActionsApi: { ...actual.aiActionsApi, askAndRun },
+  };
+});
+
+function renderWithClient(ui: ReactNode) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+  );
+}
 
 const STEP: InsightDiagnostic = {
   stage: "quantify",
@@ -66,5 +101,49 @@ describe("cardContext", () => {
       }),
     );
     expect(withOwn.analytical_method?.method).toBe("period_change");
+  });
+});
+
+describe("InsightAskBox", () => {
+  it("renders the matched card's chart and breadcrumb when a live query fails but a card answers it", async () => {
+    askAndRun.mockResolvedValueOnce({
+      question: "Show me IT backup jobs by system",
+      sql: "",
+      columns: [],
+      rows: [],
+      suggestedVisualization: { type: "table" },
+      explanation:
+        "I couldn't build a live query for this question. I found an existing analysis that answers this: **Backup Jobs by System**",
+      dataSourcesUsed: [],
+      status: "success",
+      answerType: "text",
+      error: null,
+      matchedInsight: {
+        insightId: "backup-001",
+        projectId: 7,
+        projectName: "IT",
+        title: "Backup Jobs by System",
+        summary: "Backup job counts grouped by system.",
+        chart: { type: "bar", data: { rows: [{ system: "SAP", count: 12 }] } },
+        severity: "info",
+      },
+    });
+
+    renderWithClient(<InsightAskBox card={card()} suggestions={[]} />);
+
+    fireEvent.change(
+      screen.getByLabelText("Ask your own question about this insight"),
+      { target: { value: "Show me IT backup jobs by system" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+
+    await waitFor(() => expect(askAndRun).toHaveBeenCalled());
+    expect(await screen.findByText("Backup Jobs by System")).toBeInTheDocument();
+    expect(screen.getByTestId("widget")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /explore full analysis/i }),
+    ).toHaveAttribute("href", "/business-insight/analysis/backup-001");
+    // A matched card is a real answer, not a "no rows" result.
+    expect(screen.queryByText("That query returned no rows.")).not.toBeInTheDocument();
   });
 });

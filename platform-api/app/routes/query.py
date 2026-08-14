@@ -13,12 +13,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
 from app.auth.membership import require_membership
 from app.auth.rbac import Role, require_role
-from app.database import get_db
+from app.database import SessionLocal
 from app.routes.query_sql_helpers import (
     _auto_cast_aggregates,
     _cast_timestampdiff,
@@ -66,6 +65,31 @@ router = APIRouter(prefix="/query", tags=["query"])
 # in generated SQL, so a leading digit is safe.
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_$.]*$")
 
+# Extract table/view names referenced in a SQL statement so we can sample only
+# those tables instead of every datasource in the project.
+_TABLE_REF_RE = re.compile(
+    r'(?:FROM|JOIN)\s+(?:\()?("?)([A-Za-z0-9_$.]+)\1',
+    re.IGNORECASE,
+)
+
+
+def _referenced_tables(sql: str | None, fallback: str | None) -> list[str]:
+    """Return the table/view names referenced by ``sql`` or ``fallback``."""
+    if not sql:
+        if fallback and _IDENTIFIER_RE.match(fallback):
+            return [fallback]
+        return []
+
+    names: set[str] = set()
+    for match in _TABLE_REF_RE.finditer(sql):
+        name = match.group(2)
+        if _IDENTIFIER_RE.match(name):
+            names.add(name)
+
+    if not names and fallback and _IDENTIFIER_RE.match(fallback):
+        return [fallback]
+    return list(names)
+
 
 class DatasourceQueryRequest(BaseModel):
     # Optional when an explicit ``sql`` is supplied (e.g. previewing a saved /
@@ -79,13 +103,18 @@ class DatasourceQueryRequest(BaseModel):
 @router.post("/fetch", response_model=QueryResponse)
 async def fetch_table_data(
     payload: QueryRequest,
-    session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_membership),
 ) -> QueryResponse:
-    routing = VDBRoutingService(session)
+    # Resolve VDB connection info and tenant Teiid endpoint in a short-lived
+    # session that is closed before the (potentially long) Teiid query.
+    async with SessionLocal() as session:
+        connection_info = await VDBRoutingService(session).get_connection_info(
+            context=context, project_id=payload.projectId
+        )
+        endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+
     scopes = ScopeProxyService()
-    executor = TeiidQueryExecutor(routing=routing, scopes=scopes)
-    endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+    executor = TeiidQueryExecutor(scopes=scopes)
     try:
         result = await executor.fetch_table_data(
             context=context,
@@ -96,6 +125,7 @@ async def fetch_table_data(
             limit=payload.limit,
             teiid_host=endpoint.pg_host,
             teiid_port=endpoint.pg_port,
+            connection_info=connection_info,
         )
     except QueryValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -118,7 +148,6 @@ async def fetch_table_data(
 @router.post("/datasource")
 async def query_datasource(
     payload: DatasourceQueryRequest,
-    session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> dict[str, Any]:
     """Query a datasource (view) from the appropriate VDB.
@@ -130,6 +159,9 @@ async def query_datasource(
     Generated SQL is normalized against the project schema and, if it still
     fails, repaired through the AI ``fix-sql`` endpoint so preview modals render
     rather than surfacing raw Teiid errors.
+
+    The SQLAlchemy session is closed before the (long-running) Teiid query so
+    the Postgres pool is not tied up while Teiid fetches remote files.
     """
     if not payload.sql and not (
         payload.tableName and _IDENTIFIER_RE.match(payload.tableName)
@@ -138,36 +170,47 @@ async def query_datasource(
             status_code=400, detail=f"Invalid table name: {payload.tableName!r}"
         )
 
-    database = await _resolve_vdb_database(
-        session=session, context=context, project_id=payload.project_id
-    )
-
-    endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
-
     table_schema: list[dict[str, Any]] = []
     allowed_tables: list[str] = []
     column_types: dict[str, str] = {}
     column_samples: dict[str, str] = {}
 
+    # Resolve VDB/database and project metadata in a short-lived session that
+    # is closed before we wait on Teiid, which itself calls back into
+    # platform-api for remote file proxies.
     project_id = payload.project_id
-    if project_id:
-        table_schema = await project_table_schema(
-            session, tenant_id=context.tenant_id, project_id=project_id
+    async with SessionLocal() as session:
+        database = await _resolve_vdb_database(
+            session=session, context=context, project_id=project_id
         )
-        allowed_tables = [
-            str(t)
-            for entry in table_schema
-            if (t := entry.get("table")) is not None
-        ]
-        column_types = {
-            str(col.get("name")): str(col.get("type") or "")
-            for entry in table_schema
-            for col in (entry.get("columns") or [])
-            if isinstance(col, dict) and col.get("name")
-        }
+        endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+        if project_id:
+            table_schema = await project_table_schema(
+                session, tenant_id=context.tenant_id, project_id=project_id
+            )
+            allowed_tables = [
+                str(t)
+                for entry in table_schema
+                if (t := entry.get("table")) is not None
+            ]
+            column_types = {
+                str(col.get("name")): str(col.get("type") or "")
+                for entry in table_schema
+                for col in (entry.get("columns") or [])
+                if isinstance(col, dict) and col.get("name")
+            }
+
+    if project_id:
+        # Sample only the tables this query actually references. Sampling every
+        # project datasource on every widget/query call fetches large remote
+        # CSVs repeatedly and saturates the Teiid PG server.
+        tables_to_sample = _referenced_tables(payload.sql, payload.tableName)
+        tables_to_sample = [
+            t for t in tables_to_sample if t in allowed_tables
+        ] or ([payload.tableName] if payload.tableName and payload.tableName in allowed_tables else [])
         column_samples = await _sample_project_columns(
             database=database,
-            tables=allowed_tables,
+            tables=tables_to_sample,
             teiid_host=endpoint.pg_host,
             teiid_port=endpoint.pg_port,
         )

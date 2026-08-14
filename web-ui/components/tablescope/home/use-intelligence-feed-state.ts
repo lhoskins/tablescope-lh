@@ -1,5 +1,6 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useCallback,
   useEffect,
@@ -52,6 +53,7 @@ export function useIntelligenceFeedState({
         : EMPTY_PROJECTS,
     [propAvailableProjects],
   );
+  const queryClient = useQueryClient();
   const { toasts, push: pushToast, dismiss } = useToasts();
   const [saveCard, setSaveCard] = useState<InsightCard | null>(null);
   const [status, setStatus] = useState<"idle" | "streaming" | "complete" | "error">("idle");
@@ -230,8 +232,21 @@ export function useIntelligenceFeedState({
     }
   }, []);
 
+  const applySnapshot = useCallback((snap: IntelligenceSnapshot) => {
+    setProjects(snap.projects);
+    const map: Record<string, ProjectResult> = {};
+    for (const r of snap.results) map[r.projectId] = r;
+    setResults(map);
+    visibleResultCountRef.current = Object.keys(map).length;
+    setCompleted(new Set(Object.keys(map)));
+    setSynthesis(snap.synthesis);
+    setLastUpdated(snap.updatedAt ? new Date(snap.updatedAt) : null);
+    setStale(Boolean(snap.stale));
+    setStaleProjectIds(snap.staleProjects ?? []);
+  }, []);
+
   const startStream = useCallback(
-    (crossProject: boolean, granularity: number, background = false) => {
+    (crossProject: boolean, granularity: number, background = false, runId?: string) => {
       controllerRef.current?.abort();
       backgroundRef.current = background;
       setStale(false);
@@ -245,6 +260,7 @@ export function useIntelligenceFeedState({
       controllerRef.current = streamHomeIntelligence(handleEvent, {
         crossProject,
         granularity,
+        runId,
       });
     },
     [handleEvent],
@@ -266,24 +282,26 @@ export function useIntelligenceFeedState({
       setSettings(intel);
 
       const snap = snapRes?.snapshot ?? null;
-      setStale(Boolean(snap?.stale));
-      setStaleProjectIds(snap?.staleProjects ?? []);
-      let hydrated = false;
-      if (snap && snap.results.length > 0) {
-        setProjects(snap.projects);
-        const map: Record<string, ProjectResult> = {};
-        for (const r of snap.results) map[r.projectId] = r;
-        setResults(map);
-        visibleResultCountRef.current = Object.keys(map).length;
-        setCompleted(new Set(Object.keys(map)));
-        setSynthesis(snap.synthesis);
-        setLastUpdated(snap.updatedAt ? new Date(snap.updatedAt) : new Date());
-        setStatus("complete");
-        hydrated = true;
+      if (snap) {
+        applySnapshot(snap);
+      } else {
+        setStale(false);
+        setStaleProjectIds([]);
       }
 
-      if (intel.run_on_load) {
-        startStream(intel.cross_project, intel.granularity ?? 3, hydrated);
+      // If a run is already in progress, reconnect to it instead of starting
+      // a new one so cards continue to surface after a page refresh/leave.
+      if (snap?.activeRunId && !snap.activeRunComplete) {
+        setStatus("streaming");
+        startStream(intel.cross_project, intel.granularity ?? 3, false, snap.activeRunId);
+        return;
+      }
+
+      // Otherwise, start a new run on load when configured.
+      if (intel.run_on_load && (!snap || snap.results.length === 0 || snap.stale)) {
+        startStream(intel.cross_project, intel.granularity ?? 3, false);
+      } else if (snap) {
+        setStatus("complete");
       }
     });
     return () => {
@@ -294,7 +312,7 @@ export function useIntelligenceFeedState({
         pollTimerRef.current = null;
       }
     };
-  }, [startStream]);
+  }, [applySnapshot, startStream]);
 
   useEffect(() => {
     const t = setInterval(() => forceTick((n) => n + 1), 30000);
@@ -378,19 +396,6 @@ export function useIntelligenceFeedState({
 
   const granularity = settings?.granularity ?? 3;
 
-  const applySnapshot = useCallback((snap: IntelligenceSnapshot) => {
-    setProjects(snap.projects);
-    const map: Record<string, ProjectResult> = {};
-    for (const r of snap.results) map[r.projectId] = r;
-    setResults(map);
-    visibleResultCountRef.current = Object.keys(map).length;
-    setCompleted(new Set(Object.keys(map)));
-    setSynthesis(snap.synthesis);
-    setLastUpdated(snap.updatedAt ? new Date(snap.updatedAt) : new Date());
-    setStale(Boolean(snap.stale));
-    setStaleProjectIds(snap.staleProjects ?? []);
-  }, []);
-
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current) {
       window.clearInterval(pollTimerRef.current);
@@ -412,41 +417,21 @@ export function useIntelligenceFeedState({
             setStatus("complete");
             return;
           }
-          getHomeIntelligenceRunStatus(res.run_id).then((status) => {
-            if (status.complete) {
-              getIntelligenceSnapshot().then((snapRes) => {
-                const snap = snapRes.snapshot ?? null;
-                if (snap) applySnapshot(snap);
-                setStatus(snap?.stale ? "streaming" : "complete");
-              });
-            }
-          });
-          pollTimerRef.current = window.setInterval(() => {
-            const check = async () => {
-              if (res.run_id) {
-                const status = await getHomeIntelligenceRunStatus(res.run_id).catch(
-                  () => null,
-                );
-                if (!status?.complete) return;
-              }
-              const snapRes = await getIntelligenceSnapshot().catch(() => null);
-              const snap = snapRes?.snapshot ?? null;
-              if (snap) {
-                applySnapshot(snap);
-                if (!snap.stale) {
-                  stopPolling();
-                  setStatus("complete");
-                }
-              }
-            };
-            void check();
-          }, 5000);
+          // Stream the run we just created; this is the same SSE feed as a new
+          // page load, so cards surface as each project completes and the feed
+          // survives navigation/refresh via the persisted run_id.
+          startStream(
+            settings?.cross_project ?? true,
+            overrideGranularity ?? granularity,
+            false,
+            res.run_id,
+          );
         })
         .catch(() => {
           setStatus("error");
         });
     },
-    [applySnapshot, granularity, settings?.cross_project, stopPolling],
+    [granularity, settings?.cross_project, startStream, stopPolling],
   );
 
   const handleGranularity = useCallback(
@@ -463,11 +448,12 @@ export function useIntelligenceFeedState({
   const [clearingCache, setClearingCache] = useState(false);
   const handleClearCache = useCallback(async () => {
     if (clearingCache) return;
-    if (!window.confirm("Clear all cached Business Insight cards?")) return;
+    if (!window.confirm("Clear all cached Business Insight cards and the Percent Change Summary?")) return;
     setClearingCache(true);
     controllerRef.current?.abort();
     try {
       await clearBusinessInsightCache();
+      queryClient.removeQueries({ queryKey: ["percent-change-summary"] });
       setProjects([]);
       setResults({});
       setCompleted(new Set());
@@ -480,7 +466,7 @@ export function useIntelligenceFeedState({
     } finally {
       setClearingCache(false);
     }
-  }, [clearingCache, pushToast]);
+  }, [clearingCache, pushToast, queryClient]);
 
   const handleSaveToDashboard = useCallback((card: InsightCard) => {
     setSaveCard(card);

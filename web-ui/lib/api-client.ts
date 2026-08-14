@@ -119,8 +119,44 @@ function readToken(): string | null {
   return window.localStorage.getItem(TOKEN_KEY);
 }
 
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return null;
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const pad = (4 - (base64.length % 4)) % 4;
+    const padded = base64 + "=".repeat(pad);
+    return JSON.parse(atob(padded)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function getTokenTenantId(token: string): number | null {
+  const payload = decodeJwtPayload(token);
+  if (payload && typeof payload.tenant_id === "number") {
+    return payload.tenant_id;
+  }
+  return null;
+}
+
+/** Only adopt a renewed session token if it belongs to the current tenant.
+ *
+ * This prevents a background tab (or stale service worker) holding a different
+ * tenant's session from clobbering the active token with a short-lived one.
+ */
+function shouldAdoptRenewedToken(renewed: string): boolean {
+  if (typeof window === "undefined") return false;
+  const current = readToken();
+  if (!current) return true;
+  const currentTenant = getTokenTenantId(current);
+  const renewedTenant = getTokenTenantId(renewed);
+  if (currentTenant == null || renewedTenant == null) return true;
+  return currentTenant === renewedTenant;
+}
+
 export function storeToken(token: string): void {
-  if (typeof window !== "undefined") {
+  if (typeof window !== "undefined" && token) {
     window.localStorage.setItem(TOKEN_KEY, token);
   }
 }
@@ -157,7 +193,9 @@ async function request<T>(
   // Read before the `ok` check so a renewal riding on an error response is
   // still picked up.
   const renewed = response.headers.get(SESSION_TOKEN_HEADER);
-  if (renewed) storeToken(renewed);
+  if (renewed && shouldAdoptRenewedToken(renewed)) {
+    storeToken(renewed);
+  }
 
   if (!response.ok) {
     let detail = `Request failed: ${response.status}`;
@@ -220,7 +258,9 @@ async function uploadFile<T>(
     headers,
   });
   const renewedUpload = response.headers.get(SESSION_TOKEN_HEADER);
-  if (renewedUpload) storeToken(renewedUpload);
+  if (renewedUpload && shouldAdoptRenewedToken(renewedUpload)) {
+    storeToken(renewedUpload);
+  }
   if (!response.ok) {
     let detail = `Upload failed: ${response.status}`;
     let code: string | null = null;
@@ -268,7 +308,9 @@ async function streamRequest(
   // SSE runs are the longest-lived requests in the app — an insight refresh can
   // straddle the TTL — so adopt a renewal here too.
   const renewed = response.headers.get(SESSION_TOKEN_HEADER);
-  if (renewed) storeToken(renewed);
+  if (renewed && shouldAdoptRenewedToken(renewed)) {
+    storeToken(renewed);
+  }
   return response;
 }
 

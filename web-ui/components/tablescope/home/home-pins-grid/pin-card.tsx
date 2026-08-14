@@ -1,49 +1,14 @@
 "use client";
 
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useGridItemAutoHeight } from "@/lib/hooks/use-grid-item-auto-height";
 import {
-  ResponsiveGridLayout,
-  useContainerWidth,
-  type EventCallback,
-  type Layout,
-  type LayoutItem,
-  type ResponsiveLayouts,
-} from "react-grid-layout";
-import "react-grid-layout/css/styles.css";
-import {
-  GRID_BREAKPOINTS,
-  GRID_COLS,
-  GRID_DRAG_CONFIG,
-  GRID_MARGIN,
-  GRID_RESIZE_CONFIG,
-  GRID_ROW_HEIGHT,
-  buildResponsiveHomeLayouts,
-} from "@/lib/ui/grid-layout";
-import {
-  IconLoader2,
   IconPinnedOff,
   IconRefresh,
   IconGripVertical,
 } from "@tabler/icons-react";
-import type { WidgetConfig } from "@/components/dashboard/types";
-import { WidgetRenderer } from "@/components/dashboard/WidgetRenderer";
-import { IntelligenceCard } from "../intelligence-card";
-import {
-  getHomePins,
-  deleteHomePin,
-  updateHomePinLayout,
-  refreshAllHomePins,
-  type HomePin,
-} from "@/lib/api/home-pins";
-import type { InsightCard } from "@/lib/api/home-intelligence";
 import type { GovernanceItem, InsightFeedbackRecord } from "@/lib/api/insight-feedback";
-import { useInsightFeedback } from "@/lib/hooks/use-insight-feedback";
-import {
-  CreateActionFromInsightDialog,
-  type ActionableInsight,
-} from "@/components/tablescope/project-actions/create-action-from-insight-dialog";import { HomePinItem } from "./home-pin-item";
+import { HomePinItem } from "./home-pin-item";
 import { PinContent } from "./pin-content";
 
 
@@ -59,6 +24,8 @@ export function PinCard({
   onFeedbackRespond,
   onCreateAction,
   governance,
+  onHeightChange,
+  isResizing,
 }: {
   pin: HomePinItem;
   feedback?: InsightFeedbackRecord | null;
@@ -74,9 +41,16 @@ export function PinCard({
   onFeedbackRespond?: (pin: HomePinItem, response: string) => void;
   onCreateAction?: (pin: HomePinItem) => void;
   governance?: GovernanceItem | null;
+  onHeightChange?: (pinId: string | number, rows: number) => void;
+  isResizing?: boolean;
 }) {
   const isLive = pin.pin_type === "live_widget";
   const isInsight = pin.pin_type === "insight_card";
+  const { ref: contentRef } = useGridItemAutoHeight(
+    pin.id,
+    onHeightChange,
+    isResizing || !isInsight,
+  );
 
   const actions = (
     <div className="flex items-center gap-1">
@@ -110,7 +84,7 @@ export function PinCard({
           <IconGripVertical size={14} className="shrink-0 text-ink-tertiary" />
           {actions}
         </div>
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div ref={contentRef} className="min-h-0 flex-shrink-0">
           <PinContent
             pin={pin}
             feedback={feedback}
@@ -143,7 +117,7 @@ export function PinCard({
         </div>
         {actions}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-3">
+      <div ref={contentRef} className="min-h-0 flex-1 p-3">
         <PinContent
           pin={pin}
           feedback={feedback}

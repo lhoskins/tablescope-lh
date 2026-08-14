@@ -156,6 +156,13 @@ async def _deploy_remote_view(
         xml = add_remote_csv_view(xml, view_name, headers, data_source_id, delimiter)
         with open(host_vdb_file_path, "w", encoding="utf-8") as fh:
             fh.write(xml)
+        try:
+            # The VDB directory is setgid wildfly; new files inherit the group.
+            # Make the file group-writable so the WildFly/Teiid servlet can also
+            # update it (e.g. when registering new database sources).
+            os.chmod(host_vdb_file_path, 0o664)
+        except OSError:
+            pass
 
     await asyncio.to_thread(_edit_and_write)
 

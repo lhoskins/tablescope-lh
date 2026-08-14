@@ -1,35 +1,18 @@
 "use client";
 
-
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   activateLLMDeployment,
   approveLLMDeployment,
   getLLMAuditEvents,
-  getLLMCapabilities,
   getLLMDeployments,
   getLLMFrameworkStatus,
-  getLLMInventory,
-  getLLMEmbeddingMigrations,
-  getLLMModelConversions,
-  installLLMArtifact,
-  preflightLLMInstall,
-  registerLLMRuntimeTarget,
   rollbackLLMDeployment,
-  searchLLMCatalog,
-  stageLLMArtifact,
-  reindexLLMArtifact,
-  convertLLMCatalogEntry,
-  upsertLLMRoutingProfile,
   type AuditEvent,
-  type CatalogSearchResult,
   type Deployment,
-  type LLMInventory,
-  type RuntimeTarget,
-} from "@/lib/api/llm-framework";import { formatDate, formatCapability, Section, StatusBadge } from "./utils";
-
-
+} from "@/lib/api/llm-framework";
+import { formatDate, formatCapability, Section, StatusBadge } from "./utils";
 
 export function DeploymentsPanel({
   capabilities,
@@ -52,15 +35,26 @@ export function DeploymentsPanel({
   });
 
   const [selectedCapability, setSelectedCapability] = useState<Record<number, string>>({});
+  const [priority, setPriority] = useState<Record<number, string>>({});
+  const [expectedVersion, setExpectedVersion] = useState<Record<number, string>>({});
+  const [activateResult, setActivateResult] = useState<{ routing_profile_id?: number; version?: number } | null>(null);
 
   const approveMutation = useMutation({
     mutationFn: approveLLMDeployment,
     onSuccess: () => deploymentsQuery.refetch(),
   });
   const activateMutation = useMutation({
-    mutationFn: ({ deploymentId, request }: { deploymentId: number; request: { capability: string; target_id: number } }) =>
-      activateLLMDeployment(deploymentId, request),
-    onSuccess: () => deploymentsQuery.refetch(),
+    mutationFn: ({
+      deploymentId,
+      request,
+    }: {
+      deploymentId: number;
+      request: { capability: string; target_id: number; expected_version?: number | null; priority?: number };
+    }) => activateLLMDeployment(deploymentId, request),
+    onSuccess: (data) => {
+      setActivateResult({ routing_profile_id: data.routing_profile_id, version: data.version });
+      deploymentsQuery.refetch();
+    },
   });
   const rollbackMutation = useMutation({
     mutationFn: rollbackLLMDeployment,
@@ -68,12 +62,16 @@ export function DeploymentsPanel({
   });
 
   const isDeploymentEnabled = statusQuery.data?.deployment_enabled ?? false;
-  const requiresApproval = statusQuery.data?.two_person_approval_required ?? true;
 
   return (
     <div className="space-y-4">
       <Section title="Deployments">
         {!isDeploymentEnabled && <p className="text-sm text-ink-tertiary">Deployment is disabled in configuration.</p>}
+        {activateResult && (
+          <p className="text-sm text-emerald-600">
+            Activated routing profile {activateResult.routing_profile_id} (version {activateResult.version}).
+          </p>
+        )}
         {deploymentsQuery.isLoading ? (
           <p className="text-sm text-ink-tertiary">Loading...</p>
         ) : deploymentsQuery.data?.length === 0 ? (
@@ -86,6 +84,7 @@ export function DeploymentsPanel({
                   <th className="py-2 pr-4 font-medium">ID</th>
                   <th className="py-2 pr-4 font-medium">Artifact</th>
                   <th className="py-2 pr-4 font-medium">Target</th>
+                  <th className="py-2 pr-4 font-medium">Mode</th>
                   <th className="py-2 pr-4 font-medium">Status</th>
                   <th className="py-2 pr-4 font-medium">Requested by</th>
                   <th className="py-2 pr-4 font-medium">Approved by</th>
@@ -98,6 +97,7 @@ export function DeploymentsPanel({
                     <td className="py-2 pr-4">{d.id}</td>
                     <td className="py-2 pr-4 font-medium text-ink-primary">{d.artifact_name}</td>
                     <td className="py-2 pr-4">{d.target_name}</td>
+                    <td className="py-2 pr-4">{d.deployment_mode.replace(/_/g, " ")}</td>
                     <td className="py-2 pr-4"><StatusBadge status={d.status} /></td>
                     <td className="py-2 pr-4">{d.requested_by_user_id ?? "-"}</td>
                     <td className="py-2 pr-4">{d.approved_by_user_id ?? "-"}</td>
@@ -113,7 +113,7 @@ export function DeploymentsPanel({
                           </button>
                         )}
                         {d.status === "approved" && (
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             <select
                               value={selectedCapability[d.id] || ""}
                               onChange={(e) =>
@@ -128,12 +128,33 @@ export function DeploymentsPanel({
                                 </option>
                               ))}
                             </select>
+                            <input
+                              type="number"
+                              placeholder="Priority"
+                              value={priority[d.id] || "1"}
+                              onChange={(e) => setPriority((prev) => ({ ...prev, [d.id]: e.target.value }))}
+                              className="w-20 rounded-md border border-line-tertiary bg-bg-primary px-2 py-1 text-xs text-ink-primary"
+                            />
+                            <input
+                              type="number"
+                              placeholder="Expected version"
+                              value={expectedVersion[d.id] || ""}
+                              onChange={(e) =>
+                                setExpectedVersion((prev) => ({ ...prev, [d.id]: e.target.value }))
+                              }
+                              className="w-28 rounded-md border border-line-tertiary bg-bg-primary px-2 py-1 text-xs text-ink-primary"
+                            />
                             <button
                               onClick={() =>
                                 selectedCapability[d.id] &&
                                 activateMutation.mutate({
                                   deploymentId: d.id,
-                                  request: { capability: selectedCapability[d.id], target_id: d.target_id },
+                                  request: {
+                                    capability: selectedCapability[d.id],
+                                    target_id: d.target_id,
+                                    priority: priority[d.id] ? Number(priority[d.id]) : 1,
+                                    expected_version: expectedVersion[d.id] ? Number(expectedVersion[d.id]) : null,
+                                  },
                                 })
                               }
                               disabled={!selectedCapability[d.id] || activateMutation.isPending}

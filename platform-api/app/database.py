@@ -22,7 +22,8 @@ def _engine_kwargs() -> dict:
         kwargs.update(
             pool_pre_ping=True,
             pool_size=_settings.database_pool_max_size,
-            max_overflow=10,
+            max_overflow=30,
+            pool_timeout=60,
         )
     return kwargs
 

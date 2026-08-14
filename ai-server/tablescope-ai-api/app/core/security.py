@@ -21,7 +21,7 @@ SIGNATURE_MAX_AGE_SECONDS = 300  # 5 minutes
 
 def sign_request(payload: dict[str, Any]) -> str:
     """Generate HMAC-SHA256 signature for a request payload."""
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hmac.new(
         settings.ai_signing_secret.encode(),
         canonical.encode(),

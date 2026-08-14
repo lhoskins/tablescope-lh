@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -57,6 +58,99 @@ from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ai", tags=["AI Intelligence"])
+
+# Bounded concurrency/timeouts so one slow project (or a cold AI model) cannot
+# hang the Home "New Query / New Dashboard" pills for every project.
+_SUGGESTION_CONCURRENCY = 3
+_QUERY_SUGGESTION_TIMEOUT = 90.0
+_DASHBOARD_SUGGESTION_TIMEOUT = 120.0
+_suggestion_sem = asyncio.Semaphore(_SUGGESTION_CONCURRENCY)
+
+
+async def _bounded_suggestion(
+    project: Project,
+    work: Callable[[Project], Awaitable[dict[str, Any]]],
+    timeout: float,
+    empty_key: str,
+    empty_value: Any,
+) -> dict[str, Any]:
+    """Run a per-project suggestion coroutine with a timeout and semaphore.
+
+    If the work times out or fails, return the project entry with the empty
+    payload so the Home pills still render results for other projects.
+    """
+    async with _suggestion_sem:
+        try:
+            return await asyncio.wait_for(work(project), timeout=timeout)
+        except TimeoutError:
+            logger.warning("Suggestion timed out for project %s", project.id)
+        except Exception as exc:
+            logger.warning("Suggestion failed for project %s: %s", project.id, exc)
+    return {
+        "projectId": str(project.id),
+        "projectName": project.name,
+        "projectColor": hi.project_color(project.id),
+        empty_key: empty_value,
+        "timedOut": True,
+    }
+
+
+def _suggestions_from_bir(
+    bir: BusinessInsightResult | None, max_per_project: int
+) -> list[dict[str, Any]]:
+    """Convert a cached Business Insight result into query suggestions."""
+    if not bir or not bir.payload:
+        return []
+    insights = bir.payload.get("insights") or []
+    suggestions: list[dict[str, Any]] = []
+    for card in insights[:max_per_project]:
+        sql = (card.get("sql") or "").strip()
+        if not sql:
+            continue
+        suggestions.append(
+            {
+                "title": card.get("title") or "Query",
+                "description": card.get("summary") or "",
+                "sql": sql,
+                "chartType": card.get("chartType") or "",
+                "labelColumn": card.get("labelColumn") or "",
+                "valueColumn": card.get("valueColumn") or "",
+            }
+        )
+    return suggestions
+
+
+def _dashboard_from_bir(
+    bir: BusinessInsightResult | None,
+    project: Project,
+    max_per_project: int,
+) -> dict[str, Any] | None:
+    """Convert a cached Business Insight result into a dashboard preview."""
+    if not bir or not bir.payload:
+        return None
+    insights = (bir.payload.get("insights") or [])[:max_per_project]
+    widgets: list[dict[str, Any]] = []
+    for card in insights:
+        sql = (card.get("sql") or "").strip()
+        chart = card.get("chart")
+        if not sql or not chart:
+            continue
+        widgets.append(
+            {
+                "title": card.get("title") or "Widget",
+                "chartType": card.get("chartType") or chart.get("type") or "bar",
+                "chart": chart,
+                "sql": sql,
+                "labelColumn": card.get("labelColumn") or "",
+                "valueColumn": card.get("valueColumn") or "",
+            }
+        )
+    if not widgets:
+        return None
+    return {
+        "title": _derive_dashboard_title(project.name, widgets),
+        "widgets": widgets,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -247,8 +341,26 @@ async def home_query_suggestions(
         return {"projects": []}
 
     async def work(project: Project) -> dict[str, Any]:
-        analyses: list[dict[str, Any]] = []
         async with SessionLocal() as session:
+            bir = await session.scalar(
+                select(BusinessInsightResult)
+                .where(
+                    BusinessInsightResult.tenant_id == context.tenant_id,
+                    BusinessInsightResult.project_id == project.id,
+                    BusinessInsightResult.granularity == req.granularity,
+                )
+                .order_by(BusinessInsightResult.updated_at.desc())
+            )
+            if bir and bir.payload:
+                suggestions = _suggestions_from_bir(bir, req.max_per_project)
+                if suggestions:
+                    return {
+                        "projectId": str(project.id),
+                        "projectName": project.name,
+                        "projectColor": hi.project_color(project.id),
+                        "suggestions": suggestions,
+                    }
+            analyses: list[dict[str, Any]] = []
             try:
                 analyses = await _plan_analyses(
                     session,
@@ -280,7 +392,18 @@ async def home_query_suggestions(
             "suggestions": suggestions,
         }
 
-    results = await asyncio.gather(*(work(p) for p in projects))
+    results = await asyncio.gather(
+        *(
+            _bounded_suggestion(
+                p,
+                work,
+                _QUERY_SUGGESTION_TIMEOUT,
+                "suggestions",
+                [],
+            )
+            for p in projects
+        )
+    )
     return {"projects": list(results)}
 
 
@@ -304,8 +427,26 @@ async def home_dashboard_suggestions(
         return {"projects": []}
 
     async def work(project: Project) -> dict[str, Any]:
-        widgets: list[dict[str, Any]] = []
         async with SessionLocal() as session:
+            bir = await session.scalar(
+                select(BusinessInsightResult)
+                .where(
+                    BusinessInsightResult.tenant_id == context.tenant_id,
+                    BusinessInsightResult.project_id == project.id,
+                    BusinessInsightResult.granularity == req.granularity,
+                )
+                .order_by(BusinessInsightResult.updated_at.desc())
+            )
+            if bir and bir.payload:
+                dashboard = _dashboard_from_bir(bir, project, req.max_per_project)
+                if dashboard:
+                    return {
+                        "projectId": str(project.id),
+                        "projectName": project.name,
+                        "projectColor": hi.project_color(project.id),
+                        "dashboard": dashboard,
+                    }
+            widgets: list[dict[str, Any]] = []
             runner = _make_runner(session, context, project.id)
             ctx = await hi.gather_project_context(session, project)
             try:
@@ -361,7 +502,18 @@ async def home_dashboard_suggestions(
             ),
         }
 
-    results = await asyncio.gather(*(work(p) for p in projects))
+    results = await asyncio.gather(
+        *(
+            _bounded_suggestion(
+                p,
+                work,
+                _DASHBOARD_SUGGESTION_TIMEOUT,
+                "dashboard",
+                None,
+            )
+            for p in projects
+        )
+    )
     return {"projects": list(results)}
 
 

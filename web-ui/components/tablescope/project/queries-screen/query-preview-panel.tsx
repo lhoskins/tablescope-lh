@@ -43,12 +43,14 @@ import { Row } from "./row";
 
 export function QueryPreviewPanel({
   query,
+  collapsible = true,
 }: {
   query: SavedQuery | null;
+  collapsible?: boolean;
 }) {
   if (!query) {
     return (
-      <ContextPanel title="Query Preview" askPlaceholder="Ask about this query…">
+      <ContextPanel title="Query Preview" askPlaceholder="Ask about this query…" collapsible={collapsible}>
         <div className="px-1 py-8 text-center text-small text-ink-tertiary">
           Select a query to preview its SQL and metadata.
         </div>
@@ -56,7 +58,7 @@ export function QueryPreviewPanel({
     );
   }
   return (
-    <ContextPanel title="Query Preview" askPlaceholder="Ask about this query…">
+    <ContextPanel title="Query Preview" askPlaceholder="Ask about this query…" collapsible={collapsible}>
       <div className="space-y-1">
         <div className="min-w-0 truncate text-caption uppercase tracking-wide text-ink-tertiary">
           {query.name}

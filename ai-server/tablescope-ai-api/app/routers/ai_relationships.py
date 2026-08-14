@@ -27,7 +27,7 @@ router = APIRouter()
 async def generate_relationships(req: GenerateRelationshipsRequest) -> GenerateRelationshipsResponse:
     """Generate suggested relationships between project tables."""
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     try:
         ctx = await context_builder.build_context(
@@ -59,8 +59,9 @@ async def generate_relationships(req: GenerateRelationshipsRequest) -> GenerateR
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt=SYSTEM_PROMPT,
-        model=settings.sql_model,
+        model=req.model or settings.sql_model,
         temperature=0.0,
+        ollama_url=req.ollama_url,
     )
 
     # Parse relationships from LLM response
@@ -84,5 +85,5 @@ async def generate_relationships(req: GenerateRelationshipsRequest) -> GenerateR
     return GenerateRelationshipsResponse(
         relationships=relationships,
         request_id=request_id,
-        model_used=settings.sql_model,
+        model_used=req.model or settings.sql_model,
     )

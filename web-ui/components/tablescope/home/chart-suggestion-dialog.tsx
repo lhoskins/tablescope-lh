@@ -105,10 +105,10 @@ export function ChartSuggestionDialog({
       aria-modal="true"
     >
       <div
-        className="my-8 w-full max-w-5xl rounded-xl border border-line-tertiary bg-bg-primary p-5 shadow-lg"
+        className="my-8 flex max-h-[85vh] w-full max-w-5xl flex-col rounded-xl border border-line-tertiary bg-bg-primary p-5 shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="mb-4 flex shrink-0 items-start justify-between gap-3">
           <div>
             <h2 className="flex items-center gap-2 text-h2 text-ink-primary">
               <IconChartBar size={18} className="text-brand-500" />
@@ -128,7 +128,7 @@ export function ChartSuggestionDialog({
           </button>
         </div>
 
-        <div className="grid max-h-[70vh] grid-cols-1 gap-4 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
           {candidates.map((candidate, idx) => {
             const candidateChart = buildCandidateChart(card.chart, candidate);
             const isSelected =
@@ -165,7 +165,7 @@ export function ChartSuggestionDialog({
           })}
         </div>
 
-        <div className="mt-4 flex justify-end gap-2">
+        <div className="mt-4 flex shrink-0 justify-end gap-2">
           <button
             type="button"
             onClick={onClose}
@@ -177,7 +177,7 @@ export function ChartSuggestionDialog({
             type="button"
             onClick={handleApply}
             disabled={!selected || saving}
-            className="rounded-md bg-brand-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-brand-300"
+            className="rounded-md bg-brand px-3 py-1.5 text-[13px] font-medium text-brand-fg hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {saving ? "Saving..." : "Apply chart"}
           </button>

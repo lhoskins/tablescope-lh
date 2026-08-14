@@ -37,6 +37,7 @@ from app.schemas.project_insight import (
     ReviewedInsight,
     ReviewedInsightsResponse,
 )
+from app.services import home_intel_queue as q
 from app.services.project_insight_service import build_project_insight
 from app.tasks.workflows import enqueue_rebuild_project_insight
 
@@ -174,24 +175,26 @@ async def refresh_project_insight(
     until the rebuild completes.
     """
     project = await _require_project_access(project_id, session, context)
+    now_iso = datetime.now(UTC).isoformat()
 
     snap = await _get_snapshot(session, context, project_id)
     if snap is None:
+        payload: dict[str, Any] = {
+            "project": {
+                "id": project.id,
+                "name": project.name,
+                "status": project.type or "Active",
+            },
+            "stale": True,
+            "generatedAt": now_iso,
+            "lastUpdatedAt": now_iso,
+        }
         snap = ProjectIntelligenceSnapshot(
             tenant_id=context.tenant_id,
             user_id=context.user_id,
             project_id=project_id,
             suite="project_insight",
-            payload={
-                "project": {
-                    "id": project.id,
-                    "name": project.name,
-                    "status": project.type or "Active",
-                },
-                "stale": True,
-                "generatedAt": datetime.now(UTC).isoformat(),
-                "lastUpdatedAt": datetime.now(UTC).isoformat(),
-            },
+            payload=payload,
             is_stale=True,
         )
         session.add(snap)
@@ -199,6 +202,9 @@ async def refresh_project_insight(
         snap.is_stale = True
         payload = dict(snap.payload)
         payload["stale"] = True
+        payload["lastUpdatedAt"] = now_iso
+        if "generatedAt" not in payload:
+            payload["generatedAt"] = now_iso
         snap.payload = payload
     await session.commit()
 
@@ -206,47 +212,76 @@ async def refresh_project_insight(
         tenant_id=context.tenant_id, project_id=project_id
     )
 
-    payload = dict(snap.payload)
-    payload["stale"] = True
     if "project" not in payload:
         payload["project"] = {
             "id": project.id,
             "name": project.name,
             "status": project.type or "Active",
         }
-    if snap.updated_at:
-        payload["generatedAt"] = snap.updated_at.isoformat()
     return ProjectInsightResponse.model_validate(payload)
 
 
-@router.post("/{project_id}/insight/clear-cache")
+@router.post("/{project_id}/insight/clear-cache", response_model=ProjectInsightResponse)
 async def clear_project_insight_cache(
     project_id: int,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.ADMIN)),
-) -> dict[str, Any]:
-    """Clear Project Insight snapshots for a single project.
+) -> ProjectInsightResponse:
+    """Clear Project Insight caches for a single project.
 
-    Deletes the per-user project insight snapshots and any shared Business
-    Insight cache row for this project. The next project insight refresh
-    regenerates cards with the latest ranking.
+    Deletes shared Business Insight result rows for this project and marks the
+    per-user ``project_insight`` snapshot stale so the page never goes blank.
+    A background rebuild is queued; the client sees the existing snapshot with
+    ``stale=true`` until the fresh run completes.
     """
+    from datetime import UTC, datetime
+
     project = await _require_project_access(project_id, session, context)
-    r1 = await session.execute(
-        delete(ProjectIntelligenceSnapshot).where(
-            ProjectIntelligenceSnapshot.tenant_id == context.tenant_id,
-            ProjectIntelligenceSnapshot.project_id == project.id,
-            ProjectIntelligenceSnapshot.suite == "project_insight",
-        )
-    )
-    r2 = await session.execute(
+    now_iso = datetime.now(UTC).isoformat()
+
+    await session.execute(
         delete(BusinessInsightResult).where(
             BusinessInsightResult.tenant_id == context.tenant_id,
             BusinessInsightResult.project_id == project.id,
         )
     )
-    project_snapshot_count = int(getattr(r1, "rowcount", 0) or 0)
-    business_count = int(getattr(r2, "rowcount", 0) or 0)
+
+    snap = await _get_snapshot(session, context, project_id, suite="project_insight")
+    if snap is None:
+        payload: dict[str, Any] = {
+            "project": {
+                "id": project.id,
+                "name": project.name,
+                "status": project.type or "Active",
+            },
+            "stale": True,
+            "generatedAt": now_iso,
+            "lastUpdatedAt": now_iso,
+        }
+        snap = ProjectIntelligenceSnapshot(
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            project_id=project_id,
+            suite="project_insight",
+            payload=payload,
+            is_stale=True,
+        )
+        session.add(snap)
+    else:
+        payload = dict(snap.payload)
+        payload["stale"] = True
+        payload["lastUpdatedAt"] = now_iso
+        if "generatedAt" not in payload:
+            payload["generatedAt"] = now_iso
+        if "project" not in payload:
+            payload["project"] = {
+                "id": project.id,
+                "name": project.name,
+                "status": project.type or "Active",
+            }
+        snap.payload = payload
+        snap.is_stale = True
+
     session.add(
         AuditEvent(
             tenant_id=context.tenant_id,
@@ -258,7 +293,20 @@ async def clear_project_insight_cache(
         )
     )
     await session.commit()
-    return {"deleted": {"project_intelligence_snapshots": project_snapshot_count, "business_insight_results": business_count}}
+
+    try:
+        redis = q.get_redis()
+        pcs_keys = await redis.keys(f"pcs:{context.tenant_id}:*")
+        if pcs_keys:
+            await redis.delete(*pcs_keys)
+    except Exception:
+        logger.exception("Failed to clear Percent Change Summary cache")
+
+    await enqueue_rebuild_project_insight(
+        tenant_id=context.tenant_id, project_id=project_id
+    )
+
+    return ProjectInsightResponse.model_validate(payload)
 
 
 @router.post(

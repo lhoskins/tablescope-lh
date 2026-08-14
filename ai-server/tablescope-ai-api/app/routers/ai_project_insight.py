@@ -68,7 +68,7 @@ async def project_insight(req: ProjectInsightRequest) -> ProjectInsightResponse:
     authorized context. Recommended dashboards/queries/KPIs are AI suggestions.
     """
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     best_practices = load_prompt_reference("project_insight_best_practices.md")
     best_practices_block = (
@@ -182,10 +182,11 @@ async def project_insight(req: ProjectInsightRequest) -> ProjectInsightResponse:
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt=_PROJECT_INSIGHT_SYSTEM_PROMPT,
-        model=settings.reasoning_model,
+        model=req.model or settings.reasoning_model,
         temperature=0.2,
         num_ctx=24576,
         response_format="json",
+        ollama_url=req.ollama_url,
     )
 
     parsed = _parse_json_response(raw) or {}
@@ -211,5 +212,5 @@ async def project_insight(req: ProjectInsightRequest) -> ProjectInsightResponse:
             parsed.get("insightValidationWorkflow"), 12
         ),
         request_id=request_id,
-        model_used=settings.reasoning_model,
+        model_used=req.model or settings.reasoning_model,
     )

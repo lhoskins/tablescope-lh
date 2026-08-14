@@ -6,10 +6,12 @@ import { useQuery } from "@tanstack/react-query";
 import { IconLoader2, IconPlus, IconServer } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { listNetworkFileConnections, type NetworkFileConnection } from "@/lib/api/network-file-connections";
+import { BUILDER_QUERY_OPTIONS } from "@/lib/query-options";
 import { NetworkRepositoryModal } from "./network-repository-modal";
 
 export function ConnectedNetworkRepositories({ projectId }: { projectId?: string }) {
   const { data: connections, isLoading } = useQuery({
+    ...BUILDER_QUERY_OPTIONS,
     queryKey: ["builder", "network-file-connections"],
     queryFn: listNetworkFileConnections,
   });

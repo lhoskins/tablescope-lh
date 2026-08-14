@@ -20,27 +20,76 @@ logger = logging.getLogger(__name__)
 TIMEOUT = httpx.Timeout(180.0, connect=10.0)
 
 
-async def generate(
+def _is_openai_target(target_url: str) -> bool:
+    """Heuristic: vLLM/OpenAI-compatible endpoints expose a /v1 base path."""
+    return target_url.endswith("/v1") or "/v1/" in target_url
+
+
+async def _generate_openai(
     prompt: str,
     system_prompt: str = "",
-    model: str | None = None,
+    model: str = "",
+    target_url: str = "",
     temperature: float = 0.1,
     max_tokens: int | None = None,
+    stop: list[str] | None = None,
+    response_format: str | None = None,
+) -> str:
+    """Generate using a vLLM/OpenAI-compatible /v1/chat/completions endpoint."""
+    messages: list[dict[str, str]] = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "stream": False,
+    }
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
+    if stop:
+        payload["stop"] = stop
+    if response_format == "json":
+        payload["response_format"] = {"type": "json_object"}
+
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.post(
+            f"{target_url}/chat/completions",
+            json=payload,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        message = data["choices"][0]["message"]
+        content = message.get("content") or message.get("reasoning") or ""
+        text = str(content)
+        # Muse Glimmer emits channel-scoped messages (to=self reasoning,
+        # assistant to=user final answer). When the vLLM parser does not split
+        # them, keep only the final user-facing segment.
+        for marker in ("assistant to=user", " to=user", "to=user"):
+            if marker in text:
+                text = text.split(marker)[-1]
+        return text.strip()
+
+
+async def _generate_ollama(
+    prompt: str,
+    system_prompt: str = "",
+    model: str = "",
+    target_url: str = "",
+    temperature: float = 0.1,
+    max_tokens: int | None = None,
+    stop: list[str] | None = None,
     num_ctx: int | None = None,
     response_format: str | None = None,
 ) -> str:
-    """Generate text completion from Ollama.
-
-    ``response_format="json"`` forces Ollama's constrained JSON decoding so the
-    model can only emit a syntactically valid JSON value — use it for any call
-    whose response is parsed as JSON, to stop the model from wrapping output in
-    prose/markdown.
-    """
-    model = model or settings.reasoning_model
-
+    """Generate using an Ollama /api/generate endpoint."""
     options: dict[str, Any] = {"temperature": temperature}
     if max_tokens is not None:
         options["num_predict"] = max_tokens
+    if stop:
+        options["stop"] = stop
     if num_ctx is not None:
         options["num_ctx"] = num_ctx
 
@@ -57,11 +106,56 @@ async def generate(
 
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         resp = await client.post(
-            f"{settings.ollama_url}/api/generate",
+            f"{target_url}/api/generate",
             json=payload,
         )
         resp.raise_for_status()
         return resp.json()["response"]
+
+
+async def generate(
+    prompt: str,
+    system_prompt: str = "",
+    model: str | None = None,
+    ollama_url: str | None = None,
+    temperature: float = 0.1,
+    max_tokens: int | None = None,
+    stop: list[str] | None = None,
+    num_ctx: int | None = None,
+    response_format: str | None = None,
+) -> str:
+    """Generate text completion from Ollama or a vLLM/OpenAI-compatible target.
+
+    ``response_format="json"`` forces constrained JSON decoding so the model can
+    only emit a syntactically valid JSON value — use it for any call whose
+    response is parsed as JSON.
+    """
+    model = model or settings.reasoning_model
+    target_url = (ollama_url or settings.ollama_url).rstrip("/")
+
+    if _is_openai_target(target_url):
+        return await _generate_openai(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            model=model,
+            target_url=target_url,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stop=stop,
+            response_format=response_format,
+        )
+
+    return await _generate_ollama(
+        prompt=prompt,
+        system_prompt=system_prompt,
+        model=model,
+        target_url=target_url,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        stop=stop,
+        num_ctx=num_ctx,
+        response_format=response_format,
+    )
 
 
 _TEIID_RULES = (
@@ -110,6 +204,10 @@ _TEIID_RULES = (
     "expression that is already a date/timestamp (e.g. do NOT write "
     "PARSETIMESTAMP(PARSETIMESTAMP(\"Month\", 'yyyy-MM-dd'), 'M/d/yyyy')). "
     "Use the exact same date expression in SELECT, GROUP BY, and ORDER BY.\n"
+    "16. Generate a single SELECT statement. Do NOT use UNION or UNION ALL "
+    "unless the user explicitly asks to combine rows from two different tables. "
+    "Never place ORDER BY inside a UNION branch; in Teiid ORDER BY is only "
+    "valid at the very end of the entire query.\n"
 )
 
 _SEMANTIC_RULES = (
@@ -192,6 +290,8 @@ async def generate_sql(
     source_catalog: list[Any] | None = None,
     preferred_sources: list[str] | None = None,
     relevant_columns: list[str] | None = None,
+    model: str | None = None,
+    ollama_url: str | None = None,
 ) -> str:
     """Generate SQL using the code-specialized model with semantic discovery."""
     catalog = _catalog_text(allowed_tables, source_catalog)
@@ -203,7 +303,9 @@ async def generate_sql(
         "Generate SQL only using the allowed sources and columns listed below.\n"
         "Do not use SELECT *.\n"
         "Do not generate INSERT, UPDATE, DELETE, DROP, or any write operations.\n"
-        "Return only the SQL query, no explanation.\n"
+        "Return ONLY the final SQL query. Do not explain, reason, or preface. "
+        "Do not wrap the SQL in markdown unless the user explicitly asks for it. "
+        "No chain-of-thought, no commentary, no 'Here is the query' introductions.\n"
         "When a Knowledge Graph context block is present, prioritize SQL that "
         "measures or validates its risks, opportunities, gaps, warnings, "
         "recommended/measured KPIs, documented processes, and entity "
@@ -221,8 +323,11 @@ async def generate_sql(
     return await generate(
         prompt=prompt,
         system_prompt=system_prompt,
-        model=settings.sql_model,
+        model=model or settings.sql_model,
+        ollama_url=ollama_url,
         temperature=0.0,
+        max_tokens=1024,
+        stop=[";"],
     )
 
 
@@ -235,6 +340,8 @@ async def repair_sql(
     source_catalog: list[Any] | None = None,
     preferred_sources: list[str] | None = None,
     relevant_columns: list[str] | None = None,
+    model: str | None = None,
+    ollama_url: str | None = None,
 ) -> str:
     """Ask the model to fix SQL that failed validation, preserving intent."""
     catalog = _catalog_text(allowed_tables, source_catalog)
@@ -266,8 +373,11 @@ async def repair_sql(
     return await generate(
         prompt=repair_prompt,
         system_prompt=system_prompt,
-        model=settings.sql_model,
+        model=model or settings.sql_model,
+        ollama_url=ollama_url,
         temperature=0.0,
+        max_tokens=1024,
+        stop=[";"],
     )
 
 

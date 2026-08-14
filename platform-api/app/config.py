@@ -97,7 +97,8 @@ class Settings(BaseSettings):
     # this to true blocks any FP16 / safetensors / conversion pipeline paths.
     llm_model_catalog_gguf_only: bool = True
     # Allow staging and activation of a verified artifact on a runtime target.
-    # Kept off until the deployment agent and canary pipeline are wired.
+    # Enabled in docker-compose by default for deployments; kept false here so
+    # test suites that have not seeded the LLM Framework tables are unaffected.
     llm_deployment_enabled: bool = False
     # Require two distinct platform administrators to approve a production
     # model replacement before activation.
@@ -120,6 +121,8 @@ class Settings(BaseSettings):
     # Optional Hugging Face token for accessing gated models.
     llm_huggingface_token: str = ""
     # Phase 4: allow dynamic routing profile changes and activation.
+    # Enabled in docker-compose by default for deployments; kept false here so
+    # test suites that have not seeded the LLM Framework tables are unaffected.
     llm_dynamic_routing_enabled: bool = False
     # Phase 5: enable embedding-model re-index migrations (dual collection,
     # re-embed, recall comparison, cut-over). Disabled until the AI server
@@ -136,13 +139,23 @@ class Settings(BaseSettings):
     llm_deployment_agent_url: str = ""
     # Internal Ollama API URL used by the deployment agent and preflight checks.
     llm_ollama_url: str = "http://ollama:11434"
-    # Path on the AI host where GGUF files are installed before ollama create.
-    # The agent writes here and Ollama's Modelfile references this path.
-    llm_model_install_path: str = "/mnt/tablescope-ai/ollama/models/imported"
+    # Local path on the deployment worker where GGUF files are staged before
+    # being uploaded to the target Ollama host by digest. Must be on a volume
+    # visible to the platform-api worker container.
+    llm_model_install_path: str = "/opt/tablescope/model-vault/install"
     # Number of Ollama model slots reserved for the previous (rollback) model.
     llm_ollama_rollback_slots: int = 1
     tablescope_ai_cross_project_enabled: bool = False
     tablescope_ai_tenant_scope_enabled: bool = False
+
+    # --- Voice transcription (private STT pipeline) ---
+    voice_input_enabled: bool = False  # master switch; per-tenant flag also required
+    voice_max_duration_seconds: int = 120
+    voice_max_upload_bytes: int = 20 * 1024 * 1024  # 20 MiB
+    voice_rate_limit_window_seconds: int = 600  # 10 minutes
+    voice_rate_limit_max_per_window: int = 30
+    voice_ai_timeout_seconds: float = 45.0
+
     # Business Context (Goal Setting) workspace feature flags.
     business_context_v2_enabled: bool = True
     business_context_kpi_matching_enabled: bool = True

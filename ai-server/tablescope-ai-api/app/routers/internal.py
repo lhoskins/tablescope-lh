@@ -8,15 +8,12 @@ server itself does not have the toolchain to perform.
 from __future__ import annotations
 
 import logging
-import uuid
-from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from app.core.config import settings
 from app.core.security import verify_signature
-from app.services import llm_client, vector_store
+from app.services import vector_store
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +47,7 @@ async def reindex_tenant_collection(req: ReindexRequest) -> ReindexResponse:
     (platform-api) decides whether the recall score is high enough to alias the
     target collection as the active tenant collection.
     """
-    payload = req.model_dump(exclude={"signature"})
+    payload = req.model_dump(exclude={"signature"}, exclude_unset=True)
     verify_signature(payload, req.signature)
 
     try:

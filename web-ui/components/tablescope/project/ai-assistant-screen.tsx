@@ -3,19 +3,19 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
-  IconArrowUp,
   IconSparkles,
   IconPlus,
   IconHistory,
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { StatusDot } from "@/components/tablescope/status-dot";
+import { ContextPanel } from "@/components/tablescope/context-panel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { AutosizeTextarea } from "@/components/ui/autosize-textarea";
 import { cn } from "@/lib/cn";
 import { useProjectShell, askProjectAi } from "@/lib/ui/use-project-data";
 import { ResponsePresenter } from "@/components/ai/ResponsePresenter";
+import { AskAnythingComposer } from "@/components/ai/ask-anything-composer";
 import type { ResponseEnvelope } from "@/lib/api/ai-actions";
 
 interface ChatMessage {
@@ -145,32 +145,15 @@ export function AiAssistantScreen({ projectId }: { projectId: string }) {
         </div>
 
         <div className="border-t border-line-tertiary pt-3">
-          <div className="flex items-end gap-2 rounded-lg border border-line-secondary bg-bg-primary px-3 py-2">
-            <AutosizeTextarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  send(input);
-                }
-              }}
-              minRows={2}
-              maxRows={8}
-              placeholder={`Ask about your data, documents, or dashboards in ${project?.name ?? "this project"}…`}
-              aria-label="Ask about your project"
-              className="flex-1 text-[13px] text-ink-primary placeholder:text-ink-tertiary"
-            />
-            <button
-              type="button"
-              onClick={() => send(input)}
-              disabled={busy || !input.trim()}
-              aria-label="Send"
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-brand text-brand-fg hover:bg-brand-700 disabled:opacity-40"
-            >
-              <IconArrowUp size={15} />
-            </button>
-          </div>
+          <AskAnythingComposer
+            value={input}
+            onChange={setInput}
+            onSubmit={send}
+            placeholder={`Ask about your data, documents, or dashboards in ${project?.name ?? "this project"}…`}
+            ariaLabel="Ask about your project"
+            busy={busy}
+            projectId={projectId}
+          />
           <p className="mt-1.5 text-center text-small text-ink-tertiary">
             AI responses are scoped to this project and tenant only. All actions
             are audited.
@@ -212,12 +195,8 @@ function ChatBubble({ message }: { message: ChatMessage }) {
 function AiContextRail({ projectId }: { projectId: string }) {
   const { project, tenant } = useProjectShell(projectId);
   return (
-    <aside className="flex w-rail shrink-0 flex-col border-l border-line-tertiary bg-bg-tertiary">
-      <div className="flex items-center justify-between px-4 py-3.5">
-        <span className="text-h2 text-ink-primary">Conversation</span>
-        <StatusDot tone="online" />
-      </div>
-      <div className="flex-1 space-y-3 overflow-y-auto px-4 pb-4">
+    <ContextPanel title="Conversation" aiOnline collapsible>
+      <div className="space-y-3">
         <Section title="Active Context">
           <dl className="space-y-1 text-[13px]">
             <RailRow label="Tenant" value={tenant.name} />
@@ -240,7 +219,7 @@ function AiContextRail({ projectId }: { projectId: string }) {
           </div>
         </Section>
       </div>
-    </aside>
+    </ContextPanel>
   );
 }
 

@@ -35,7 +35,7 @@ async def intelligence_interpret(
     an optional callout, and a recommended action.
     """
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     blocks: list[str] = []
     for a in req.analyses:
@@ -77,9 +77,10 @@ async def intelligence_interpret(
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt=_INTEL_SYSTEM_PROMPT,
-        model=settings.reasoning_model,
+        model=req.model or settings.reasoning_model,
         temperature=0.2,
         num_ctx=8192,
+        ollama_url=req.ollama_url,
     )
 
     parsed = _parse_json_response(raw)
@@ -108,5 +109,5 @@ async def intelligence_interpret(
     return IntelligenceInterpretResponse(
         insights=insights,
         request_id=request_id,
-        model_used=settings.reasoning_model,
+        model_used=req.model or settings.reasoning_model,
     )

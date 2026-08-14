@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 from arq import create_pool
 from arq.connections import RedisSettings
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -24,10 +26,22 @@ from app.models.llm_framework import (
 )
 from app.services.llm_catalog_client import CatalogModel, HuggingFaceCatalogClient
 from app.services.llm_ollama_adapter import OllamaAdapter
+from app.services.llm_vllm_adapter import VllmAdapter
 
 logger = logging.getLogger(__name__)
 
 CAPABILITIES = ROUTING_CAPABILITIES
+
+
+@dataclass(frozen=True)
+class ActiveRouting:
+    """Resolved routing decision for a capability."""
+
+    model: str | None
+    ollama_url: str | None
+    target_id: int | None
+    installation_id: int | None
+    version: int | None
 
 
 class InvalidCapabilityError(ValueError):
@@ -52,6 +66,70 @@ async def validate_routing_capability(capability: str) -> str:
             f"Routable capabilities are: {', '.join(ROUTING_CAPABILITIES)}"
         )
     return normalized
+
+
+async def get_active_routing(session: AsyncSession, capability: str) -> ActiveRouting:
+    """Return the active routing decision for a routable capability."""
+    try:
+        normalized = await validate_routing_capability(capability)
+    except InvalidCapabilityError:
+        return ActiveRouting(None, None, None, None, None)
+    stmt = (
+        select(LLMRoutingProfile)
+        .where(
+            LLMRoutingProfile.capability == normalized,
+            LLMRoutingProfile.is_active.is_(True),
+        )
+        .options(selectinload(LLMRoutingProfile.installation))
+        .options(selectinload(LLMRoutingProfile.target))
+        .order_by(LLMRoutingProfile.priority.desc())
+        .limit(1)
+    )
+    try:
+        profile = (await session.execute(stmt)).scalar_one_or_none()
+    except SQLAlchemyError as exc:
+        logger.warning("Failed to resolve active LLM routing profile: %s", exc)
+        return ActiveRouting(None, None, None, None, None)
+    if profile is None or profile.installation is None:
+        return ActiveRouting(None, None, None, None, None)
+    return ActiveRouting(
+        model=profile.installation.ollama_model_name,
+        ollama_url=profile.target.host if profile.target else None,
+        target_id=profile.target_id,
+        installation_id=profile.installation_id,
+        version=profile.version,
+    )
+
+
+async def resolve_active_model_for_capability(capability: str) -> str | None:
+    """Resolve the active model for a capability using a short-lived session.
+
+    Returns ``None`` when dynamic routing is disabled or no active profile exists,
+    letting the AI server fall back to its static defaults.
+    """
+    settings = get_settings()
+    if not settings.llm_dynamic_routing_enabled:
+        return None
+    from app.database import SessionLocal
+
+    async with SessionLocal() as session:
+        routing = await get_active_routing(session, capability)
+        return routing.model
+
+
+async def resolve_active_routing_for_capability(capability: str) -> ActiveRouting:
+    """Resolve the full active routing decision for a capability.
+
+    Returns an empty ActiveRouting when dynamic routing is disabled or no active
+    profile exists, letting callers fall back to static defaults.
+    """
+    settings = get_settings()
+    if not settings.llm_dynamic_routing_enabled:
+        return ActiveRouting(None, None, None, None, None)
+    from app.database import SessionLocal
+
+    async with SessionLocal() as session:
+        return await get_active_routing(session, capability)
 
 
 async def get_inventory(session: AsyncSession) -> dict:
@@ -106,6 +184,13 @@ async def register_runtime_target(
     version: str | None = None,
     max_loaded_models: int | None = None,
     keep_alive_minutes: int | None = None,
+    environment: str | None = None,
+    gpu_memory_gb: int | None = None,
+    system_ram_gb: int | None = None,
+    disk_gb: int | None = None,
+    is_internet_isolated: bool = True,
+    max_concurrency: int | None = None,
+    context_tokens: int | None = None,
     labels: dict | None = None,
 ) -> LLMRuntimeTarget:
     """Register a runtime target. Probes reachability but does not require it."""
@@ -117,16 +202,22 @@ async def register_runtime_target(
 
     is_reachable = False
     last_seen_at = None
-    if runtime_type == "ollama":
-        try:
+    try:
+        if runtime_type == "ollama":
             result = await OllamaAdapter(base_url=host).preflight(
                 artifact_size=0, reserve_bytes=0
             )
-            is_reachable = result.reachable
-            if is_reachable:
-                last_seen_at = datetime.now(UTC)
-        except Exception:
-            logger.warning("Reachability probe failed for new target %s (%s)", name, host)
+        elif runtime_type == "vllm":
+            result = await VllmAdapter(base_url=host).preflight(
+                artifact_size=0, reserve_bytes=0
+            )
+        else:
+            result = None
+        if result and result.reachable:
+            is_reachable = True
+            last_seen_at = datetime.now(UTC)
+    except Exception:
+        logger.warning("Reachability probe failed for new target %s (%s)", name, host)
 
     target = LLMRuntimeTarget(
         name=name,
@@ -138,6 +229,13 @@ async def register_runtime_target(
         last_seen_at=last_seen_at,
         max_loaded_models=max_loaded_models,
         keep_alive_minutes=keep_alive_minutes,
+        environment=environment,
+        gpu_memory_gb=gpu_memory_gb,
+        system_ram_gb=system_ram_gb,
+        disk_gb=disk_gb,
+        is_internet_isolated=is_internet_isolated,
+        max_concurrency=max_concurrency,
+        context_tokens=context_tokens,
         labels=labels or {},
     )
     session.add(target)
@@ -169,7 +267,7 @@ async def list_deployments(session: AsyncSession, *, limit: int = 50) -> list[di
             select(LLMDeployment, LLMInstallation, LLMModelArtifact, LLMRuntimeTarget)
             .join(LLMInstallation, LLMDeployment.installation_id == LLMInstallation.id)
             .join(LLMModelArtifact, LLMInstallation.artifact_id == LLMModelArtifact.id)
-            .join(LLMRuntimeTarget, LLMInstallation.target_id == LLMRuntimeTarget.id)
+            .join(LLMRuntimeTarget, LLMDeployment.target_id == LLMRuntimeTarget.id)
             .order_by(LLMDeployment.created_at.desc())
             .limit(min(limit, 200))
         )
@@ -185,6 +283,8 @@ async def list_deployments(session: AsyncSession, *, limit: int = 50) -> list[di
             "requested_by_user_id": d.requested_by_user_id,
             "approved_by_user_id": d.approved_by_user_id,
             "status": d.status,
+            "deployment_mode": d.deployment_mode,
+            "runtime_options": d.runtime_options,
             "previous_deployment_id": d.previous_deployment_id,
             "stabilized_at": d.stabilized_at,
             "created_at": d.created_at,
@@ -221,10 +321,17 @@ async def upsert_routing_profile(
     capability: str,
     target_id: int,
     installation_id: int,
+    deployment_id: int | None = None,
     priority: int = 1,
     is_active: bool = True,
+    expected_version: int | None = None,
 ) -> LLMRoutingProfile:
-    """Create or update a routing profile and ensure at most one active profile per capability."""
+    """Create a new routing profile version and activate it atomically.
+
+    Each activation creates a new version row so rollback can restore the
+    previous active profile. ``expected_version`` provides optimistic
+    concurrency for the current active profile version.
+    """
     normalized = await validate_routing_capability(capability)
     target = await session.get(LLMRuntimeTarget, target_id)
     if target is None:
@@ -233,37 +340,43 @@ async def upsert_routing_profile(
     if installation is None or installation.status != "installed":
         raise ValueError("Installation is not installed")
 
-    profile = await session.scalar(
+    # Find the currently active profile for this capability (if any).
+    active_profile = await session.scalar(
         select(LLMRoutingProfile).where(
             LLMRoutingProfile.capability == normalized,
-            LLMRoutingProfile.target_id == target_id,
-            LLMRoutingProfile.installation_id == installation_id,
+            LLMRoutingProfile.is_active.is_(True),
         )
     )
-    if profile is None:
-        profile = LLMRoutingProfile(
-            capability=normalized,
-            target_id=target_id,
-            installation_id=installation_id,
-        )
-        session.add(profile)
-
-    if is_active:
-        for existing in (
-            await session.scalars(
-                select(LLMRoutingProfile).where(
-                    LLMRoutingProfile.capability == normalized,
-                    LLMRoutingProfile.is_active.is_(True),
-                )
+    if expected_version is not None:
+        if active_profile is None or active_profile.version != expected_version:
+            raise ValueError(
+                f"Routing version mismatch: expected {expected_version}, "
+                f"found {active_profile.version if active_profile else 'none'}"
             )
-        ).all():
-            existing.is_active = False
 
-    profile.is_active = is_active
-    profile.priority = priority
-    profile.config = {"installation_id": installation_id}
+    next_version = 1
+    if active_profile is not None:
+        next_version = active_profile.version + 1
+        active_profile.is_active = False
+
+    new_profile = LLMRoutingProfile(
+        capability=normalized,
+        target_id=target_id,
+        installation_id=installation_id,
+        deployment_id=deployment_id,
+        is_active=is_active,
+        priority=priority,
+        version=next_version,
+        previous_routing_profile_id=active_profile.id if active_profile else None,
+        config={"installation_id": installation_id, "deployment_id": deployment_id},
+    )
+    session.add(new_profile)
     await session.flush()
-    return profile
+
+    if active_profile is not None:
+        active_profile.superseded_by_id = new_profile.id
+
+    return new_profile
 
 
 async def release_quarantined_artifact(
@@ -372,6 +485,8 @@ async def enqueue_deploy_llm_artifact(
     artifact_id: int,
     target_id: int,
     requested_by_user_id: int,
+    deployment_mode: str = "install_only",
+    runtime_options: dict | None = None,
 ) -> str:
     """Enqueue a verified artifact for installation on a runtime target."""
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
@@ -382,6 +497,8 @@ async def enqueue_deploy_llm_artifact(
             artifact_id=artifact_id,
             target_id=target_id,
             requested_by_user_id=requested_by_user_id,
+            deployment_mode=deployment_mode,
+            runtime_options=runtime_options or {},
         )
         return job.job_id if job else ""
     finally:

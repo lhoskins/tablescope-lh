@@ -42,4 +42,5 @@ export interface SidebarProps {
   project?: ProjectSummary | null;
   otherProjects?: ProjectSummary[];
   counts?: Partial<Record<"projects" | "queries" | "documents" | "actionCount", number>>;
+  className?: string;
 }

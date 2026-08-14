@@ -189,11 +189,13 @@ def _qualify_bare_shared_columns(
         if c1.lower() == c2.lower():
             shared.add(c1)
 
-    # Also include any column that exists in both tables according to the
-    # supplied schema.  This catches shared keys the model uses in SELECT/GROUP
-    # BY but did not place in the ON clause.
+    # Also include any column that exists in the left table (or in both)
+    # according to the supplied schema.  This catches not only shared join keys
+    # but also left-table columns the model left bare in GROUP BY / ORDER BY /
+    # WHERE, which Teiid rejects as ambiguous once a second table is in scope.
     if table_schema:
         cols_by_table: dict[str, set[str]] = {}
+        left_col_canonical: dict[str, str] = {}
         for entry in table_schema:
             t = _strip_quotes(str(entry.get("table") or "")).lower()
             cols = entry.get("columns") or []
@@ -203,11 +205,17 @@ def _qualify_bare_shared_columns(
                 name = _strip_quotes(str(col.get("name") or ""))
                 if name:
                     cols_by_table[t].add(name.lower())
-        left_cols = cols_by_table.get(left_table.lower(), set())
+                    if t == left_table.lower():
+                        left_col_canonical.setdefault(name.lower(), name)
         right_cols = cols_by_table.get(right_table.lower(), set())
         shared.update(
             c
-            for c in left_cols & right_cols
+            for c in left_col_canonical.values()
+            if c
+        )
+        shared.update(
+            c
+            for c in (cols_by_table.get(left_table.lower(), set()) & right_cols)
             if c
         )
 

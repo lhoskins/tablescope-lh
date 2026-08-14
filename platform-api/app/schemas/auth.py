@@ -63,4 +63,5 @@ class CurrentUserResponse(BaseModel):
     tenant_slug: str | None = None
     avatar_url: str | None = None
     company_logo_url: str | None = None
+    voice_input_enabled: bool = False
     permissions: list[str] = Field(default_factory=list)

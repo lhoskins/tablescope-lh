@@ -26,6 +26,7 @@ class TenantRead(BaseModel):
     external_id: str | None
     is_active: bool
     enforce_2fa: bool = False
+    voice_input_enabled: bool = False
     logo_url: str | None = None
     created_at: datetime
     updated_at: datetime
@@ -119,6 +120,7 @@ class TenantSettingsRead(BaseModel):
     is_active: bool
     enforce_2fa: bool
     allowed_domains_enabled: bool
+    voice_input_enabled: bool = False
     logo_url: str | None = None
     login_url: str | None = None
     created_at: datetime

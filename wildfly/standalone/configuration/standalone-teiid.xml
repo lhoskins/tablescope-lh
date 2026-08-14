@@ -485,9 +485,39 @@
                     <connection-definitions>
                         <connection-definition class-name="org.teiid.resource.adapter.file.FileManagedConnectionFactory" jndi-name="java:/fileDS" enabled="true" use-java-context="true" pool-name="fileDS">
                             <config-property name="ParentDirectory">/opt/wildfly/teiidfiles/customers</config-property>
+                            <pool>
+                                <min-pool-size>1</min-pool-size>
+                                <max-pool-size>100</max-pool-size>
+                                <prefill>false</prefill>
+                                <flush-strategy>IdleConnections</flush-strategy>
+                            </pool>
+                            <timeout>
+                                <blocking-timeout-millis>10000</blocking-timeout-millis>
+                                <idle-timeout-minutes>3</idle-timeout-minutes>
+                            </timeout>
+                            <validation>
+                                <validate-on-match>true</validate-on-match>
+                                <background-validation>true</background-validation>
+                                <background-validation-millis>10000</background-validation-millis>
+                            </validation>
                         </connection-definition>
                         <connection-definition class-name="org.teiid.resource.adapter.file.FileManagedConnectionFactory" jndi-name="java:/excelDS" enabled="true" use-java-context="true" pool-name="excelDS">
                             <config-property name="ParentDirectory">/opt/wildfly/teiidfiles/customers</config-property>
+                            <pool>
+                                <min-pool-size>1</min-pool-size>
+                                <max-pool-size>100</max-pool-size>
+                                <prefill>false</prefill>
+                                <flush-strategy>IdleConnections</flush-strategy>
+                            </pool>
+                            <timeout>
+                                <blocking-timeout-millis>10000</blocking-timeout-millis>
+                                <idle-timeout-minutes>3</idle-timeout-minutes>
+                            </timeout>
+                            <validation>
+                                <validate-on-match>true</validate-on-match>
+                                <background-validation>true</background-validation>
+                                <background-validation-millis>10000</background-validation-millis>
+                            </validation>
                         </connection-definition>
                     </connection-definitions>
                 </resource-adapter>
@@ -500,8 +530,8 @@
                             <config-property name="ParentDirectory">/opt/wildfly/teiidfiles/customers</config-property>
                             <config-property name="ProxyBaseUrl">http://platform-api:8000/internal/file-proxy</config-property>
                             <pool>
-                                <min-pool-size>0</min-pool-size>
-                                <max-pool-size>50</max-pool-size>
+                                <min-pool-size>1</min-pool-size>
+                                <max-pool-size>100</max-pool-size>
                                 <prefill>false</prefill>
                                 <flush-strategy>IdleConnections</flush-strategy>
                             </pool>
@@ -509,6 +539,11 @@
                                 <blocking-timeout-millis>10000</blocking-timeout-millis>
                                 <idle-timeout-minutes>3</idle-timeout-minutes>
                             </timeout>
+                            <validation>
+                                <validate-on-match>true</validate-on-match>
+                                <background-validation>true</background-validation>
+                                <background-validation-millis>10000</background-validation-millis>
+                            </validation>
                         </connection-definition>
                     </connection-definitions>
                 </resource-adapter>
@@ -708,8 +743,8 @@
         <subsystem xmlns="urn:jboss:domain:undertow:10.0" default-server="default-server" default-virtual-host="default-host" default-servlet-container="default" default-security-domain="other" statistics-enabled="${wildfly.undertow.statistics-enabled:${wildfly.statistics-enabled:false}}">
             <buffer-cache name="default"/>
             <server name="default-server">
-                <http-listener name="default" socket-binding="http" redirect-socket="https" enable-http2="true"/>
-                <https-listener name="https" socket-binding="https" security-realm="ApplicationRealm" enable-http2="true"/>
+                <http-listener name="default" socket-binding="http" redirect-socket="https" enable-http2="true" max-post-size="104857600"/>
+                <https-listener name="https" socket-binding="https" security-realm="ApplicationRealm" enable-http2="true" max-post-size="104857600"/>
                 <host name="default-host" alias="localhost">
                     <location name="/" handler="welcome-content"/>
                     <http-invoker security-realm="ApplicationRealm"/>

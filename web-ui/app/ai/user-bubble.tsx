@@ -40,7 +40,7 @@ export function UserBubble({ content }: { content: string }) {
   return (
     <div className="flex flex-col items-end">
       <div className="max-w-[75%] rounded-xl bg-brand px-4 py-3 text-[13px] leading-relaxed text-brand-fg">
-        <span className="whitespace-pre-wrap">{content}</span>
+        <span className="whitespace-pre-wrap break-words">{content}</span>
       </div>
     </div>
   );

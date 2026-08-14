@@ -99,6 +99,47 @@ def _catalog_table_columns(
     return result
 
 
+def _compact_sql_context(
+    ctx: Any,
+    catalog: list[SourceCatalogEntry] | None,
+    allowed_tables: list[str],
+    kg_block: str,
+) -> str:
+    """Return a token-budget schema summary for SQL generation.
+
+    Avoids dumping the full grounding package (documents, dashboards, full
+    query history) into the prompt. Only authorized table columns and a short
+    Knowledge Graph steer are included.
+    """
+    lines: list[str] = ["Allowed tables and columns:"]
+    allowed_set = set(allowed_tables)
+
+    for entry in catalog or []:
+        if entry.kind != "table":
+            continue
+        if allowed_set and entry.name not in allowed_set:
+            continue
+        cols = ", ".join(f'"{c}"' for c in entry.columns) if entry.columns else ""
+        desc = f" -- {entry.description}" if entry.description else ""
+        lines.append(f'- "{entry.name}"{desc}: {cols}')
+
+    if len(lines) == 1:
+        for ds in ctx.allowed_context.get("metadata", []):
+            name = ds.get("view_name") or ds.get("name")
+            if not name:
+                continue
+            if allowed_set and name not in allowed_set:
+                continue
+            cols = ", ".join(f'"{c}"' for c in ds.get("columns", []))
+            lines.append(f'- "{name}": {cols}')
+
+    if kg_block:
+        lines.append("\nKnowledge Graph context:")
+        lines.append(kg_block[:1000])
+
+    return "\n".join(lines)
+
+
 def _remap_tables_to_authorized(
     sql: str,
     allowed_tables: list[str],
@@ -199,7 +240,7 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
     sources so the app can show a friendly clarification.
     """
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     try:
         ctx = await context_builder.build_context(
@@ -217,22 +258,18 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
             detail=f"Access denied: {e.reason}",
         )
 
-    context_text = context_builder.context_to_prompt_text(ctx)
+    # Determine allowed tables first; the compact context needs this list.
+    allowed_tables = req.allowed_tables or [
+        ds.get("view_name", ds.get("name", ""))
+        for ds in ctx.allowed_context.get("metadata", [])
+        if ds.get("view_name") or ds.get("name")
+    ]
 
-    # Fold in the Knowledge Graph context so generated SQL targets the validated
-    # risks/gaps/measured KPIs the graph surfaces (never Reference Library docs).
+    # Use a compact schema-only context for SQL generation. The full grounding
+    # package is often too large for a single L40S context window, and the
+    # generator only needs table/column names and a short KG steer.
     kg_block = format_knowledge_graph_context(req.knowledge_graph_context)
-    if kg_block:
-        context_text = f"{context_text}\n\n{kg_block}"
-
-    # Determine allowed tables
-    allowed_tables = req.allowed_tables
-    if not allowed_tables:
-        allowed_tables = [
-            ds.get("view_name", ds.get("name", ""))
-            for ds in ctx.allowed_context.get("metadata", [])
-            if ds.get("view_name") or ds.get("name")
-        ]
+    context_text = _compact_sql_context(ctx, req.source_catalog, allowed_tables, kg_block)
 
     catalog = req.source_catalog or None
     table_columns = _catalog_table_columns(catalog)
@@ -266,6 +303,8 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
         source_catalog=catalog,
         preferred_sources=req.preferred_sources,
         relevant_columns=req.relevant_columns,
+        model=req.model,
+        ollama_url=req.ollama_url,
     )
     if _needs_clarification(raw):
         raise _clarify("Model could not find a matching authorized source.")
@@ -302,6 +341,8 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
                 source_catalog=catalog,
                 preferred_sources=req.preferred_sources,
                 relevant_columns=req.relevant_columns,
+                model=req.model,
+                ollama_url=req.ollama_url,
             )
             repaired = True
             if _needs_clarification(raw):
@@ -334,7 +375,7 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
         explanation="",
         allowed_tables_used=allowed_tables,
         request_id=request_id,
-        model_used=settings.sql_model,
+        model_used=req.model or settings.sql_model,
         selected_sources=selected,
         repaired=repaired,
         knowledge_graph_context_used=bool(kg_block),
@@ -350,11 +391,11 @@ async def match_query(req: MatchQueryRequest) -> MatchQueryResponse:
     match_id of the equivalent existing query, or None if none match.
     """
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     if not req.existing_queries:
         return MatchQueryResponse(
-            match_id=None, request_id=request_id, model_used=settings.reasoning_model,
+            match_id=None, request_id=request_id, model_used=req.model or settings.reasoning_model,
         )
 
     existing_text = "\n".join(
@@ -381,8 +422,9 @@ async def match_query(req: MatchQueryRequest) -> MatchQueryResponse:
             "You compare SQL queries for functional equivalence. "
             "Respond with ONLY 'MATCH=<id>' or 'NO_MATCH' — no other text."
         ),
-        model=settings.reasoning_model,
+        model=req.model or settings.reasoning_model,
         temperature=0.0,
+        ollama_url=req.ollama_url,
     )
 
     match_id: int | None = None
@@ -395,5 +437,5 @@ async def match_query(req: MatchQueryRequest) -> MatchQueryResponse:
     update_activity(req.user_id, req.tenant_id, req.project_id)
 
     return MatchQueryResponse(
-        match_id=match_id, request_id=request_id, model_used=settings.reasoning_model,
+        match_id=match_id, request_id=request_id, model_used=req.model or settings.reasoning_model,
     )

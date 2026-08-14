@@ -184,17 +184,18 @@ async def classify_conversation_turn(
     intents and renderer-supported chart configs.
     """
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
     update_activity()
 
     raw = await llm_client.generate(
         prompt=_conversation_turn_prompt(req),
         system_prompt=_CONVERSATION_TURN_SYSTEM_PROMPT,
-        model=settings.reasoning_model,
+        model=req.model or settings.reasoning_model,
         temperature=0.0,
         max_tokens=400,
         num_ctx=8192,
         response_format="json",
+        ollama_url=req.ollama_url,
     )
     parsed = _parse_json_response(raw or "") or {}
 
@@ -230,5 +231,5 @@ async def classify_conversation_turn(
         confidence=confidence,
         reason=str(parsed.get("reason") or "")[:300],
         request_id=request_id,
-        model_used=settings.reasoning_model,
+        model_used=req.model or settings.reasoning_model,
     )

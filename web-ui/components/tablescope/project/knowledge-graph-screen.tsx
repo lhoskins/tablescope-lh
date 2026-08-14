@@ -198,9 +198,9 @@ export function KnowledgeGraphScreen({ projectId, breadcrumb }: ScreenProps) {
   const crumbs = breadcrumb ?? ["Documents", "Knowledge Graph"];
 
   return (
-    <div className="flex h-[calc(100vh-220px)] min-h-[640px] gap-3">
+    <div className="flex h-auto min-h-0 flex-col gap-3 lg:h-[calc(100vh-220px)] lg:min-h-[640px] lg:flex-row">
       {/* Left controls */}
-      <aside className="w-[252px] shrink-0 rounded-lg border border-line-tertiary bg-bg-primary">
+      <aside className="max-h-[40vh] w-full shrink-0 overflow-y-auto rounded-lg border border-line-tertiary bg-bg-primary lg:h-auto lg:max-h-none lg:w-[252px]">
         <KnowledgeGraphControls
           lens={lens}
           onLensChange={setLens}
@@ -221,7 +221,7 @@ export function KnowledgeGraphScreen({ projectId, breadcrumb }: ScreenProps) {
 
       {/* Center canvas */}
       <section className="flex min-w-0 flex-1 flex-col">
-        <header className="mb-2 flex items-center justify-between gap-3">
+        <header className="mb-2 flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <nav className="flex items-center gap-1 text-small text-ink-tertiary">
               {crumbs.map((c, i) => (
@@ -307,7 +307,7 @@ export function KnowledgeGraphScreen({ projectId, breadcrumb }: ScreenProps) {
       </section>
 
       {/* Right insight panel */}
-      <aside className="w-[372px] shrink-0 rounded-lg border border-line-tertiary bg-bg-primary">
+      <aside className="max-h-[50vh] w-full shrink-0 overflow-y-auto rounded-lg border border-line-tertiary bg-bg-primary lg:h-auto lg:max-h-none lg:w-[372px]">
         <KnowledgeGraphInsightPanel
           title={center ? center.label : "Knowledge Graph"}
           subtitle="Business insight"

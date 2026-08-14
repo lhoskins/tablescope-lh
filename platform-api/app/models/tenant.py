@@ -48,6 +48,10 @@ class Tenant(TimestampMixin, Base):
     allowed_domains_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False, server_default=text("false")
     )
+    # When true, microphone/audio input is surfaced in AI composers for this tenant.
+    voice_input_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default=text("false")
+    )
     # The original tenant admin / owner — always exempt from domain restriction
     # so an admin can never lock themselves out.
     owner_user_id: Mapped[int | None] = mapped_column(

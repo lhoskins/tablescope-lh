@@ -21,7 +21,7 @@ router = APIRouter()
 @router.post("/analyze-file", response_model=AnalyzeFileResponse)
 async def analyze_file(req: AnalyzeFileRequest):
     """Analyze a file profile and return structured metadata."""
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     request_id = str(uuid.uuid4())
     logger.info("[%s] File analysis request", request_id)
@@ -33,8 +33,9 @@ async def analyze_file(req: AnalyzeFileRequest):
             "Return ONLY valid JSON with the exact structure requested. "
             "Do not include markdown formatting, code fences, or any text outside the JSON."
         ),
-        model=settings.reasoning_model,
+        model=req.model or settings.reasoning_model,
         temperature=0.1,
+        ollama_url=req.ollama_url,
     )
 
     # Parse JSON from LLM response
@@ -60,5 +61,5 @@ async def analyze_file(req: AnalyzeFileRequest):
     return AnalyzeFileResponse(
         analysis=analysis,
         request_id=request_id,
-        model_used=settings.reasoning_model,
+        model_used=req.model or settings.reasoning_model,
     )

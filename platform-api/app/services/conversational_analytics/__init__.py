@@ -11,9 +11,16 @@ from app.models.analytics_conversation import AnalyticsConversation, AnalyticsCo
 from app.routes.ai_proxy import _ask_and_run_core, _forward_prose_answer
 from app.services import ai_intelligence_client as ai_intelligence_client
 from app.services.ai_governance import ai_governance_service, infer_governance_key
+from app.services.ai_grounding import gather_grounding_evidence
 from app.services.ai_intelligence_client import AIUnavailableError as AIUnavailableError
 from app.services.business_insight_project_resolver import (
     resolve_business_insight_project,
+)
+from app.services.insight_card_match import (
+    _extract_terms as _extract_insight_terms,
+)
+from app.services.insight_card_match import (
+    find_matching_insight_cards,
 )
 from app.services.project_ai_context import build_project_ai_context
 
@@ -30,6 +37,7 @@ from .intent_classification import _MAX_PREVIEW_BYTES as _MAX_PREVIEW_BYTES
 from .intent_classification import _MAX_PREVIEW_ROWS, ConversationalIntent, classify_turn, logger
 from .intent_classification import _fallback_classify as _fallback_classify
 from .intent_classification import _grounded_data_question as _grounded_data_question
+from .intent_classification import _is_document_question as _is_document_question
 from .intent_classification import _normalize_question as _normalize_question
 from .intent_classification import _prior_turn_state as _prior_turn_state
 from .result_profiling import _answer_text, _bound_result, _profile_result, _sql_fingerprint
@@ -106,6 +114,43 @@ def _format_context_prompt(project_context: dict[str, Any] | None) -> str:
     return "\n".join(parts)[:1200]
 
 
+def _live_query_score(
+    question: str,
+    result_cache: dict[str, Any],
+    data_sources: list[str],
+) -> float:
+    """Score how directly a live result answers the question.
+
+    Returns a 0-1 value based on term overlap between the question and the
+    result columns, source names, and a few sample values. A high score means
+    the live query already covers the user's topic; a low score means the
+    result may be generic or off-topic, so a matched Insight Card can add
+    grounded analysis.
+    """
+    q_terms = _extract_insight_terms(question)
+    if not q_terms:
+        return 0.0
+
+    columns = result_cache.get("columns") or []
+    rows = result_cache.get("rows") or []
+    sample_values: list[str] = []
+    for row in rows[:3]:
+        for v in row.values():
+            if isinstance(v, str | int | float):
+                sample_values.append(str(v))
+
+    haystack = " ".join(
+        [str(c) for c in columns]
+        + [str(s) for s in data_sources]
+        + sample_values
+    )
+    h_terms = _extract_insight_terms(haystack)
+    overlap = len(q_terms & h_terms)
+    if not overlap:
+        return 0.1 if rows else 0.0
+    return min(1.0, overlap / len(q_terms))
+
+
 async def _run_analytical_turn(
     session: AsyncSession,
     context: RequestContext,
@@ -141,6 +186,76 @@ async def _run_analytical_turn(
         source=None,  # source override can be added once the route exposes it
     )
     return run
+
+
+def _data_result_for_synthesis(
+    result_cache: dict[str, Any],
+    chart_config: dict[str, Any],
+    sql: str | None,
+    data_sources_used: list[str],
+) -> dict[str, Any]:
+    """Shape the executed result into a block the AI server can synthesize."""
+    data: dict[str, Any] = {
+        "columns": result_cache.get("columns", []),
+        "rows": result_cache.get("rows", []),
+        "rowCount": result_cache.get("rowCount", 0),
+        "truncated": result_cache.get("truncated", False),
+        "sql": sql or "",
+        "dataSourcesUsed": data_sources_used,
+    }
+    if chart_config:
+        data["chart_config"] = chart_config
+    return data
+
+
+def _matched_insight_dict(m: Any) -> dict[str, Any]:
+    """Serialize an InsightCardMatch (or related dict) for the AI server."""
+    if isinstance(m, dict):
+        return m
+    return {
+        "insightId": m.insight_id,
+        "projectId": m.project_id,
+        "projectName": m.project_name,
+        "title": m.title,
+        "summary": m.summary,
+        "chart": m.chart,
+        "severity": m.severity,
+        "diagnostics": m.diagnostics,
+        "proposedActions": m.proposed_actions,
+        "score": m.score,
+    }
+
+
+async def _synthesize_answer(
+    context: RequestContext,
+    project_id: int,
+    question: str,
+    *,
+    data_result: dict[str, Any] | None = None,
+    matched_insights: list[dict[str, Any]] | None = None,
+) -> str | None:
+    """Ask the LLM to synthesize the final answer from data and/or insight cards.
+
+    Returns ``None`` when the AI server is unavailable so callers can fall back
+    to deterministic text.
+    """
+    try:
+        response = await ai_intelligence_client.ask(
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            project_id=project_id,
+            question=question,
+            scope="project",
+            data_result=data_result,
+            matched_insights=matched_insights,
+        )
+        if response and response.get("answer"):
+            return str(response["answer"]).strip()
+    except AIUnavailableError:
+        logger.warning("AI answer synthesis unavailable; using deterministic fallback")
+    except Exception as exc:
+        logger.warning("Answer synthesis failed: %s", exc)
+    return None
 
 
 async def execute_turn(
@@ -224,24 +339,29 @@ async def execute_turn(
         return
 
     # New analysis or query-changing follow-up
+    # Re-resolve the project every turn for cross-project surfaces (Business
+    # Insight / AI Assistant) so a follow-up can switch projects and a question
+    # like "Show me IT backup jobs" routes to the IT project even if the
+    # conversation was previously pinned to Manufacturing. Project Insights is
+    # page-scoped, so its project never changes mid-conversation.
+    is_project_scoped = conversation.surface == "project_insights"
     project_id = conversation.project_id
-    if project_id is None:
-        # Business Insight and similar flows may have created the conversation
-        # before project resolution existed; resolve from the question now.
+    if not is_project_scoped:
         resolved = await resolve_business_insight_project(
             session, context, question
         )
         if resolved.status == "resolved" and resolved.project_id:
             project_id = resolved.project_id
             conversation.project_id = project_id
-        else:
-            turn.status = "error"
-            turn.error_code = "no_project"
-            turn.assistant_message = (
-                "I couldn't tell which project this question belongs to. "
-                "Please ask from a project page or mention a project name."
-            )
-            return
+
+    if project_id is None:
+        turn.status = "error"
+        turn.error_code = "no_project"
+        turn.assistant_message = (
+            "I couldn't tell which project this question belongs to. "
+            "Please ask from a project page or mention a project name."
+        )
+        return
 
     project_context: dict[str, Any] | None = None
     try:
@@ -272,6 +392,48 @@ async def execute_turn(
         turn.assistant_message = pre_decision.user_message
         return
 
+    # Phase D: Reference Library / document Q&A bypasses SQL generation.
+    # These questions are answered directly from grounded documents and KG context.
+    if _is_document_question(question):
+        grounding = await gather_grounding_evidence(
+            session,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            project_id=project_id,
+            question=question,
+        )
+        if grounding is None:
+            from app.schemas.ai_grounding import GroundingEvidence
+            grounding = GroundingEvidence()
+        grounding_dict = grounding.model_dump()
+        prose = await _forward_prose_answer(
+            session,
+            context,
+            project_id=project_id,
+            question=question,
+            history=[],
+            scope="project",
+            include_query_history=False,
+            include_dashboard_context=False,
+            grounding_evidence=grounding_dict,
+        )
+        answer = (
+            prose.get("answer") if isinstance(prose, dict) else (str(prose) if prose else "")
+        )
+        turn.assistant_message = (
+            answer
+            or "I couldn't find a relevant document for that question. Try rephrasing or checking the Reference Library."
+        )
+        turn.status = "success"
+        turn.intent_type = ConversationalIntent.DOCUMENT_QA
+        turn.result_metadata = {
+            "documentQa": {
+                "referenceDocumentCount": len(grounding.reference_documents),
+                "kgNodeCount": len(grounding.kg_nodes),
+            }
+        }
+        return
+
     run = await _run_analytical_turn(
         session,
         context,
@@ -288,17 +450,104 @@ async def execute_turn(
 
     if run.get("status") in ("generation_error", "execution_error"):
         # A question that cannot be grounded or executed on an authorized source
-        # may still be answerable from documents/KG; answer it with a prose
-        # fallback instead of a hard SQL error. Degrades gracefully if the AI
-        # service is busy.
+        # may already be answered by one or more existing, verified Insight Cards —
+        # that analysis ran the real multi-query pipeline, so pointing back to it
+        # beats both a hard SQL error and unattributed KG prose. Check before
+        # falling further back.
+        card_matches = await find_matching_insight_cards(
+            session,
+            context=context,
+            tenant_id=context.tenant_id,
+            project_id=project_id,
+            question=question,
+            # Project Insights is scoped to the project the user is already
+            # looking at — widening there would answer from a different
+            # project than the page the question was asked on. AI Assistant
+            # and Business Insights have no such single-project framing, so
+            # a card from any project the user can access is fair game.
+            allow_cross_project=conversation.surface != "project_insights",
+            max_cards=3,
+        )
+        if card_matches:
+            primary = card_matches[0]
+            related = card_matches[1:]
+            turn.chart_config = None
+            turn.result_cache = None
+            turn.sql = None
+            turn.sql_fingerprint = None
+            turn.datasource_context = {"dataSourcesUsed": []}
+            matched_insights = [_matched_insight_dict(primary)] + [
+                _matched_insight_dict(m) for m in related
+            ]
+            turn.matched_insight = {
+                "insightId": primary.insight_id,
+                "projectId": primary.project_id,
+                "projectName": primary.project_name,
+                "title": primary.title,
+                "summary": primary.summary,
+                "chart": primary.chart,
+                "severity": primary.severity,
+                "diagnostics": primary.diagnostics,
+                "proposedActions": primary.proposed_actions,
+                "score": primary.score,
+                "relatedInsights": [
+                    {
+                        "insightId": m.insight_id,
+                        "projectId": m.project_id,
+                        "projectName": m.project_name,
+                        "title": m.title,
+                        "summary": m.summary,
+                        "chart": m.chart,
+                        "severity": m.severity,
+                        "diagnostics": m.diagnostics,
+                        "proposedActions": m.proposed_actions,
+                        "score": m.score,
+                    }
+                    for m in related
+                ],
+            }
+            # Keep the fallback message focused on the existing analysis the
+            # user can act on. The live-query failure reason is still captured
+            # in result_metadata for debugging, but it is not user-facing text.
+            synthesized = await _synthesize_answer(
+                context,
+                project_id,
+                question,
+                matched_insights=matched_insights,
+            )
+            turn.assistant_message = (
+                synthesized
+                or f"I found an existing analysis that answers this: **{primary.title}**"
+                + (f"\n\n{primary.summary}" if primary.summary else "")
+            )
+            # Machine-readable trail for debugging why the live path failed,
+            # even though the turn itself completed successfully from the
+            # user's point of view. error_code is intentionally set despite
+            # status="success" -- nothing in the schema or frontend treats a
+            # non-null error_code as implying failure, and it is the only
+            # place this reason is queryable/filterable server-side.
+            turn.error_code = f"live_query_fallback_{run.get('status')}"
+            turn.result_metadata = {
+                "fallbackReason": run.get("status"),
+                "fallbackError": run.get("error"),
+                "fallbackErrorDetails": run.get("errorDetails"),
+                "insightCardScores": [m.score for m in card_matches],
+            }
+            turn.status = "success"
+            return
+
+        # No existing card answers it either; the question may still be
+        # answerable from documents/KG prose instead of a hard SQL error.
+        # Degrades gracefully if the AI service is busy.
         prose = await _forward_prose_answer(
             session,
             context,
             project_id=project_id,
             question=question,
         )
-        if prose:
-            turn.assistant_message = prose
+        answer = prose.get("answer") if isinstance(prose, dict) else (str(prose) if prose else "")
+        if answer:
+            turn.assistant_message = answer
             turn.chart_config = None
             turn.result_cache = None
             turn.sql = None
@@ -372,5 +621,75 @@ async def execute_turn(
         turn.sql, result_cache, chart_config, governance=post_decision.to_explanation_dict()
     )
     turn.datasource_context = {"dataSourcesUsed": run.get("dataSourcesUsed", [])}
-    turn.assistant_message = run.get("explanation") or _answer_text(columns, bounded_rows)
     turn.status = "success"
+
+    # If the live result is on-topic but there is a strong, precomputed Insight
+    # Card that adds deeper grounded analysis, return both. The Insight Card is
+    # surfaced below the live chart so the user gets the fresh numbers plus the
+    # existing diagnostics and proposed actions.
+    matched_insights_for_synthesis: list[dict[str, Any]] | None = None
+    live_score = _live_query_score(
+        question, result_cache, run.get("dataSourcesUsed") or []
+    )
+    if live_score < 0.95:
+        insight_matches = await find_matching_insight_cards(
+            session,
+            context=context,
+            tenant_id=context.tenant_id,
+            project_id=project_id,
+            question=question,
+            allow_cross_project=conversation.surface != "project_insights",
+            max_cards=2,
+            use_llm=False,
+        )
+        if insight_matches:
+            primary = insight_matches[0]
+            normalized_insight_score = min(1.0, (primary.score or 0.0) / 4.0)
+            if normalized_insight_score >= 0.65 and normalized_insight_score > live_score:
+                related = insight_matches[1:]
+                turn.matched_insight = {
+                    "insightId": primary.insight_id,
+                    "projectId": primary.project_id,
+                    "projectName": primary.project_name,
+                    "title": primary.title,
+                    "summary": primary.summary,
+                    "chart": primary.chart,
+                    "severity": primary.severity,
+                    "diagnostics": primary.diagnostics,
+                    "proposedActions": primary.proposed_actions,
+                    "score": primary.score,
+                    "relatedInsights": [
+                        {
+                            "insightId": m.insight_id,
+                            "projectId": m.project_id,
+                            "projectName": m.project_name,
+                            "title": m.title,
+                            "summary": m.summary,
+                            "chart": m.chart,
+                            "severity": m.severity,
+                            "diagnostics": m.diagnostics,
+                            "proposedActions": m.proposed_actions,
+                            "score": m.score,
+                        }
+                        for m in related
+                    ],
+                }
+                matched_insights_for_synthesis = [_matched_insight_dict(primary)] + [
+                    _matched_insight_dict(m) for m in related
+                ]
+
+    data_result = _data_result_for_synthesis(
+        result_cache, chart_config, turn.sql, run.get("dataSourcesUsed") or []
+    )
+    synthesized = await _synthesize_answer(
+        context,
+        project_id,
+        question,
+        data_result=data_result,
+        matched_insights=matched_insights_for_synthesis,
+    )
+    turn.assistant_message = (
+        synthesized
+        or run.get("explanation")
+        or _answer_text(columns, bounded_rows)
+    )

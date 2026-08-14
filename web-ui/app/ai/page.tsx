@@ -12,19 +12,16 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  IconArrowUp,
   IconSparkles,
-  IconPlus,
   IconTrash,
   IconRefresh,
   IconDots,
   IconPencil,
+  IconMenu2,
 } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
-import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { AutosizeTextarea } from "@/components/ui/autosize-textarea";
-import { cn } from "@/lib/cn";
+import { AskAnythingComposer } from "@/components/ai/ask-anything-composer";
 import { getUserMeta } from "@/lib/auth";
 import { useCurrentUser, useProjectSummaries } from "@/lib/ui/use-shell-data";
 import {
@@ -45,7 +42,8 @@ import { AssistantHeader } from "./assistant-header";
 import { FALLBACK_USER } from "./fallback-user";
 import { FALLBACK_TENANT } from "./fallback-tenant";
 import { CHART_FOLLOW_UPS } from "./chart-follow-ups";
-import { ConversationRow } from "./conversation-row";
+import { ConversationListPanel } from "./conversation-list-panel";
+import { MobileConversationDrawer } from "./mobile-conversation-drawer";
 import { UserBubble } from "./user-bubble";
 import { TurnBubbles } from "./turn-bubbles";
 import { groupConversationSummaries } from "@/lib/conversations/group-canonical";
@@ -65,14 +63,21 @@ function AiAssistantPageInner() {
 
   const [activeId, setActiveId] = useState<number | null>(null);
   const [input, setInput] = useState("");
+  // An explicit pick narrows which project a new conversation is scoped to.
+  // It is never required — when unset, the backend resolves the most
+  // relevant authorized project from the question itself.
   const [projectId, setProjectId] = useState<number | null>(null);
-  const [needsProject, setNeedsProject] = useState(false);
   const [paramsRead, setParamsRead] = useState(false);
   const [autoStarted, setAutoStarted] = useState(false);
+  // Stores the question seeded from a deep-link (the ?q=... param). We keep it
+  // separate from the live composer input so user typing does not accidentally
+  // trigger the auto-start behaviour on the first keystroke.
+  const [autoStartQuestion, setAutoStartQuestion] = useState<string | null>(null);
   // Set only from a deep link, so "View all project conversations" lands on a
   // list already narrowed to that project.
   const [projectFilter, setProjectFilter] = useState<number | null>(null);
   const [pendingTurnId, setPendingTurnId] = useState<number | null>(null);
+  const [mobileConversationsOpen, setMobileConversationsOpen] = useState(false);
   const { data: active } = useQuery({
     queryKey: ["conversational-analytics", "conversation", activeId],
     queryFn: () => getConversation(activeId as number),
@@ -105,12 +110,23 @@ function AiAssistantPageInner() {
   }, [searchParams, projects]);
   const turnCount = turns.length;
   const scrollRef = useRef<HTMLDivElement>(null);
+  // AbortController for the in-flight turn so the user can cancel a long-running
+  // AI request from the composer.
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Read-only: which project the current conversation resolved to. This lets
+  // users see (and debug) what the backend chose when a question wasn't
+  // explicitly scoped, even while the optional picker is still visible.
+  const resolvedProjectName = useMemo(() => {
+    const pid = active?.project_id;
+    if (pid == null) return null;
+    return projects?.find((p) => Number(p.id) === pid)?.name ?? null;
+  }, [active?.project_id, projects]);
 
   // A conversation is scoped to one project for grounded answers; reflect it
   // in the picker (and lock the picker) while that thread is open.
   useEffect(() => {
     if (active?.project_id != null) setProjectId(active.project_id);
-    setNeedsProject(false);
   }, [active?.id, active?.project_id]);
 
   useEffect(() => {
@@ -123,7 +139,10 @@ function AiAssistantPageInner() {
     const q = searchParams.get("q");
     const pid = searchParams.get("projectId");
     const cid = searchParams.get("conversation");
-    if (q) setInput(q);
+    if (q) {
+      setInput(q);
+      setAutoStartQuestion(q);
+    }
     if (pid) {
       const n = Number(pid);
       if (!Number.isNaN(n)) {
@@ -162,17 +181,21 @@ function AiAssistantPageInner() {
       pid,
     }: {
       question: string;
-      pid: number;
+      // Omitted when the user hasn't narrowed to a project — the backend
+      // (resolve_business_insight_project) picks the best authorized project
+      // from the question itself, the same resolver Business Insights uses.
+      pid: number | undefined;
     }): Promise<Conversation | { conversation_id: number }> => {
+      const signal = abortControllerRef.current?.signal;
       if (activeId == null) {
-        const convo = await createConversation({
-          project_id: pid,
-          initial_message: question,
-        });
+        const convo = await createConversation(
+          { project_id: pid, initial_message: question },
+          signal,
+        );
         setActiveId(convo.id);
         return convo;
       }
-      return submitTurn(activeId, { message: question });
+      return submitTurn(activeId, { message: question }, signal);
     },
     onSuccess: (res) => {
       const id = "conversation_id" in res ? res.conversation_id : res.id;
@@ -217,33 +240,36 @@ function AiAssistantPageInner() {
     (raw: string) => {
       const question = raw.trim();
       if (!question || busy) return;
-      if (activeId == null && projectId == null) {
-        // Prompt for the project only when creating a brand-new conversation.
-        setNeedsProject(true);
-        return;
-      }
-      setNeedsProject(false);
       setInput("");
-      const pid = active?.project_id ?? projectId ?? 0;
+      // A picked project narrows the request; otherwise leave it unset so
+      // the backend resolves the project from the question.
+      const pid = active?.project_id ?? projectId ?? undefined;
+      abortControllerRef.current = new AbortController();
       sendMutation.mutate({ question, pid });
     },
-    [active, activeId, projectId, busy, sendMutation],
+    [active, projectId, busy, sendMutation],
   );
 
   // Auto-start a conversation seeded from the deep-link parameters once.
+  // Only the ?q=... param should trigger an automatic send; user typing should
+  // never be auto-submitted on the first keystroke.
   useEffect(() => {
-    if (!paramsRead || autoStarted || !input.trim()) return;
-    // Need either an existing conversation (submit) or a project to create one.
-    if (activeId == null && projectId == null) return;
+    if (!paramsRead || autoStarted || !autoStartQuestion?.trim()) return;
     setAutoStarted(true);
-    const question = input.trim();
-    send(question);
-  }, [paramsRead, autoStarted, input, projectId, activeId, send]);
+    send(autoStartQuestion.trim());
+  }, [paramsRead, autoStarted, autoStartQuestion, send]);
 
   const retryLast = () => {
     if (busy || !sendMutation.variables) return;
+    abortControllerRef.current = new AbortController();
     sendMutation.mutate(sendMutation.variables);
   };
+
+  const cancelLast = useCallback(() => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    sendMutation.reset();
+  }, [sendMutation]);
 
   const user = identity?.user ?? FALLBACK_USER;
   const tenant = identity?.tenant ?? FALLBACK_TENANT;
@@ -263,52 +289,64 @@ function AiAssistantPageInner() {
       user={user}
       counts={{ projects: projects?.length }}
       topBarLeft={<AssistantHeader returnProject={returnProject} />}
+      scrollable={false}
     >
-      <div className="flex h-[calc(100vh-9rem)] gap-0 overflow-hidden rounded-lg border border-line-tertiary">
-        {/* Left sidebar — conversations */}
-        <aside className="flex w-[260px] shrink-0 flex-col border-r border-line-tertiary bg-bg-secondary">
-          <div className="border-b border-line-tertiary p-2.5">
-            <Button
-              variant="secondary"
-              className="w-full justify-start gap-2"
-              onClick={() => {
-                setActiveId(null);
-                setInput("");
-                setProjectId(null);
-                setProjectFilter(null);
-              }}
-            >
-              <IconPlus size={14} />
-              New chat
-            </Button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-2">
-            {groupedConversations.length === 0 && (
-              <p className="px-2 py-4 text-small text-ink-tertiary">
-                No conversations yet.
-              </p>
-            )}
-            {groupedConversations.map((c) => (
-              <ConversationRow
-                key={c.canonical_key ?? c.id}
-                conversation={c}
-                active={activeId === c.id}
-                onSelect={() => setActiveId(c.id)}
-                onRename={(title) =>
-                  renameMutation.mutate({ id: c.id, title })
-                }
-                onDelete={() => setConfirmDeleteId(c.id)}
-              />
-            ))}
-          </div>
+      <div className="relative flex h-[calc(100dvh-6.5rem)] min-h-0 flex-col gap-0 overflow-hidden rounded-lg border border-line-tertiary lg:flex-row">
+        {/* Left sidebar — conversations (desktop) */}
+        <aside className="hidden w-[260px] shrink-0 flex-col border-r border-line-tertiary bg-bg-secondary lg:flex">
+          <ConversationListPanel
+            conversations={groupedConversations}
+            activeId={activeId}
+            onNew={() => {
+              setActiveId(null);
+              setInput("");
+              setProjectId(null);
+              setProjectFilter(null);
+            }}
+            onSelect={setActiveId}
+            onRename={(id, title) => renameMutation.mutate({ id, title })}
+            onDelete={(id) => setConfirmDeleteId(id)}
+          />
         </aside>
 
+        <MobileConversationDrawer
+          open={mobileConversationsOpen}
+          onClose={() => setMobileConversationsOpen(false)}
+          conversations={groupedConversations}
+          activeId={activeId}
+          onNew={() => {
+            setActiveId(null);
+            setInput("");
+            setProjectId(null);
+            setProjectFilter(null);
+            setMobileConversationsOpen(false);
+          }}
+          onSelect={(id) => {
+            setActiveId(id);
+            setMobileConversationsOpen(false);
+          }}
+          onRename={(id, title) => renameMutation.mutate({ id, title })}
+          onDelete={(id) => setConfirmDeleteId(id)}
+        />
+
         {/* Right — chat area */}
-        <div className="flex min-w-0 flex-1 flex-col bg-bg-primary">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary">
+          {/* Mobile conversation toggle */}
+          <div className="flex items-center justify-end border-b border-line-tertiary px-4 py-2 lg:hidden">
+            <button
+              type="button"
+              onClick={() => setMobileConversationsOpen(true)}
+              aria-label="Open conversations"
+              className="inline-flex h-9 items-center gap-2 rounded-md px-3 text-[12px] font-medium text-ink-secondary hover:bg-bg-secondary"
+            >
+              <IconMenu2 size={18} />
+              Conversations
+            </button>
+          </div>
           {/* Messages */}
           <div
             ref={scrollRef}
-            className="flex-1 overflow-y-auto px-6 py-5"
+            className="min-h-0 flex-1 overflow-y-auto px-6 py-5"
           >
             {turns.length === 0 && !pendingQuestion ? (
               <div className="mx-auto flex h-full max-w-md flex-col items-center justify-center text-center">
@@ -384,62 +422,25 @@ function AiAssistantPageInner() {
                 ))}
               </div>
             )}
-            <div className="mx-auto mb-2 flex max-w-3xl items-center gap-2">
-              <label className="text-[12px] text-ink-tertiary">Project</label>
-              <select
-                value={active?.project_id ?? projectId ?? ""}
-                disabled={active != null}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setProjectId(v === "" ? null : Number(v));
-                  if (v !== "") setNeedsProject(false);
-                }}
-                className={cn(
-                  "min-w-0 flex-1 rounded-md border bg-bg-primary px-2 py-1.5 text-[12px] text-ink-primary focus:outline-none disabled:opacity-60",
-                  needsProject
-                    ? "border-danger focus:border-danger"
-                    : "border-line-secondary focus:border-brand-500",
-                )}
-              >
-                <option value="">Select a project…</option>
-                {(projects ?? []).map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {needsProject && (
-              <p className="mx-auto mb-2 max-w-3xl text-[12px] text-danger">
-                Please choose a project so I know which data to use.
+            {resolvedProjectName && (
+              <p className="mx-auto mb-2 max-w-3xl text-[11px] text-ink-tertiary">
+                Answered from{" "}
+                <span className="font-medium text-ink-secondary">
+                  {resolvedProjectName}
+                </span>
               </p>
             )}
-            <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-xl border border-line-secondary bg-bg-primary px-4 py-3 shadow-sm">
-              <AutosizeTextarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    send(input);
-                  }
-                }}
-                minRows={2}
-                maxRows={8}
-                placeholder="Message Tablescope AI…"
-                aria-label="Message Tablescope AI"
-                className="flex-1 text-[13px] text-ink-primary placeholder:text-ink-tertiary"
-              />
-              <button
-                type="button"
-                onClick={() => send(input)}
-                disabled={busy || !input.trim()}
-                aria-label="Send"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand text-brand-fg hover:bg-brand-700 disabled:opacity-40"
-              >
-                <IconArrowUp size={16} />
-              </button>
-            </div>
+            <AskAnythingComposer
+              value={input}
+              onChange={setInput}
+              onSubmit={send}
+              onCancel={busy ? cancelLast : undefined}
+              placeholder="Message Tablescope AI…"
+              ariaLabel="Message Tablescope AI"
+              busy={busy}
+              projectId={projectId}
+              className="mx-auto max-w-3xl"
+            />
             <p className="mt-2 text-center text-[11px] text-ink-tertiary">
               Tablescope AI may produce inaccurate information. All responses
               are scoped to your tenant.

@@ -46,7 +46,7 @@ async def db_session(db_engine) -> AsyncIterator[AsyncSession]:
         yield session
 
 
-def _build_app(db_engine, *, enforce_membership: bool):
+def _build_app(db_engine, *, enforce_membership: bool, monkeypatch):
     get_settings.cache_clear()
     session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
 
@@ -61,6 +61,23 @@ def _build_app(db_engine, *, enforce_membership: bool):
 
     app = create_app()
     app.dependency_overrides[database_module.get_db] = override_get_db
+
+    # Several routes use SessionLocal directly for short-lived metadata
+    # sessions. Override the imported reference so those sessions use the
+    # test database as well.
+    import importlib
+
+    monkeypatch.setattr(database_module, "SessionLocal", session_factory)
+    for _mod_name in (
+        "app.auth.membership",
+        "app.routes.internal_file_proxy",
+        "app.routes.query",
+        "app.routes.dashboards_widget_query",
+    ):
+        _mod = importlib.import_module(_mod_name)
+        if hasattr(_mod, "SessionLocal"):
+            monkeypatch.setattr(_mod, "SessionLocal", session_factory)
+
     if not enforce_membership:
         # Most route tests mint synthetic tokens without seeding a matching
         # membership row; bypass the DB-backed membership check so they keep
@@ -74,17 +91,17 @@ def _build_app(db_engine, *, enforce_membership: bool):
 
 
 @pytest_asyncio.fixture(scope="function")
-async def client(db_engine) -> AsyncIterator[AsyncClient]:
-    app = _build_app(db_engine, enforce_membership=False)
+async def client(db_engine, monkeypatch) -> AsyncIterator[AsyncClient]:
+    app = _build_app(db_engine, enforce_membership=False, monkeypatch=monkeypatch)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
         yield ac
 
 
 @pytest_asyncio.fixture(scope="function")
-async def client_strict(db_engine) -> AsyncIterator[AsyncClient]:
+async def client_strict(db_engine, monkeypatch) -> AsyncIterator[AsyncClient]:
     """Client with real tenant-membership enforcement (no bypass)."""
-    app = _build_app(db_engine, enforce_membership=True)
+    app = _build_app(db_engine, enforce_membership=True, monkeypatch=monkeypatch)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
         yield ac

@@ -22,7 +22,7 @@ router = APIRouter()
 async def index_document(req: IndexDocumentRequest) -> dict:
     """Index a project document into the tenant's vector collection."""
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     # Ensure tenant collection exists
     await vector_store.ensure_collection(req.tenant_id)
@@ -96,7 +96,7 @@ async def index_reference(req: IndexReferenceRequest) -> dict:
     is idempotent: existing chunks for the document are dropped first.
     """
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     await vector_store.delete_reference_document(req.document_id)
 

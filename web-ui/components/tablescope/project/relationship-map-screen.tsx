@@ -212,14 +212,16 @@ function SelectedNodePanel({
   selected,
   nodes,
   edges,
+  collapsible = true,
 }: {
   selected: GraphNode | null;
   nodes: GraphNode[];
   edges: GraphEdge[];
+  collapsible?: boolean;
 }) {
   if (!selected) {
     return (
-      <ContextPanel title="Selected Node" askPlaceholder="Ask about this node…">
+      <ContextPanel title="Selected Node" askPlaceholder="Ask about this node…" collapsible={collapsible}>
         <div className="px-1 py-8 text-center text-small text-ink-tertiary">
           Select a node to see its relationships.
         </div>
@@ -236,7 +238,7 @@ function SelectedNodePanel({
     .filter((r) => r.other);
 
   return (
-    <ContextPanel title="Selected Node" askPlaceholder="Ask about this node…">
+    <ContextPanel title="Selected Node" askPlaceholder="Ask about this node…" collapsible={collapsible}>
       <div className="space-y-1">
         <div className="text-h3 text-ink-primary">{selected.label}</div>
         <Badge tone="neutral">{selected.type}</Badge>

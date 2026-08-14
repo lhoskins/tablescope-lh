@@ -59,7 +59,7 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
     judge stage executes each widget's SQL and drops empty/weak ones before save.
     """
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     try:
         ctx = await context_builder.build_context(
@@ -212,12 +212,13 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt=_DASHBOARD_INSIGHT_SYSTEM_PROMPT,
-        model=settings.sql_model,
+        model=req.model or settings.sql_model,
         temperature=0.3,
         # Larger window so the injected dashboard_best_practices reference fits
         # alongside the project context without truncation.
         num_ctx=24576,
         response_format="json",
+        ollama_url=req.ollama_url,
     )
 
     suggestions: list[dict] = []
@@ -260,7 +261,7 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
     return SuggestDashboardResponse(
         suggestions=suggestions,
         request_id=request_id,
-        model_used=settings.sql_model,
+        model_used=req.model or settings.sql_model,
     )
 
 
@@ -278,7 +279,7 @@ async def suggest_dashboards_multi(
     generate-and-save-dashboard pipeline.
     """
     request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
     try:
         ctx = await context_builder.build_context(
@@ -380,10 +381,11 @@ async def suggest_dashboards_multi(
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt=_DASHBOARD_INSIGHT_SYSTEM_PROMPT,
-        model=settings.sql_model,
+        model=req.model or settings.sql_model,
         temperature=0.4,
         num_ctx=24576,
         response_format="json",
+        ollama_url=req.ollama_url,
     )
 
     parsed = _parse_json_response(raw)
@@ -455,5 +457,5 @@ async def suggest_dashboards_multi(
     return SuggestDashboardsMultiResponse(
         suggestions=suggestions,
         request_id=request_id,
-        model_used=settings.sql_model,
+        model_used=req.model or settings.sql_model,
     )
