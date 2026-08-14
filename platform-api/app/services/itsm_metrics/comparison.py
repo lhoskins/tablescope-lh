@@ -31,71 +31,81 @@ def compute_comparison(
     - color/outcome is based on polarity
     - zero and missing data are handled explicitly (no Infinity / NaN)
     """
-    result: dict[str, float | str | None] = {
-        "delta": None,
-        "delta_percent": None,
-        "direction": None,
-        "outcome": None,
-        "comparison_label": None,
-    }
-
     if current_value is None:
-        return result
+        return {
+            "delta": None,
+            "delta_percent": None,
+            "direction": None,
+            "outcome": None,
+            "comparison_label": None,
+        }
 
     if previous_value is None:
-        result["comparison_label"] = "No prior-month comparison"
-        result["outcome"] = "neutral"
-        return result
+        return {
+            "delta": None,
+            "delta_percent": None,
+            "direction": None,
+            "outcome": "neutral",
+            "comparison_label": "No prior-month comparison",
+        }
 
     # Both values present (they may be zero)
     delta = current_value - previous_value
-    result["delta"] = delta
 
     if previous_value == 0:
         if current_value == 0:
-            result["delta_percent"] = 0.0
-            result["direction"] = "flat"
-            result["outcome"] = "neutral"
-            result["comparison_label"] = f"0.0% vs {previous_label}"
-            return result
+            return {
+                "delta": delta,
+                "delta_percent": 0.0,
+                "direction": "flat",
+                "outcome": "neutral",
+                "comparison_label": f"0.0% vs {previous_label}",
+            }
         # previous 0, current > 0
-        result["delta_percent"] = None
-        result["direction"] = "up"
-        result["outcome"] = "neutral"
-        result["comparison_label"] = f"New vs {previous_label}"
-        return result
+        return {
+            "delta": delta,
+            "delta_percent": None,
+            "direction": "up",
+            "outcome": "neutral",
+            "comparison_label": f"New vs {previous_label}",
+        }
 
-    delta_percent = (delta / abs(previous_value)) * 100
-    if math.isfinite(delta_percent):
-        result["delta_percent"] = round(delta_percent, precision)
+    raw_delta_percent: float = (delta / abs(previous_value)) * 100
+    if math.isfinite(raw_delta_percent):
+        delta_percent: float | None = round(raw_delta_percent, precision)
     else:
-        result["delta_percent"] = None
+        delta_percent = None
 
     # Direction
     if delta > 0:
-        result["direction"] = "up"
+        direction = "up"
     elif delta < 0:
-        result["direction"] = "down"
+        direction = "down"
     else:
-        result["direction"] = "flat"
+        direction = "flat"
 
     # Outcome based on polarity
-    direction = result["direction"]
     if direction == "flat":
-        result["outcome"] = "neutral"
+        outcome = "neutral"
     elif direction == "up":
-        result["outcome"] = "favorable" if polarity == "higher_is_better" else "unfavorable"
+        outcome = "favorable" if polarity == "higher_is_better" else "unfavorable"
     else:  # down
-        result["outcome"] = "favorable" if polarity == "lower_is_better" else "unfavorable"
+        outcome = "favorable" if polarity == "lower_is_better" else "unfavorable"
 
     arrow = {"up": "↑", "down": "↓", "flat": "→"}[direction]
-    pct_text = (
-        f"{abs(result['delta_percent']):.{precision}f}%"
-        if result["delta_percent"] is not None
-        else "New"
-    )
-    result["comparison_label"] = f"{arrow} {pct_text} vs {previous_label}"
-    return result
+    if delta_percent is not None:
+        pct_text = f"{abs(delta_percent):.{precision}f}%"
+    else:
+        pct_text = "New"
+    comparison_label = f"{arrow} {pct_text} vs {previous_label}"
+
+    return {
+        "delta": delta,
+        "delta_percent": delta_percent,
+        "direction": direction,
+        "outcome": outcome,
+        "comparison_label": comparison_label,
+    }
 
 
 def outcome_color_class(outcome: str | None) -> str:

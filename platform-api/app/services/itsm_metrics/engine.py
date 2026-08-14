@@ -10,7 +10,7 @@ import logging
 import math
 from calendar import monthrange
 from datetime import UTC, date, datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -92,9 +92,13 @@ def _format_filter(f: FilterSpec) -> str:
     if op == "lte":
         return f"{col} <= {_literal(val)}"
     if op == "in":
+        if not isinstance(val, list | tuple) or not val:
+            return "1 = 0"
         values = ", ".join(_literal(v) for v in val)
         return f"{col} IN ({values})"
     if op == "not_in":
+        if not isinstance(val, list | tuple) or not val:
+            return "1 = 1"
         values = ", ".join(_literal(v) for v in val)
         return f"{col} NOT IN ({values})"
     return "1 = 1"
@@ -111,12 +115,12 @@ def _date_expression(date_field: str | None, date_unit: str = "seconds") -> str:
         return "NULL"
     col = _quote_identifier(date_field)
     if date_unit == "seconds":
-        return f"CAST({col} AS double)"
+        return f"unix_timestamp(CAST({col} AS timestamp))"
     if date_unit == "milliseconds":
-        return f"CAST({col} AS double) / 1000.0"
+        return f"unix_timestamp(CAST({col} AS timestamp)) / 1000.0"
     if date_unit == "iso_string":
-        return f"CAST({col} AS timestamp)"
-    return f"CAST({col} AS double)"
+        return f"unix_timestamp(CAST({col} AS timestamp))"
+    return f"unix_timestamp(CAST({col} AS timestamp))"
 
 
 def _build_metric_sql(
@@ -127,7 +131,7 @@ def _build_metric_sql(
 ) -> str:
     """Generate a value SQL query for a single metric and period."""
     if metric.status == "not_implemented":
-        return "SELECT NULL AS value"
+        return "SELECT NULL AS metric_value"
 
     table = _quote_identifier(metric.table)
     start_epoch, end_epoch = _period_epoch(period)
@@ -153,7 +157,7 @@ def _build_metric_sql(
         # If the expression already starts with SELECT, return as-is.
         if expr.strip().lower().startswith("select"):
             return expr
-        return f"SELECT {expr} AS value"
+        return f"SELECT {expr} AS metric_value"
 
     # Generic builders by kind.
     if metric.kind == "event_period":
@@ -163,7 +167,7 @@ def _build_metric_sql(
         if metric.aggregation == "distinct":
             select = "COUNT(DISTINCT sys_id)"
         where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-        return f"SELECT {select} AS value FROM {table} {where}"
+        return f"SELECT {select} AS metric_value FROM {table} {where}"
 
     if metric.kind == "snapshot_eom":
         open_field = metric.date_field or "opened_at"
@@ -177,7 +181,7 @@ def _build_metric_sql(
             where_clauses.append(f"state IN ({', '.join(states)})")
         select = "COUNT(DISTINCT sys_id)"
         where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-        return f"SELECT {select} AS value FROM {table} {where}"
+        return f"SELECT {select} AS metric_value FROM {table} {where}"
 
     if metric.kind == "duration_period":
         duration_col = metric.numerator or "resolution_minutes"
@@ -185,12 +189,12 @@ def _build_metric_sql(
         where_clauses.append(f"{_quote_identifier(duration_col)} IS NOT NULL")
         select = f"AVG(CAST({_quote_identifier(duration_col)} AS double))"
         where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-        return f"SELECT {select} AS value FROM {table} {where}"
+        return f"SELECT {select} AS metric_value FROM {table} {where}"
 
     if metric.kind == "ratio_period":
         return _build_ratio_sql(metric, start_epoch, end_epoch, date_expr, where_clauses, table)
 
-    return "SELECT NULL AS value"
+    return "SELECT NULL AS metric_value"
 
 
 def _build_ratio_sql(
@@ -207,16 +211,16 @@ def _build_ratio_sql(
             where = f"WHERE {date_expr} >= {start_epoch} AND {date_expr} <= {end_epoch} AND {' AND '.join(where_clauses)}"
         num_expr = _quote_identifier(metric.numerator)
         den_expr = _quote_identifier(metric.denominator)
-        sql = f"""SELECT CASE WHEN {den_expr} > 0 THEN 100.0 * CAST({num_expr} AS double) / {den_expr} ELSE 0 END AS value
+        sql = f"""SELECT CASE WHEN {den_expr} > 0 THEN 100.0 * CAST({num_expr} AS double) / {den_expr} ELSE 0 END AS metric_value
 FROM {table} {where}"""
         return sql
-    return "SELECT NULL AS value"
+    return "SELECT NULL AS metric_value"
 
 
 def _extract_single_value(rows: list[dict[str, Any]]) -> float | None:
     if not rows:
         return None
-    for k in ("value", "VALUE", "count", "COUNT", "avg", "AVG"):
+    for k in ("metric_value", "METRIC_VALUE", "value", "VALUE", "y", "Y", "count", "COUNT", "avg", "AVG"):
         if k in rows[0]:
             val = rows[0][k]
             break
@@ -286,7 +290,7 @@ def _metric_sql_safe(metric: MetricDefinition, period: PeriodBounds, site_code: 
         return _build_metric_sql(metric, period, site_code, date_unit)
     except Exception as exc:
         logger.warning("SQL build failed for %s: %s", metric.key, exc)
-        return "SELECT NULL AS value"
+        return "SELECT NULL AS metric_value"
 
 
 async def compute_metric(
@@ -329,12 +333,12 @@ async def compute_metric(
         period_start=current_period.start,
         period_end=current_period.end,
         previous_value=previous_value,
-        delta=comparison.get("delta"),
-        delta_percent=comparison.get("delta_percent"),
-        direction=comparison.get("direction"),
+        delta=cast(float | None, comparison.get("delta")),
+        delta_percent=cast(float | None, comparison.get("delta_percent")),
+        direction=cast(str | None, comparison.get("direction")),
         polarity=metric.polarity,
-        outcome=comparison.get("outcome"),
-        comparison_label=comparison.get("comparison_label"),
+        outcome=cast(str | None, comparison.get("outcome")),
+        comparison_label=cast(str | None, comparison.get("comparison_label")),
         status=metric.status,
         as_of=utc_now_iso(),
     )
@@ -415,6 +419,7 @@ async def compute_dashboard(
         database, host, port = await _resolve_teiid(project_id, session, tenant_id, user_id)
         for chart_metric in chart_metrics[:2]:
             try:
+                assert chart_metric.group_by is not None
                 sql = _build_chart_sql(chart_metric, current_period, chart_metric.group_by, site_code, date_unit)
                 rows = await _run_sql(database, host, port, sql)
                 x = [str(r.get("x", "")) for r in rows]

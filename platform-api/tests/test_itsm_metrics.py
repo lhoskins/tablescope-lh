@@ -140,7 +140,7 @@ class TestSqlGeneration:
         assert "01_incidents_CSV" in sql
         assert "COUNT(DISTINCT sys_id)" in sql
         assert '"site_code" = \'US01\'' in sql
-        assert "CAST(\"opened_at\" AS double)" in sql
+        assert 'unix_timestamp(CAST("opened_at" AS timestamp))' in sql
 
     def test_not_implemented_metric_selects_null(self) -> None:
         from app.services.itsm_metrics.models import PeriodBounds
@@ -149,7 +149,7 @@ class TestSqlGeneration:
         assert metric is not None
         period = PeriodBounds(start="2026-07-01", end="2026-07-31", label="Jul 2026")
         sql = _build_metric_sql(metric, period)
-        assert "SELECT NULL AS value" in sql
+        assert "SELECT NULL AS metric_value" in sql
 
     def test_custom_value_expression_is_formatted(self) -> None:
         from app.services.itsm_metrics.models import PeriodBounds
