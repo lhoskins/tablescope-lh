@@ -478,11 +478,11 @@ async def compute_dashboard(
 
         chart_tasks = [_build_chart(dashboard_key, m) for m in chart_metrics[:2]]
         chart_results = await asyncio.gather(*chart_tasks, return_exceptions=True)
-        for result in chart_results:
-            if isinstance(result, ChartResult):
-                charts.append(result)
+        for chart_result in chart_results:
+            if isinstance(chart_result, ChartResult):
+                charts.append(chart_result)
             else:
-                exc = result if isinstance(result, BaseException) else Exception(result)
+                exc = chart_result if isinstance(chart_result, BaseException) else Exception(chart_result)
                 logger.warning("Chart build failed: %s", exc)
                 warnings.append(f"chart: {exc}")
 
