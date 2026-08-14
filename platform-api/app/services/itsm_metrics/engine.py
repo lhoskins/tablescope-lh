@@ -60,7 +60,7 @@ def _period_epoch(period: PeriodBounds) -> tuple[float, float]:
 
 
 def _quote_identifier(name: str) -> str:
-    return f'"{name.replace('"', '""')}"'
+    return '"' + name.replace('"', '""') + '"'
 
 
 def _literal(value: Any) -> str:
@@ -80,8 +80,12 @@ def _format_filter(f: FilterSpec) -> str:
     if op == "is_not_null":
         return f"{col} IS NOT NULL"
     if op == "eq":
+        if isinstance(val, bool):
+            return f"CAST({col} AS boolean) = {_literal(val)}"
         return f"{col} = {_literal(val)}"
     if op == "neq":
+        if isinstance(val, bool):
+            return f"CAST({col} AS boolean) <> {_literal(val)}"
         return f"{col} <> {_literal(val)}"
     if op == "gt":
         return f"{col} > {_literal(val)}"
@@ -163,9 +167,12 @@ def _build_metric_sql(
     if metric.kind == "event_period":
         if metric.date_field:
             where_clauses.append(f"{date_expr} >= {start_epoch} AND {date_expr} <= {end_epoch}")
-        select = "COUNT(*)" if metric.aggregation == "count" else f"{metric.aggregation.upper()}(sys_id)"
+        target_col = _quote_identifier(metric.numerator) if metric.numerator else "sys_id"
+        select = "COUNT(*)" if metric.aggregation == "count" else f"{metric.aggregation.upper()}({target_col})"
         if metric.aggregation == "distinct":
-            select = "COUNT(DISTINCT sys_id)"
+            select = f"COUNT(DISTINCT {target_col})"
+        if metric.aggregation == "sum":
+            select = f"SUM(CAST({target_col} AS double))"
         where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
         return f"SELECT {select} AS metric_value FROM {table} {where}"
 
@@ -177,8 +184,9 @@ def _build_metric_sql(
         where_clauses.append(f"{open_expr} <= {end_epoch}")
         where_clauses.append(f"({close_expr} IS NULL OR {close_expr} > {end_epoch})")
         if metric.state_field:
-            states = ["'New'", "'In Progress'", "'On Hold'"]
-            where_clauses.append(f"state IN ({', '.join(states)})")
+            states = [f"'{s}'" for s in (metric.open_states or ["New", "In Progress", "On Hold"])]
+            state_col = _quote_identifier(metric.state_field)
+            where_clauses.append(f"{state_col} IN ({', '.join(states)})")
         select = "COUNT(DISTINCT sys_id)"
         where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
         return f"SELECT {select} AS metric_value FROM {table} {where}"
@@ -363,10 +371,17 @@ def _build_chart_sql(
     if metric.date_field:
         where_clauses.append(f"{date_expr} >= {start_epoch} AND {date_expr} <= {end_epoch}")
     where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-    return f"""SELECT {group_col} AS x, COUNT(DISTINCT sys_id) AS y
+    is_date_group = group_by.endswith(("_at", "_date")) or group_by in {"begin", "end_col"}
+    if is_date_group:
+        x_expr = f"SUBSTRING(CAST({group_col} AS string), 1, 7)"
+        order_by = "x ASC"
+    else:
+        x_expr = group_col
+        order_by = "y DESC"
+    return f"""SELECT {x_expr} AS x, COUNT(DISTINCT sys_id) AS y
 FROM {table} {where}
-GROUP BY {group_col}
-ORDER BY y DESC"""
+GROUP BY x
+ORDER BY {order_by}"""
 
 
 async def compute_dashboard(
@@ -424,10 +439,11 @@ async def compute_dashboard(
                 rows = await _run_sql(database, host, port, sql)
                 x = [str(r.get("x", "")) for r in rows]
                 y = [_extract_single_value([r]) for r in rows]
+                is_date_chart = bool(chart_metric.group_by and (chart_metric.group_by.endswith(("_at", "_date")) or chart_metric.group_by in {"begin", "end_col"}))
                 charts.append(ChartResult(
                     chart_key=f"{dashboard_key}_{chart_metric.key}",
                     title=chart_metric.label,
-                    chart_type="bar" if chart_metric.aggregation != "distinct" else "bar",
+                    chart_type="line" if is_date_chart else "bar",
                     x_axis_label=chart_metric.group_by,
                     y_axis_label="Count",
                     series=[ChartSeries(name=chart_metric.label, x=x, y=y)],

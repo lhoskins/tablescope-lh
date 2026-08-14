@@ -27,6 +27,7 @@ class MetricDefinition:
     date_field: str | None = None
     close_field: str | None = "resolved_at"  # for snapshot reconstruction
     state_field: str | None = None
+    open_states: list[str] = field(default_factory=list)
     numerator: str | None = None
     denominator: str | None = None
     value_expression: str | None = None
