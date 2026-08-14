@@ -19,8 +19,10 @@ import {
   widgetCount,
   type Dashboard,
 } from "@/lib/ui/use-project-data";
+import { useCurrentUser } from "@/lib/ui/use-shell-data";
 import { DashboardDetailView } from "@/components/tablescope/project/detail-views";
 import { AIDashboardSuggestionsModal } from "@/components/tablescope/project/ai-dashboard-suggestions-modal";
+import { PRESET_LABELS } from "@/components/tablescope/project/itsm-dashboards/ItsmDashboardContent";
 import { useToasts, ToastViewport } from "@/components/ui/toast";
 import { createHomePin } from "@/lib/api/home-pins";
 import type { WidgetConfig } from "@/components/dashboard/types";
@@ -58,8 +60,28 @@ export function DashboardsScreen({
   const { data, isLoading } = useProjectDashboards(projectId);
   const { data: queries } = useProjectQueries(projectId);
   const { data: sources } = useProjectDataSources(projectId);
+  const { data: currentUser } = useCurrentUser();
   const queryClient = useQueryClient();
-  const rows = useMemo(() => data ?? [], [data]);
+  const realRows = useMemo(() => data ?? [], [data]);
+  const itsmPresets = useMemo<Dashboard[]>(() => {
+    if (!currentUser?.tenant.servicenowItsmDashboardsV2Enabled) return [];
+    const now = new Date().toISOString();
+    return Object.entries(PRESET_LABELS).map(([key, label], i) => ({
+      id: -(i + 1),
+      project_id: Number(projectId),
+      tenant_id: 0,
+      owner_id: null,
+      name: label,
+      description: null,
+      status: "published",
+      config: { itsm_dashboard: key },
+      ai_generated: true,
+      view_count: 0,
+      created_at: now,
+      updated_at: now,
+    }));
+  }, [currentUser, projectId]);
+  const rows = useMemo(() => [...itsmPresets, ...realRows], [itsmPresets, realRows]);
   const [viewingId, setViewingId] = useState<number | null>(
     dashboardId ? Number(dashboardId) : null,
   );
@@ -85,7 +107,7 @@ export function DashboardsScreen({
   const createMutation = useMutation({
     mutationFn: () =>
       apiClient.post<Dashboard>(`/api/projects/${projectId}/dashboards`, {
-        name: `Dashboard ${rows.length + 1}`,
+        name: `Dashboard ${realRows.length + 1}`,
         description: "",
         config: { widgets: [], globalFilters: [] },
       }),
@@ -148,6 +170,10 @@ export function DashboardsScreen({
 
   const handleDeleteDashboard = useCallback(
     (d: Dashboard) => {
+      if (d.id < 0) {
+        push("ServiceNow preset dashboards cannot be deleted", "info");
+        return;
+      }
       if (
         typeof window !== "undefined" &&
         !window.confirm(`Delete dashboard "${d.name}"? This cannot be undone.`)
@@ -157,7 +183,7 @@ export function DashboardsScreen({
       if (draftIdRef.current === d.id) draftIdRef.current = null;
       deleteMutation.mutate(d.id);
     },
-    [deleteMutation],
+    [deleteMutation, push],
   );
 
   // Auto-delete a pristine draft on tab close / refresh / navigating away.
@@ -177,10 +203,10 @@ export function DashboardsScreen({
     };
   }, [projectId]);
 
-  const published = rows.filter(isPublished).length;
-  const aiCount = rows.filter((d) => d.ai_generated).length;
-  const totalViews = rows.reduce((a, d) => a + (d.view_count ?? 0), 0);
-  const totalWidgets = rows.reduce((a, d) => a + widgetCount(d.config), 0);
+  const published = realRows.filter(isPublished).length;
+  const aiCount = realRows.filter((d) => d.ai_generated).length;
+  const totalViews = realRows.reduce((a, d) => a + (d.view_count ?? 0), 0);
+  const totalWidgets = realRows.reduce((a, d) => a + widgetCount(d.config), 0);
 
   return (
     <ProjectShell
@@ -188,20 +214,22 @@ export function DashboardsScreen({
       activeNav="project-dashboards"
       breadcrumbLabel="Dashboards"
       actions={
-        <>
-          <Button variant="secondary" onClick={() => setAiOpen(true)}>
-            <IconSparkles size={14} />
-            Generate with AI
-          </Button>
-          <Button
-            variant="primary"
-            onClick={() => createMutation.mutate()}
-            disabled={createMutation.isPending}
-          >
-            <IconPlus size={14} />
-            {createMutation.isPending ? "Creating…" : "New dashboard"}
-          </Button>
-        </>
+        !viewing ? (
+          <>
+            <Button variant="secondary" onClick={() => setAiOpen(true)}>
+              <IconSparkles size={14} />
+              Generate with AI
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => createMutation.mutate()}
+              disabled={createMutation.isPending}
+            >
+              <IconPlus size={14} />
+              {createMutation.isPending ? "Creating…" : "New dashboard"}
+            </Button>
+          </>
+        ) : null
       }
     >
       {viewing ? (
@@ -219,13 +247,13 @@ export function DashboardsScreen({
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatTile
             label="Total dashboards"
-            value={rows.length}
+            value={realRows.length}
             hint={`${published} published`}
           />
           <StatTile
             label="AI-generated"
             value={aiCount}
-            hint={`${rows.length - aiCount} manual`}
+            hint={`${realRows.length - aiCount} manual`}
           />
           <StatTile label="Total views" value={totalViews} />
           <StatTile

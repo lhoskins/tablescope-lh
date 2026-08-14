@@ -14,6 +14,7 @@ import { DataGrid } from "@/components/data-grid/DataGrid";
 import { TanStackDataGrid } from "@/components/data-grid/TanStackDataGrid";
 import { DashboardViewer } from "@/components/dashboard/DashboardViewer";
 import { QueryBuilder } from "@/components/query-builder/QueryBuilder";
+import { ItsmDashboardContent } from "@/components/tablescope/project/itsm-dashboards/ItsmDashboardContent";
 import type { Dashboard as ViewerDashboard, WidgetConfig } from "@/components/dashboard/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -49,6 +50,21 @@ export function DashboardDetailView({
   onPersisted?: () => void;
   onPinWidget?: (widget: WidgetConfig, data: unknown[], dashboardId: number) => void;
 }) {
+  const itsmPreset =
+    typeof dashboard.config === "object" && dashboard.config !== null
+      ? (dashboard.config as Record<string, unknown>).itsm_dashboard
+      : undefined;
+
+  if (typeof itsmPreset === "string") {
+    return (
+      <ItsmDashboardContent
+        projectId={projectId}
+        preset={itsmPreset}
+        onBack={onBack}
+      />
+    );
+  }
+
   return (
     <DashboardViewer
       dashboard={dashboard as unknown as ViewerDashboard}

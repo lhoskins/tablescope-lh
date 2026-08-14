@@ -12,7 +12,6 @@ import {
   IconBuildingBank,
   IconClipboardList,
   IconBinaryTree,
-  IconChartBar,
   type Icon,
 } from "@tabler/icons-react";
 import type { CurrentUser, NavKey, TenantSummary } from "@/lib/ui/types";
@@ -67,7 +66,7 @@ export function homeNavGroups(user?: CurrentUser): NavGroup[] {
 export function projectNavGroups(
   projectId: string,
   user?: CurrentUser,
-  tenant?: TenantSummary,
+  _tenant?: TenantSummary,
 ): NavGroup[] {
   const base = `/projects/${projectId}`;
   const groups: NavGroup[] = [
@@ -91,12 +90,6 @@ export function projectNavGroups(
           label: "Project Actions",
           href: `${base}/actions`,
           icon: IconClipboardList,
-        },
-        {
-          key: "project-itsm-dashboards",
-          label: "ITSM Dashboards",
-          href: `${base}/itsm-dashboards`,
-          icon: IconChartBar,
         },
         {
           key: "project-business-context",
@@ -130,15 +123,6 @@ export function projectNavGroups(
       ],
     },
   ];
-
-  if (!tenant?.servicenowItsmDashboardsV2Enabled) {
-    const projectGroup = groups[0];
-    if (projectGroup) {
-      projectGroup.items = projectGroup.items.filter(
-        (i) => i.key !== "project-itsm-dashboards",
-      );
-    }
-  }
 
   return groups;
 }

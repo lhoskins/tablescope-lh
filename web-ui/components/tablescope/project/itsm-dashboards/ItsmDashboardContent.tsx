@@ -1,20 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { IconRefresh, IconX } from "@tabler/icons-react";
+import { IconArrowLeft, IconRefresh, IconX } from "@tabler/icons-react";
 import { apiClient } from "@/lib/api-client";
-import { ProjectShell } from "@/components/tablescope/project-shell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { useCurrentUser } from "@/lib/ui/use-shell-data";
 import { cn } from "@/lib/cn";
 import type { ItsmDashboardResult, ItsmMetricValue } from "./types";
 import { ItsmMetricCard } from "./ItsmMetricCard";
 import { ItsmChart } from "./ItsmChart";
 import styles from "./ItsmDashboardScreen.module.css";
 
-const PRESET_LABELS: Record<string, string> = {
+export const PRESET_LABELS: Record<string, string> = {
   incident: "Incident Management",
   service_request: "Service Request Management",
   availability: "Availability & Reliability",
@@ -22,21 +20,24 @@ const PRESET_LABELS: Record<string, string> = {
   problem: "Problem Management",
 };
 
-interface ItsmDashboardScreenProps {
+interface ItsmDashboardContentProps {
   projectId: string;
+  preset: string;
+  onBack: () => void;
 }
 
-export function ItsmDashboardScreen({ projectId }: ItsmDashboardScreenProps) {
-  const { data: identity } = useCurrentUser();
-  const [preset, setPreset] = useState<string>("incident");
+export function ItsmDashboardContent({ projectId, preset, onBack }: ItsmDashboardContentProps) {
+  const [selectedPreset, setSelectedPreset] = useState(preset);
+  useEffect(() => {
+    setSelectedPreset(preset);
+  }, [preset]);
+
   const [drilldown, setDrilldown] = useState<{
     open: boolean;
     title: string;
     metric?: ItsmMetricValue;
     dimension?: { name: string; value: number | null };
   }>({ open: false, title: "" });
-
-  const enabled = identity?.tenant.servicenowItsmDashboardsV2Enabled ?? false;
 
   const {
     data: presets,
@@ -45,7 +46,7 @@ export function ItsmDashboardScreen({ projectId }: ItsmDashboardScreenProps) {
   } = useQuery<string[]>({
     queryKey: ["project", projectId, "itsm-dashboards"],
     queryFn: () => apiClient.get<string[]>(`/api/projects/${projectId}/itsm-dashboards`),
-    enabled,
+    enabled: Boolean(projectId),
   });
 
   const {
@@ -54,106 +55,112 @@ export function ItsmDashboardScreen({ projectId }: ItsmDashboardScreenProps) {
     error,
     refetch,
   } = useQuery<ItsmDashboardResult>({
-    queryKey: ["project", projectId, "itsm-dashboards", preset],
-    queryFn: () => apiClient.get<ItsmDashboardResult>(`/api/projects/${projectId}/itsm-dashboards/${preset}`),
-    enabled,
+    queryKey: ["project", projectId, "itsm-dashboards", selectedPreset],
+    queryFn: () =>
+      apiClient.get<ItsmDashboardResult>(`/api/projects/${projectId}/itsm-dashboards/${selectedPreset}`),
+    enabled: Boolean(projectId && selectedPreset),
   });
 
   const handleMetricClick = (metric: ItsmMetricValue) => {
     setDrilldown({ open: true, title: metric.label, metric });
   };
 
-  const handleChartClick = (chartTitle: string) => (name: string, value: number | null) => {
-    setDrilldown({ open: true, title: `${chartTitle} — ${name}`, dimension: { name, value } });
-  };
+  const handleChartClick =
+    (chartTitle: string) => (name: string, value: number | null) => {
+      setDrilldown({
+        open: true,
+        title: `${chartTitle} — ${name}`,
+        dimension: { name, value },
+      });
+    };
 
   const closeDrilldown = () => setDrilldown((d) => ({ ...d, open: false }));
 
-  if (!enabled) {
-    return (
-      <ProjectShell projectId={projectId} activeNav="project-itsm-dashboards" breadcrumbLabel="ITSM Dashboards">
-        <div className="py-16 text-center text-sm text-ink-tertiary">
-          ServiceNow ITSM dashboards are not enabled for this tenant.
-        </div>
-      </ProjectShell>
-    );
-  }
-
-  const selector = (
-    <div className="flex items-center gap-3">
-      <label htmlFor="itsm-preset" className="text-sm text-ink-secondary">
-        Dashboard
-      </label>
-      <select
-        id="itsm-preset"
-        value={preset}
-        onChange={(e) => setPreset(e.target.value)}
-        className="h-8 rounded-md border border-line-secondary bg-bg-primary px-2 text-sm text-ink-primary focus:border-brand-500 focus:outline-none"
-      >
-        {presetsLoading && <option>Loading…</option>}
-        {presetsError && <option>Error</option>}
-        {presets?.map((p) => (
-          <option key={p} value={p}>
-            {PRESET_LABELS[p] ?? p}
-          </option>
-        ))}
-      </select>
-      <Button variant="secondary" size="sm" onClick={() => refetch()} disabled={isLoading}>
-        <IconRefresh size={14} className={cn(isLoading && "animate-spin")} />
-        Refresh
-      </Button>
-    </div>
-  );
-
   return (
-    <ProjectShell
-      projectId={projectId}
-      activeNav="project-itsm-dashboards"
-      breadcrumbLabel="ITSM Dashboards"
-      actions={selector}
-    >
-      <div className={cn("space-y-4", styles.dashboardContainer)}>
-        {error && (
-          <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
-            {error instanceof Error ? error.message : "Failed to load dashboard"}
+    <div className={cn("space-y-4", styles.dashboardContainer)}>
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="flex items-start gap-2">
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="Back to dashboards"
+            className="mt-1 rounded-md p-1 text-ink-tertiary hover:bg-brand-50/60 hover:text-ink-primary"
+          >
+            <IconArrowLeft size={18} />
+          </button>
+          <div>
+            <h1 className="text-h2 text-ink-primary">
+              {PRESET_LABELS[dashboard?.dashboard ?? selectedPreset] ??
+                (dashboard?.dashboard ?? selectedPreset)}
+            </h1>
+            {dashboard && (
+              <p className="text-xs text-ink-tertiary">
+                As of {new Date(dashboard.asOf).toLocaleString()} · Latest complete month:{" "}
+                {dashboard.dataQuality.latestCompleteMonth}
+              </p>
+            )}
           </div>
-        )}
+        </div>
 
-        {dashboard && (
-          <>
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-h2 text-ink-primary">{PRESET_LABELS[dashboard.dashboard] ?? dashboard.dashboard}</h1>
-                <p className="text-xs text-ink-tertiary">
-                  As of {new Date(dashboard.asOf).toLocaleString()} · Latest complete month: {" "}
-                  {dashboard.dataQuality.latestCompleteMonth}
-                </p>
-              </div>
-              {dashboard.dataQuality.missingMetrics.length > 0 && (
-                <div className="text-xs text-amber-600">
-                  {dashboard.dataQuality.missingMetrics.length} metric(s) not yet implemented
-                </div>
-              )}
-            </div>
-
-            <div className={styles.kpiGrid}>
-              {dashboard.metrics.map((metric) => (
-                <ItsmMetricCard key={metric.metricKey} metric={metric} onClick={handleMetricClick} />
-              ))}
-            </div>
-
-            <div className={styles.chartGrid}>
-              {dashboard.charts.map((chart) => (
-                <Card key={chart.chartKey} className="p-3">
-                  <ItsmChart chart={chart} onElementClick={handleChartClick(chart.title)} />
-                </Card>
-              ))}
-            </div>
-          </>
-        )}
+        <div className="flex items-center gap-3">
+          <label htmlFor="itsm-preset" className="text-sm text-ink-secondary">
+            Dashboard
+          </label>
+          <select
+            id="itsm-preset"
+            value={selectedPreset}
+            onChange={(e) => setSelectedPreset(e.target.value)}
+            className="h-8 rounded-md border border-line-secondary bg-bg-primary px-2 text-sm text-ink-primary focus:border-brand-500 focus:outline-none"
+          >
+            {presetsLoading && <option>Loading…</option>}
+            {presetsError && <option>Error</option>}
+            {presets?.map((p) => (
+              <option key={p} value={p}>
+                {PRESET_LABELS[p] ?? p}
+              </option>
+            ))}
+          </select>
+          <Button variant="secondary" size="sm" onClick={() => refetch()} disabled={isLoading}>
+            <IconRefresh size={14} className={cn(isLoading && "animate-spin")} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
-      {/* Drill-down overlay */}
+      {error && (
+        <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
+          {error instanceof Error ? error.message : "Failed to load dashboard"}
+        </div>
+      )}
+
+      {isLoading && !dashboard && (
+        <div className="py-16 text-center text-sm text-ink-tertiary">Loading metrics…</div>
+      )}
+
+      {dashboard && (
+        <>
+          {dashboard.dataQuality.missingMetrics.length > 0 && (
+            <div className="text-xs text-amber-600">
+              {dashboard.dataQuality.missingMetrics.length} metric(s) not yet implemented
+            </div>
+          )}
+
+          <div className={styles.kpiGrid}>
+            {dashboard.metrics.map((metric) => (
+              <ItsmMetricCard key={metric.metricKey} metric={metric} onClick={handleMetricClick} />
+            ))}
+          </div>
+
+          <div className={styles.chartGrid}>
+            {dashboard.charts.map((chart) => (
+              <Card key={chart.chartKey} className="p-3">
+                <ItsmChart chart={chart} onElementClick={handleChartClick(chart.title)} />
+              </Card>
+            ))}
+          </div>
+        </>
+      )}
+
       <div className={cn(styles.drilldownPanel, drilldown.open && styles.open, "bg-bg-primary shadow-2xl")}>
         <div className="flex h-full flex-col border-r border-line-tertiary">
           <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-3">
@@ -171,7 +178,9 @@ export function ItsmDashboardScreen({ projectId }: ItsmDashboardScreenProps) {
               <div className="space-y-4 text-sm">
                 <div>
                   <span className="text-ink-secondary">Value</span>
-                  <div className="text-2xl font-semibold text-ink-primary">{drilldown.metric.displayValue}</div>
+                  <div className="text-2xl font-semibold text-ink-primary">
+                    {drilldown.metric.displayValue}
+                  </div>
                 </div>
                 <div>
                   <span className="text-ink-secondary">Period</span>
@@ -193,7 +202,9 @@ export function ItsmDashboardScreen({ projectId }: ItsmDashboardScreenProps) {
                 )}
                 <div>
                   <span className="text-ink-secondary">Polarity</span>
-                  <div className="capitalize text-ink-primary">{drilldown.metric.polarity.replace(/_/g, " ")}</div>
+                  <div className="capitalize text-ink-primary">
+                    {drilldown.metric.polarity.replace(/_/g, " ")}
+                  </div>
                 </div>
                 <div>
                   <span className="text-ink-secondary">Status</span>
@@ -226,6 +237,6 @@ export function ItsmDashboardScreen({ projectId }: ItsmDashboardScreenProps) {
           aria-label="Close overlay"
         />
       )}
-    </ProjectShell>
+    </div>
   );
 }
