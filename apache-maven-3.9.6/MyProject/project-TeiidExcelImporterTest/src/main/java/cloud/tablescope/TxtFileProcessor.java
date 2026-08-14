@@ -13,12 +13,12 @@ public class TxtFileProcessor {
     // SQL Reserved Keywords (comprehensive list)
     private static final Set<String> RESERVED_KEYWORDS = new HashSet<>(Arrays.asList(
         "DATE", "TIME", "TIMESTAMP", "YEAR", "MONTH", "DAY", "HOUR", "MINUTE", "SECOND",
-        "SELECT", "FROM", "WHERE", "ORDER", "GROUP", "BY", "HAVING", "LIMIT", "OFFSET",
+        "BEGIN", "END", "SELECT", "FROM", "WHERE", "ORDER", "GROUP", "BY", "HAVING", "LIMIT", "OFFSET",
         "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "TABLE", "VIEW", "INDEX",
         "JOIN", "INNER", "LEFT", "RIGHT", "OUTER", "CROSS", "ON", "USING",
         "AND", "OR", "NOT", "IN", "EXISTS", "BETWEEN", "LIKE", "IS", "NULL",
         "AS", "DISTINCT", "ALL", "ANY", "SOME", "UNION", "INTERSECT", "EXCEPT",
-        "CASE", "WHEN", "THEN", "ELSE", "END",
+        "CASE", "WHEN", "THEN", "ELSE",
         "USER", "ROLE", "GRANT", "REVOKE", "COMMIT", "ROLLBACK",
         "PRIMARY", "FOREIGN", "KEY", "REFERENCES", "CONSTRAINT", "UNIQUE",
         "DEFAULT", "CHECK", "CASCADE", "RESTRICT"
