@@ -40,7 +40,7 @@ _INCIDENT_METRICS: list[MetricDefinition] = [
         kind="ratio_period",
         table="01_incidents_CSV",
         date_field="opened_at",
-        value_expression="""SELECT CASE WHEN population > 0 THEN 100.0 * incident_count / population ELSE 0 END AS metric_value
+        value_expression="""SELECT CASE WHEN population > 0 THEN CAST(100.0 * incident_count / population AS double) ELSE 0 END AS metric_value
 FROM (
   SELECT COUNT(DISTINCT i.sys_id) AS incident_count,
          (SELECT MAX(CAST(bs.employee_population AS double)) FROM "14_business_services_CSV" bs) AS population
@@ -122,7 +122,7 @@ WHERE unix_timestamp(CAST(resolved_at AS timestamp)) >= {start} AND unix_timesta
         kind="ratio_period",
         table="01_incidents_CSV",
         date_field="resolved_at",
-        value_expression="""SELECT CASE WHEN resolved_count > 0 THEN 100.0 * fcr_count / resolved_count ELSE 0 END AS metric_value
+        value_expression="""SELECT CASE WHEN resolved_count > 0 THEN CAST(100.0 * fcr_count / resolved_count AS double) ELSE 0 END AS metric_value
 FROM (
   SELECT
     COUNT(DISTINCT CASE WHEN state IN ('Resolved', 'Closed') THEN sys_id END) AS resolved_count,
@@ -144,7 +144,7 @@ FROM (
         kind="ratio_period",
         table="01_incidents_CSV",
         date_field="opened_at",
-        value_expression="""SELECT CASE WHEN total > 0 THEN 100.0 * reassigned / total ELSE 0 END AS metric_value
+        value_expression="""SELECT CASE WHEN total > 0 THEN CAST(100.0 * reassigned / total AS double) ELSE 0 END AS metric_value
 FROM (
   SELECT COUNT(DISTINCT sys_id) AS total,
          COUNT(DISTINCT CASE WHEN CAST(reassign_count AS integer) > 0 THEN sys_id END) AS reassigned
@@ -178,7 +178,7 @@ FROM (
         kind="ratio_period",
         table="01_incidents_CSV",
         date_field="resolved_at",
-        value_expression="""SELECT CASE WHEN resolved_count > 0 THEN 100.0 * reopened / resolved_count ELSE 0 END AS metric_value
+        value_expression="""SELECT CASE WHEN resolved_count > 0 THEN CAST(100.0 * reopened / resolved_count AS double) ELSE 0 END AS metric_value
 FROM (
   SELECT COUNT(DISTINCT CASE WHEN state IN ('Resolved', 'Closed') THEN sys_id END) AS resolved_count,
          COUNT(DISTINCT CASE WHEN state IN ('Resolved', 'Closed') AND CAST(reopen_count AS integer) > 0 THEN sys_id END) AS reopened
@@ -279,7 +279,7 @@ WHERE unix_timestamp(CAST(opened_at AS timestamp)) <= {end}
         kind="ratio_period",
         table="01_incidents_CSV",
         date_field="resolved_at",
-        value_expression="""SELECT CASE WHEN total > 0 THEN 100.0 * (total - breached) / total ELSE 0 END AS metric_value
+        value_expression="""SELECT CASE WHEN total > 0 THEN CAST(100.0 * (total - breached) / total AS double) ELSE 0 END AS metric_value
 FROM (
   SELECT COUNT(DISTINCT sl.sys_id) AS total,
          COUNT(DISTINCT CASE WHEN CAST(sl.has_breached AS boolean) = true THEN sl.sys_id END) AS breached
@@ -302,7 +302,7 @@ FROM (
         kind="ratio_period",
         table="01_incidents_CSV",
         date_field="resolved_at",
-        value_expression="""SELECT CASE WHEN total > 0 THEN 100.0 * breached / total ELSE 0 END AS metric_value
+        value_expression="""SELECT CASE WHEN total > 0 THEN CAST(100.0 * breached / total AS double) ELSE 0 END AS metric_value
 FROM (
   SELECT COUNT(DISTINCT sl.sys_id) AS total,
          COUNT(DISTINCT CASE WHEN CAST(sl.has_breached AS boolean) = true THEN sl.sys_id END) AS breached
@@ -325,7 +325,7 @@ FROM (
         kind="ratio_period",
         table="01_incidents_CSV",
         date_field="resolved_at",
-        value_expression="""SELECT CASE WHEN resolved_count > 0 THEN 100.0 * with_knowledge / resolved_count ELSE 0 END AS metric_value
+        value_expression="""SELECT CASE WHEN resolved_count > 0 THEN CAST(100.0 * with_knowledge / resolved_count AS double) ELSE 0 END AS metric_value
 FROM (
   SELECT COUNT(DISTINCT CASE WHEN state IN ('Resolved', 'Closed') THEN sys_id END) AS resolved_count,
          COUNT(DISTINCT CASE WHEN state IN ('Resolved', 'Closed') AND CAST(knowledge_used AS boolean) = true THEN sys_id END) AS with_knowledge
@@ -346,7 +346,7 @@ _SERVICE_REQUEST_METRICS: list[MetricDefinition] = [
     MetricDefinition(key="catalog_tasks", label="Catalog tasks", dashboard="service_request", order=3, kind="event_period", table="09_catalog_tasks_CSV", date_field="opened_at", aggregation="distinct", unit="count", precision=0, polarity="neutral"),
     MetricDefinition(key="average_fulfillment", label="Average fulfillment", dashboard="service_request", order=4, kind="duration_period", table="07_requests_CSV", date_field="closed_at", numerator="request_fulfillment_minutes", unit="minutes", precision=1, polarity="lower_is_better"),
     MetricDefinition(key="median_fulfillment", label="Median fulfillment", dashboard="service_request", order=5, kind="duration_period", table="07_requests_CSV", date_field="closed_at", numerator="request_fulfillment_minutes", unit="minutes", precision=1, polarity="lower_is_better", status="proxy"),
-    MetricDefinition(key="request_sla", label="Request SLA", dashboard="service_request", order=6, kind="ratio_period", table="07_requests_CSV", date_field="closed_at", value_expression="""SELECT CASE WHEN total > 0 THEN 100.0 * met / total ELSE 0 END AS metric_value FROM (SELECT COUNT(DISTINCT sys_id) AS total, COUNT(DISTINCT CASE WHEN CAST(fulfillment_sla_met AS boolean) = true THEN sys_id END) AS met FROM {table} WHERE unix_timestamp(CAST(closed_at AS timestamp)) >= {start} AND unix_timestamp(CAST(closed_at AS timestamp)) <= {end} AND {site_filter}) t""", unit="percent", precision=1, polarity="higher_is_better"),
+    MetricDefinition(key="request_sla", label="Request SLA", dashboard="service_request", order=6, kind="ratio_period", table="07_requests_CSV", date_field="closed_at", value_expression="""SELECT CASE WHEN total > 0 THEN CAST(100.0 * met / total AS double) ELSE 0 END AS metric_value FROM (SELECT COUNT(DISTINCT sys_id) AS total, COUNT(DISTINCT CASE WHEN CAST(fulfillment_sla_met AS boolean) = true THEN sys_id END) AS met FROM {table} WHERE unix_timestamp(CAST(closed_at AS timestamp)) >= {start} AND unix_timestamp(CAST(closed_at AS timestamp)) <= {end} AND {site_filter}) t""", unit="percent", precision=1, polarity="higher_is_better"),
     MetricDefinition(key="request_backlog", label="Request backlog", dashboard="service_request", order=7, kind="snapshot_eom", table="07_requests_CSV", date_field="requested_date", close_field="closed_at", state_field="state", open_states=["Open", "Work in Progress", "Pending Approval"], aggregation="distinct", unit="count", precision=0, polarity="lower_is_better"),
     MetricDefinition(key="backlog_older_than_30_days_requests", label="Backlog older than 30 days", dashboard="service_request", order=8, kind="snapshot_eom", table="07_requests_CSV", date_field="requested_date", value_expression="""SELECT COUNT(DISTINCT sys_id) AS metric_value FROM {table} WHERE unix_timestamp(CAST(requested_date AS timestamp)) <= {end} - 2592000 AND (closed_at IS NULL OR unix_timestamp(CAST(closed_at AS timestamp)) > {end}) AND {site_filter}""", unit="count", precision=0, polarity="lower_is_better", status="proxy"),
     MetricDefinition(key="open_requested_items", label="Open requested items", dashboard="service_request", order=9, kind="snapshot_eom", table="08_requested_items_CSV", date_field="opened_at", close_field="closed_at", aggregation="distinct", unit="count", precision=0, polarity="lower_is_better"),
@@ -359,12 +359,12 @@ _SERVICE_REQUEST_METRICS: list[MetricDefinition] = [
 
 
 _AVAILABILITY_METRICS: list[MetricDefinition] = [
-    MetricDefinition(key="estimated_availability", label="Estimated availability", dashboard="availability", order=1, kind="ratio_period", table="15_service_outages_CSV", date_field="begin", value_expression="""SELECT CASE WHEN total_minutes > 0 THEN GREATEST(0, 100.0 - (100.0 * unplanned_minutes / total_minutes)) ELSE 100.0 END AS metric_value
+    MetricDefinition(key="estimated_availability", label="Estimated availability", dashboard="availability", order=1, kind="ratio_period", table="15_service_outages_CSV", date_field="begin", value_expression="""SELECT CASE WHEN total_minutes > 0 THEN CAST(100.0 - CAST(100.0 * unplanned_minutes / total_minutes AS double) AS double) ELSE CAST(100.0 AS double) END AS metric_value
 FROM (
   SELECT COALESCE(SUM(CASE WHEN CAST(planned AS boolean) = false THEN CAST(duration_minutes AS double) END), 0) AS unplanned_minutes,
          COALESCE(SUM(CAST(duration_minutes AS double)), 0) AS total_minutes
   FROM {table}
-  WHERE unix_timestamp(CAST(begin AS timestamp)) >= {start} AND unix_timestamp(CAST(begin AS timestamp)) <= {end} AND {site_filter}
+  WHERE unix_timestamp(CAST(\"begin\" AS timestamp)) >= {start} AND unix_timestamp(CAST(\"begin\" AS timestamp)) <= {end} AND {site_filter}
 ) t""", unit="percent", precision=3, polarity="higher_is_better", target=99.9),
     MetricDefinition(key="service_interruptions", label="Service interruptions", dashboard="availability", order=2, kind="event_period", table="15_service_outages_CSV", date_field="begin", aggregation="distinct", unit="count", precision=0, polarity="lower_is_better"),
     MetricDefinition(key="unplanned_outages", label="Unplanned outages", dashboard="availability", order=3, kind="event_period", table="15_service_outages_CSV", date_field="begin", filters=[FilterSpec(column="planned", operator="eq", value=False)], aggregation="distinct", unit="count", precision=0, polarity="lower_is_better"),
@@ -374,7 +374,7 @@ FROM (
     MetricDefinition(key="mean_time_to_repair", label="Mean time to repair", dashboard="availability", order=7, kind="duration_period", table="15_service_outages_CSV", date_field="end_col", numerator="duration_minutes", filters=[FilterSpec(column="planned", operator="eq", value=False)], unit="minutes", precision=1, polarity="lower_is_better"),
     MetricDefinition(key="users_affected", label="Users affected", dashboard="availability", order=8, kind="event_period", table="15_service_outages_CSV", date_field="begin", aggregation="sum", numerator="users_affected", unit="count", precision=0, polarity="lower_is_better"),
     MetricDefinition(key="business_impact_minutes", label="Business-impact minutes", dashboard="availability", order=9, kind="event_period", table="15_service_outages_CSV", date_field="begin", value_expression="SELECT NULL AS metric_value", unit="minutes", precision=0, polarity="lower_is_better", status="not_implemented"),
-    MetricDefinition(key="availability_target", label="Availability target", dashboard="availability", order=10, kind="ratio_period", table="15_service_outages_CSV", date_field="begin", value_expression="SELECT AVG(CAST(availability_target_pct AS double)) AS metric_value FROM {table} WHERE unix_timestamp(CAST(begin AS timestamp)) >= {start} AND unix_timestamp(CAST(begin AS timestamp)) <= {end} AND {site_filter}", unit="percent", precision=3, polarity="higher_is_better"),
+    MetricDefinition(key="availability_target", label="Availability target", dashboard="availability", order=10, kind="ratio_period", table="15_service_outages_CSV", date_field="begin", value_expression="SELECT AVG(CAST(availability_target_pct AS double)) AS metric_value FROM {table} WHERE unix_timestamp(CAST(\"begin\" AS timestamp)) >= {start} AND unix_timestamp(CAST(\"begin\" AS timestamp)) <= {end} AND {site_filter}", unit="percent", precision=3, polarity="higher_is_better"),
     MetricDefinition(key="incident_linked_outages", label="Incident-linked outages", dashboard="availability", order=11, kind="event_period", table="15_service_outages_CSV", date_field="begin", filters=[FilterSpec(column="task_type", operator="eq", value="Incident")], aggregation="distinct", unit="count", precision=0, polarity="lower_is_better"),
     MetricDefinition(key="change_linked_outages", label="Change-linked outages", dashboard="availability", order=12, kind="event_period", table="15_service_outages_CSV", date_field="begin", filters=[FilterSpec(column="task_type", operator="eq", value="Change Request")], aggregation="distinct", unit="count", precision=0, polarity="lower_is_better"),
 ]
@@ -403,12 +403,12 @@ _PROBLEM_METRICS: list[MetricDefinition] = [
     MetricDefinition(key="problems_resolved", label="Problems resolved", dashboard="problem", order=2, kind="event_period", table="04_problems_CSV", date_field="resolved_at", filters=[FilterSpec(column="state", operator="in", value=["Resolved", "Closed"])], aggregation="distinct", unit="count", precision=0, polarity="higher_is_better"),
     MetricDefinition(key="problem_backlog", label="Problem backlog", dashboard="problem", order=3, kind="snapshot_eom", table="04_problems_CSV", date_field="opened_at", state_field="state", open_states=["Root Cause Analysis", "Fix in Progress"], aggregation="distinct", unit="count", precision=0, polarity="lower_is_better"),
     MetricDefinition(key="open_backlog_age", label="Open backlog age", dashboard="problem", order=4, kind="duration_period", table="04_problems_CSV", date_field="opened_at", value_expression="""SELECT AVG(CAST(({end} - unix_timestamp(CAST(opened_at AS timestamp))) / 86400.0 AS double)) AS metric_value FROM {table} WHERE unix_timestamp(CAST(opened_at AS timestamp)) <= {end} AND (resolved_at IS NULL OR unix_timestamp(CAST(resolved_at AS timestamp)) > {end}) AND {site_filter}""", unit="days", precision=1, polarity="lower_is_better", status="proxy"),
-    MetricDefinition(key="mean_time_to_resolve", label="Mean time to resolve", dashboard="problem", order=5, kind="duration_period", table="04_problems_CSV", date_field="resolved_at", value_expression="SELECT AVG(CAST(age_days AS double)) * 1440.0 AS metric_value FROM {table} WHERE unix_timestamp(CAST(resolved_at AS timestamp)) >= {start} AND unix_timestamp(CAST(resolved_at AS timestamp)) <= {end} AND {site_filter}", unit="minutes", precision=1, polarity="lower_is_better"),
-    MetricDefinition(key="root_cause_rate", label="Root-cause rate", dashboard="problem", order=6, kind="ratio_period", table="04_problems_CSV", date_field="resolved_at", value_expression="""SELECT CASE WHEN total > 0 THEN 100.0 * with_root_cause / total ELSE 0 END AS metric_value FROM (SELECT COUNT(DISTINCT sys_id) AS total, COUNT(DISTINCT CASE WHEN root_cause_summary IS NOT NULL THEN sys_id END) AS with_root_cause FROM {table} WHERE unix_timestamp(CAST(resolved_at AS timestamp)) >= {start} AND unix_timestamp(CAST(resolved_at AS timestamp)) <= {end} AND {site_filter}) t""", unit="percent", precision=1, polarity="higher_is_better"),
-    MetricDefinition(key="known_error_rate", label="Known-error rate", dashboard="problem", order=7, kind="ratio_period", table="04_problems_CSV", date_field="resolved_at", value_expression="""SELECT CASE WHEN total > 0 THEN 100.0 * known / total ELSE 0 END AS metric_value FROM (SELECT COUNT(DISTINCT sys_id) AS total, COUNT(DISTINCT CASE WHEN CAST(known_error AS boolean) = true THEN sys_id END) AS known FROM {table} WHERE unix_timestamp(CAST(resolved_at AS timestamp)) >= {start} AND unix_timestamp(CAST(resolved_at AS timestamp)) <= {end} AND {site_filter}) t""", unit="percent", precision=1, polarity="higher_is_better"),
-    MetricDefinition(key="workaround_coverage", label="Workaround coverage", dashboard="problem", order=8, kind="ratio_period", table="04_problems_CSV", date_field="resolved_at", value_expression="""SELECT CASE WHEN total > 0 THEN 100.0 * with_workaround / total ELSE 0 END AS metric_value FROM (SELECT COUNT(DISTINCT sys_id) AS total, COUNT(DISTINCT CASE WHEN workaround_summary IS NOT NULL THEN sys_id END) AS with_workaround FROM {table} WHERE unix_timestamp(CAST(resolved_at AS timestamp)) >= {start} AND unix_timestamp(CAST(resolved_at AS timestamp)) <= {end} AND {site_filter}) t""", unit="percent", precision=1, polarity="higher_is_better"),
+    MetricDefinition(key="mean_time_to_resolve", label="Mean time to resolve", dashboard="problem", order=5, kind="duration_period", table="04_problems_CSV", date_field="resolved_at", value_expression="SELECT CAST(AVG(CAST(age_days AS double)) * 1440.0 AS double) AS metric_value FROM {table} WHERE unix_timestamp(CAST(resolved_at AS timestamp)) >= {start} AND unix_timestamp(CAST(resolved_at AS timestamp)) <= {end} AND {site_filter}", unit="minutes", precision=1, polarity="lower_is_better"),
+    MetricDefinition(key="root_cause_rate", label="Root-cause rate", dashboard="problem", order=6, kind="ratio_period", table="04_problems_CSV", date_field="resolved_at", value_expression="""SELECT CASE WHEN total > 0 THEN CAST(100.0 * with_root_cause / total AS double) ELSE 0 END AS metric_value FROM (SELECT COUNT(DISTINCT sys_id) AS total, COUNT(DISTINCT CASE WHEN root_cause_summary IS NOT NULL THEN sys_id END) AS with_root_cause FROM {table} WHERE unix_timestamp(CAST(resolved_at AS timestamp)) >= {start} AND unix_timestamp(CAST(resolved_at AS timestamp)) <= {end} AND {site_filter}) t""", unit="percent", precision=1, polarity="higher_is_better"),
+    MetricDefinition(key="known_error_rate", label="Known-error rate", dashboard="problem", order=7, kind="ratio_period", table="04_problems_CSV", date_field="resolved_at", value_expression="""SELECT CASE WHEN total > 0 THEN CAST(100.0 * known / total AS double) ELSE 0 END AS metric_value FROM (SELECT COUNT(DISTINCT sys_id) AS total, COUNT(DISTINCT CASE WHEN CAST(known_error AS boolean) = true THEN sys_id END) AS known FROM {table} WHERE unix_timestamp(CAST(resolved_at AS timestamp)) >= {start} AND unix_timestamp(CAST(resolved_at AS timestamp)) <= {end} AND {site_filter}) t""", unit="percent", precision=1, polarity="higher_is_better"),
+    MetricDefinition(key="workaround_coverage", label="Workaround coverage", dashboard="problem", order=8, kind="ratio_period", table="04_problems_CSV", date_field="resolved_at", value_expression="""SELECT CASE WHEN total > 0 THEN CAST(100.0 * with_workaround / total AS double) ELSE 0 END AS metric_value FROM (SELECT COUNT(DISTINCT sys_id) AS total, COUNT(DISTINCT CASE WHEN workaround_summary IS NOT NULL THEN sys_id END) AS with_workaround FROM {table} WHERE unix_timestamp(CAST(resolved_at AS timestamp)) >= {start} AND unix_timestamp(CAST(resolved_at AS timestamp)) <= {end} AND {site_filter}) t""", unit="percent", precision=1, polarity="higher_is_better"),
     MetricDefinition(key="linked_incidents", label="Linked incidents", dashboard="problem", order=9, kind="event_period", table="01_incidents_CSV", date_field="opened_at", filters=[FilterSpec(column="problem_sys_id", operator="is_not_null")], aggregation="distinct", unit="count", precision=0, polarity="neutral"),
-    MetricDefinition(key="incident_problem_coverage", label="Incident problem coverage", dashboard="problem", order=10, kind="ratio_period", table="01_incidents_CSV", date_field="opened_at", value_expression="""SELECT CASE WHEN total > 0 THEN 100.0 * linked / total ELSE 0 END AS metric_value FROM (SELECT COUNT(DISTINCT sys_id) AS total, COUNT(DISTINCT CASE WHEN problem_sys_id IS NOT NULL THEN sys_id END) AS linked FROM {table} WHERE unix_timestamp(CAST(opened_at AS timestamp)) >= {start} AND unix_timestamp(CAST(opened_at AS timestamp)) <= {end} AND {site_filter}) t""", unit="percent", precision=1, polarity="higher_is_better"),
+    MetricDefinition(key="incident_problem_coverage", label="Incident problem coverage", dashboard="problem", order=10, kind="ratio_period", table="01_incidents_CSV", date_field="opened_at", value_expression="""SELECT CASE WHEN total > 0 THEN CAST(100.0 * linked / total AS double) ELSE 0 END AS metric_value FROM (SELECT COUNT(DISTINCT sys_id) AS total, COUNT(DISTINCT CASE WHEN problem_sys_id IS NOT NULL THEN sys_id END) AS linked FROM {table} WHERE unix_timestamp(CAST(opened_at AS timestamp)) >= {start} AND unix_timestamp(CAST(opened_at AS timestamp)) <= {end} AND {site_filter}) t""", unit="percent", precision=1, polarity="higher_is_better"),
     MetricDefinition(key="repeat_incident_rate", label="Repeat incident rate", dashboard="problem", order=11, kind="ratio_period", table="01_incidents_CSV", date_field="opened_at", value_expression="SELECT NULL AS metric_value", unit="percent", precision=1, polarity="lower_is_better", status="not_implemented"),
     MetricDefinition(key="average_problem_age", label="Average problem age", dashboard="problem", order=12, kind="duration_period", table="04_problems_CSV", date_field="resolved_at", value_expression="SELECT AVG(CAST(age_days AS double)) AS metric_value FROM {table} WHERE unix_timestamp(CAST(resolved_at AS timestamp)) >= {start} AND unix_timestamp(CAST(resolved_at AS timestamp)) <= {end} AND {site_filter}", unit="days", precision=1, polarity="lower_is_better"),
     MetricDefinition(key="problems_in_rca", label="Problems in RCA", dashboard="problem", order=13, kind="snapshot_eom", table="04_problems_CSV", date_field="opened_at", filters=[FilterSpec(column="state", operator="in", value=["Root Cause Analysis", "RCA"])], aggregation="distinct", unit="count", precision=0, polarity="lower_is_better", status="proxy"),

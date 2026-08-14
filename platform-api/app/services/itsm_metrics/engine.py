@@ -219,7 +219,7 @@ def _build_ratio_sql(
             where = f"WHERE {date_expr} >= {start_epoch} AND {date_expr} <= {end_epoch} AND {' AND '.join(where_clauses)}"
         num_expr = _quote_identifier(metric.numerator)
         den_expr = _quote_identifier(metric.denominator)
-        sql = f"""SELECT CASE WHEN {den_expr} > 0 THEN 100.0 * CAST({num_expr} AS double) / {den_expr} ELSE 0 END AS metric_value
+        sql = f"""SELECT CASE WHEN {den_expr} > 0 THEN CAST(100.0 * CAST({num_expr} AS double) / {den_expr} AS double) ELSE 0 END AS metric_value
 FROM {table} {where}"""
         return sql
     return "SELECT NULL AS metric_value"
@@ -374,13 +374,13 @@ def _build_chart_sql(
     is_date_group = group_by.endswith(("_at", "_date")) or group_by in {"begin", "end_col"}
     if is_date_group:
         x_expr = f"SUBSTRING(CAST({group_col} AS string), 1, 7)"
-        order_by = "x ASC"
+        order_by = "1 ASC"
     else:
         x_expr = group_col
-        order_by = "y DESC"
+        order_by = "2 DESC"
     return f"""SELECT {x_expr} AS x, COUNT(DISTINCT sys_id) AS y
 FROM {table} {where}
-GROUP BY x
+GROUP BY 1
 ORDER BY {order_by}"""
 
 

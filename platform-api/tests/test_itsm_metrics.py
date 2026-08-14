@@ -101,8 +101,8 @@ class TestFilterFormatting:
     def test_boolean_eq(self) -> None:
         from app.services.itsm_metrics.models import FilterSpec
 
-        assert _format_filter(FilterSpec("planned", "eq", True)) == '"planned" = true'
-        assert _format_filter(FilterSpec("planned", "eq", False)) == '"planned" = false'
+        assert _format_filter(FilterSpec("planned", "eq", True)) == 'CAST("planned" AS boolean) = true'
+        assert _format_filter(FilterSpec("planned", "eq", False)) == 'CAST("planned" AS boolean) = false'
 
     def test_string_eq(self) -> None:
         from app.services.itsm_metrics.models import FilterSpec
