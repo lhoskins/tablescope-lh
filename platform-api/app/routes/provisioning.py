@@ -42,7 +42,26 @@ async def provisioning_status(
         )
     )
     if req is None:
-        raise HTTPException(status_code=404, detail="No provisioning request for session")
+        # Stripe Checkout success URLs always carry the real session id. If a
+        # regenerated checkout link or a stale browser tab causes a mismatch, fall
+        # back to Stripe's own client_reference_id (the provisioning_request_id).
+        try:
+            from app.services.stripe_billing_service import StripeBillingService
+
+            cs = await StripeBillingService().retrieve_checkout_session(session_id)
+            ref = (cs.get("client_reference_id") or "").strip()
+            if ref.isdigit():
+                req = await session.get(TenantProvisioningRequest, int(ref))
+                if req is not None:
+                    req.stripe_checkout_session_id = session_id
+                    await session.flush()
+        except Exception as exc:
+            logger.warning("Could not resolve provisioning status from Stripe: %s", exc)
+    if req is None:
+        raise HTTPException(
+            status_code=404,
+            detail="We couldn't locate this checkout session. If you just paid, provisioning may still be processing—please refresh in a moment.",
+        )
     return ProvisioningStatusResponse.model_validate(req)
 
 

@@ -150,6 +150,11 @@ class StripeWebhookHandler:
         if req is None:
             return
 
+        # Keep the checkout session id in sync with the actual paid Stripe
+        # session, especially when the request was located by client_reference_id
+        # fallback (e.g. a regenerated checkout link or multiple tabs).
+        req.stripe_checkout_session_id = session_id
+
         if customer_id:
             req.stripe_customer_id = customer_id
             await self._ensure_billing_customer(customer_id, req)
