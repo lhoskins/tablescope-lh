@@ -75,7 +75,7 @@ export function Sidebar({
 
   const groups =
     mode === "project" && project
-      ? projectNavGroups(project.id, user)
+      ? projectNavGroups(project.id, user, tenant)
       : homeNavGroups(user);
 
   const isPlatformAdmin =

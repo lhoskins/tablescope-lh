@@ -38,6 +38,7 @@ from app.routes import (
 from app.routes import conversational_analytics_turns as conversational_analytics_turns_routes
 from app.routes import dashboards_crud as dashboards_crud_routes
 from app.routes import dashboards_widget_query as dashboards_widget_query_routes
+from app.routes import itsm_dashboards as itsm_dashboards_routes
 from app.routes import data_source_assignments as data_source_assignments_routes
 from app.routes import data_source_catalog as data_source_catalog_routes
 from app.routes import database_sources_connection as database_sources_connection_routes
@@ -521,6 +522,7 @@ def create_app() -> FastAPI:
     app.include_router(file_imports_routes.hosts_router, prefix=api_prefix)
     app.include_router(dashboards_crud_routes.router, prefix=api_prefix)
     app.include_router(dashboards_widget_query_routes.router, prefix=api_prefix)
+    app.include_router(itsm_dashboards_routes.router, prefix=api_prefix)
     app.include_router(ai_proxy_routes.router, prefix=api_prefix)
     app.include_router(ai_speech_routes.router, prefix=api_prefix)
     app.include_router(ai_governance_routes.router, prefix=api_prefix)

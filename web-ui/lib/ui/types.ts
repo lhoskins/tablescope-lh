@@ -62,6 +62,7 @@ export type NavKey =
   | "project-actions"
   | "project-business-context"
   | "project-relationship-map"
+  | "project-itsm-dashboards"
   // Deprecated project Intelligence nav keys — kept for redirect compatibility.
   | "project-knowledge-graph"
   | "project-metadata-catalog"
@@ -78,6 +79,8 @@ export interface TenantSummary {
   voiceInputEnabled?: boolean;
   /** Whether file/image attachments are enabled for the current tenant. */
   chatAttachmentsEnabled?: boolean;
+  /** Whether the ServiceNow ITSM dashboard presets are enabled. */
+  servicenowItsmDashboardsV2Enabled?: boolean;
 }
 
 export interface CurrentUser {

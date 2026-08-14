@@ -1,0 +1,60 @@
+.dashboardContainer {
+  container-type: inline-size;
+}
+
+.kpiGrid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@container (max-width: 940px) {
+  .kpiGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container (max-width: 660px) {
+  .kpiGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (max-width: 420px) {
+  .kpiGrid {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+}
+
+.chartGrid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@container (max-width: 760px) {
+  .chartGrid {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+}
+
+.drilldownPanel {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 50;
+  width: clamp(360px, 42vw, 60vw);
+  transform: translateX(-100%);
+  transition: transform 300ms ease-in-out;
+}
+
+.drilldownPanel.open {
+  transform: translateX(0);
+}
+
+@media (max-width: 640px) {
+  .drilldownPanel {
+    width: 100%;
+  }
+}

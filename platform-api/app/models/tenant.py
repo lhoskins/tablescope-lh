@@ -57,6 +57,10 @@ class Tenant(TimestampMixin, Base):
     chat_attachments_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False, server_default=text("false")
     )
+    # When true, the ServiceNow ITSM v2 dashboard presets are visible in the UI.
+    servicenow_itsm_dashboards_v2_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default=text("false")
+    )
     # The original tenant admin / owner — always exempt from domain restriction
     # so an admin can never lock themselves out.
     owner_user_id: Mapped[int | None] = mapped_column(
