@@ -151,6 +151,7 @@ async def get_itsm_dashboard(
             project_id=project_id,
             session=session,
             tenant_id=context.tenant_id,
+            user_id=context.user_id,
             as_of=as_of,
             site_code=site,
         )

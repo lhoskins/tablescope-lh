@@ -250,11 +250,16 @@ async def _resolve_teiid(
     project_id: int,
     session: AsyncSession,
     tenant_id: int,
+    user_id: int,
 ) -> tuple[str, str, int]:
     """Resolve the Teiid database name and endpoint for a project."""
     from app.routes.dashboards_widget_query import _resolve_vdb
 
-    database = await _resolve_vdb(session=session, context=type("Context", (), {"tenant_id": tenant_id, "user_id": 0})(), project_id=project_id)
+    database = await _resolve_vdb(
+        session=session,
+        context=type("Context", (), {"tenant_id": tenant_id, "user_id": user_id})(),
+        project_id=project_id,
+    )
     endpoint = await TenantTeiidResolver(session).resolve_for_org(tenant_id)
     return database, endpoint.pg_host, endpoint.pg_port
 
@@ -289,13 +294,14 @@ async def compute_metric(
     project_id: int,
     session: AsyncSession,
     tenant_id: int,
+    user_id: int,
     current_period: PeriodBounds,
     previous_period: PeriodBounds,
     site_code: str | None = None,
     date_unit: str = "seconds",
 ) -> MetricValue:
     """Run a metric for current and previous month and assemble a KPI card value."""
-    database, host, port = await _resolve_teiid(project_id, session, tenant_id)
+    database, host, port = await _resolve_teiid(project_id, session, tenant_id, user_id)
 
     current_sql = _metric_sql_safe(metric, current_period, site_code, date_unit)
     previous_sql = _metric_sql_safe(metric, previous_period, site_code, date_unit)
@@ -364,6 +370,7 @@ async def compute_dashboard(
     project_id: int,
     session: AsyncSession,
     tenant_id: int,
+    user_id: int,
     as_of: datetime | None = None,
     site_code: str | None = None,
     date_unit: str = "seconds",
@@ -381,6 +388,7 @@ async def compute_dashboard(
                 project_id=project_id,
                 session=session,
                 tenant_id=tenant_id,
+                user_id=user_id,
                 current_period=current_period,
                 previous_period=previous_period,
                 site_code=site_code,
@@ -404,7 +412,7 @@ async def compute_dashboard(
     chart_metrics = [m for m in metrics if m.group_by]
     charts: list[ChartResult] = []
     if len(chart_metrics) >= 2:
-        database, host, port = await _resolve_teiid(project_id, session, tenant_id)
+        database, host, port = await _resolve_teiid(project_id, session, tenant_id, user_id)
         for chart_metric in chart_metrics[:2]:
             try:
                 sql = _build_chart_sql(chart_metric, current_period, chart_metric.group_by, site_code, date_unit)
