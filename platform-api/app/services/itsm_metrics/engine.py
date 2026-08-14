@@ -6,6 +6,7 @@ plan's prior-month comparison rules.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 from calendar import monthrange
@@ -311,15 +312,21 @@ async def compute_metric(
     previous_period: PeriodBounds,
     site_code: str | None = None,
     date_unit: str = "seconds",
+    teiid_endpoint: tuple[str, str, int] | None = None,
 ) -> MetricValue:
     """Run a metric for current and previous month and assemble a KPI card value."""
-    database, host, port = await _resolve_teiid(project_id, session, tenant_id, user_id)
+    if teiid_endpoint is None:
+        database, host, port = await _resolve_teiid(project_id, session, tenant_id, user_id)
+    else:
+        database, host, port = teiid_endpoint
 
     current_sql = _metric_sql_safe(metric, current_period, site_code, date_unit)
     previous_sql = _metric_sql_safe(metric, previous_period, site_code, date_unit)
 
-    current_rows = await _run_sql(database, host, port, current_sql)
-    previous_rows = await _run_sql(database, host, port, previous_sql)
+    current_rows, previous_rows = await asyncio.gather(
+        _run_sql(database, host, port, current_sql),
+        _run_sql(database, host, port, previous_sql),
+    )
 
     current_value = _extract_single_value(current_rows)
     previous_value = _extract_single_value(previous_rows)
@@ -394,26 +401,39 @@ async def compute_dashboard(
     site_code: str | None = None,
     date_unit: str = "seconds",
 ) -> DashboardResult:
-    """Compute all KPIs and charts for an ITSM dashboard preset."""
+    """Compute all KPIs and charts for an ITSM dashboard preset.
+
+    Metric queries are executed concurrently to keep dashboard load times under
+    control; each metric still runs current and previous periods independently.
+    """
     metrics = get_dashboard_metrics(dashboard_key)
     current_period, previous_period = _month_bounds(as_of)
+    teiid_endpoint = await _resolve_teiid(project_id, session, tenant_id, user_id)
 
     values: list[MetricValue] = []
     warnings: list[str] = []
-    for metric in metrics:
-        try:
-            values.append(await compute_metric(
-                metric=metric,
-                project_id=project_id,
-                session=session,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                current_period=current_period,
-                previous_period=previous_period,
-                site_code=site_code,
-                date_unit=date_unit,
-            ))
-        except Exception as exc:
+
+    metric_tasks = [
+        compute_metric(
+            metric=metric,
+            project_id=project_id,
+            session=session,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            current_period=current_period,
+            previous_period=previous_period,
+            site_code=site_code,
+            date_unit=date_unit,
+            teiid_endpoint=teiid_endpoint,
+        )
+        for metric in metrics
+    ]
+    metric_results = await asyncio.gather(*metric_tasks, return_exceptions=True)
+    for metric, result in zip(metrics, metric_results, strict=True):
+        if isinstance(result, MetricValue):
+            values.append(result)
+        else:
+            exc = result if isinstance(result, BaseException) else Exception(result)
             logger.warning("Metric %s failed: %s", metric.key, exc)
             warnings.append(f"{metric.key}: {exc}")
             values.append(MetricValue(
@@ -431,26 +451,35 @@ async def compute_dashboard(
     chart_metrics = [m for m in metrics if m.group_by]
     charts: list[ChartResult] = []
     if len(chart_metrics) >= 2:
-        database, host, port = await _resolve_teiid(project_id, session, tenant_id, user_id)
-        for chart_metric in chart_metrics[:2]:
-            try:
-                assert chart_metric.group_by is not None
-                sql = _build_chart_sql(chart_metric, current_period, chart_metric.group_by, site_code, date_unit)
-                rows = await _run_sql(database, host, port, sql)
-                x = [str(r.get("x", "")) for r in rows]
-                y = [_extract_single_value([r]) for r in rows]
-                is_date_chart = bool(chart_metric.group_by and (chart_metric.group_by.endswith(("_at", "_date")) or chart_metric.group_by in {"begin", "end_col"}))
-                charts.append(ChartResult(
-                    chart_key=f"{dashboard_key}_{chart_metric.key}",
-                    title=chart_metric.label,
-                    chart_type="line" if is_date_chart else "bar",
-                    x_axis_label=chart_metric.group_by,
-                    y_axis_label="Count",
-                    series=[ChartSeries(name=chart_metric.label, x=x, y=y)],
-                    categories=x,
-                ))
-            except Exception as exc:
-                warnings.append(f"chart {chart_metric.key}: {exc}")
+        async def _build_chart(chart_metric: MetricDefinition) -> ChartResult | BaseException:
+            assert chart_metric.group_by is not None
+            sql = _build_chart_sql(chart_metric, current_period, chart_metric.group_by, site_code, date_unit)
+            rows = await _run_sql(*teiid_endpoint, sql)
+            x = [str(r.get("x", "")) for r in rows]
+            y = [_extract_single_value([r]) for r in rows]
+            is_date_chart = bool(
+                chart_metric.group_by.endswith(("_at", "_date"))
+                or chart_metric.group_by in {"begin", "end_col"}
+            )
+            return ChartResult(
+                chart_key=f"{dashboard_key}_{chart_metric.key}",
+                title=chart_metric.label,
+                chart_type="line" if is_date_chart else "bar",
+                x_axis_label=chart_metric.group_by,
+                y_axis_label="Count",
+                series=[ChartSeries(name=chart_metric.label, x=x, y=y)],
+                categories=x,
+            )
+
+        chart_tasks = [_build_chart(m) for m in chart_metrics[:2]]
+        chart_results = await asyncio.gather(*chart_tasks, return_exceptions=True)
+        for result in chart_results:
+            if isinstance(result, ChartResult):
+                charts.append(result)
+            else:
+                exc = result if isinstance(result, BaseException) else Exception(result)
+                logger.warning("Chart build failed: %s", exc)
+                warnings.append(f"chart: {exc}")
 
     return DashboardResult(
         dashboard=dashboard_key,
