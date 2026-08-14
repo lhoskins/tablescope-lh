@@ -38,7 +38,6 @@ from app.routes import (
 from app.routes import conversational_analytics_turns as conversational_analytics_turns_routes
 from app.routes import dashboards_crud as dashboards_crud_routes
 from app.routes import dashboards_widget_query as dashboards_widget_query_routes
-from app.routes import itsm_dashboards as itsm_dashboards_routes
 from app.routes import data_source_assignments as data_source_assignments_routes
 from app.routes import data_source_catalog as data_source_catalog_routes
 from app.routes import database_sources_connection as database_sources_connection_routes
@@ -67,6 +66,7 @@ from app.routes import insight_chart_selection as insight_chart_selection_routes
 from app.routes import insight_feedback_crud as insight_feedback_crud_routes
 from app.routes import insight_feedback_review as insight_feedback_review_routes
 from app.routes import internal_file_proxy as internal_file_proxy_routes
+from app.routes import itsm_dashboards as itsm_dashboards_routes
 from app.routes import knowledge_graph as knowledge_graph_routes
 from app.routes import llm_framework_artifacts as llm_framework_artifacts_routes
 from app.routes import llm_framework_catalog as llm_framework_catalog_routes
