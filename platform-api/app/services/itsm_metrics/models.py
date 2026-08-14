@@ -40,6 +40,7 @@ class MetricDefinition:
     target: float | None = None
     status: MetricStatus = "measured"
     drill_down_dimensions: list[str] = field(default_factory=list)
+    chart_label: str | None = None
     note: str | None = None
 
 

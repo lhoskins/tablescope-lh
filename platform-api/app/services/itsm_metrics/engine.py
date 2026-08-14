@@ -33,6 +33,8 @@ from .registry import get_dashboard_metrics
 
 logger = logging.getLogger(__name__)
 
+CACHE_HINT = "/*+ cache(pref_mem ttl:300000) */"
+
 
 def _month_bounds(as_of: datetime | None = None, tz: timezone = UTC) -> tuple[PeriodBounds, PeriodBounds]:
     """Return current and previous complete calendar month bounds."""
@@ -161,8 +163,8 @@ def _build_metric_sql(
         )
         # If the expression already starts with SELECT, return as-is.
         if expr.strip().lower().startswith("select"):
-            return expr
-        return f"SELECT {expr} AS metric_value"
+            return f"{CACHE_HINT} {expr.lstrip()}"
+        return f"{CACHE_HINT} SELECT {expr} AS metric_value"
 
     # Generic builders by kind.
     if metric.kind == "event_period":
@@ -175,7 +177,7 @@ def _build_metric_sql(
         if metric.aggregation == "sum":
             select = f"SUM(CAST({target_col} AS double))"
         where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-        return f"SELECT {select} AS metric_value FROM {table} {where}"
+        return f"{CACHE_HINT}\nSELECT {select} AS metric_value FROM {table} {where}"
 
     if metric.kind == "snapshot_eom":
         open_field = metric.date_field or "opened_at"
@@ -190,7 +192,7 @@ def _build_metric_sql(
             where_clauses.append(f"{state_col} IN ({', '.join(states)})")
         select = "COUNT(DISTINCT sys_id)"
         where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-        return f"SELECT {select} AS metric_value FROM {table} {where}"
+        return f"{CACHE_HINT}\nSELECT {select} AS metric_value FROM {table} {where}"
 
     if metric.kind == "duration_period":
         duration_col = metric.numerator or "resolution_minutes"
@@ -198,7 +200,7 @@ def _build_metric_sql(
         where_clauses.append(f"{_quote_identifier(duration_col)} IS NOT NULL")
         select = f"AVG(CAST({_quote_identifier(duration_col)} AS double))"
         where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-        return f"SELECT {select} AS metric_value FROM {table} {where}"
+        return f"{CACHE_HINT}\nSELECT {select} AS metric_value FROM {table} {where}"
 
     if metric.kind == "ratio_period":
         return _build_ratio_sql(metric, start_epoch, end_epoch, date_expr, where_clauses, table)
@@ -220,7 +222,8 @@ def _build_ratio_sql(
             where = f"WHERE {date_expr} >= {start_epoch} AND {date_expr} <= {end_epoch} AND {' AND '.join(where_clauses)}"
         num_expr = _quote_identifier(metric.numerator)
         den_expr = _quote_identifier(metric.denominator)
-        sql = f"""SELECT CASE WHEN {den_expr} > 0 THEN CAST(100.0 * CAST({num_expr} AS double) / {den_expr} AS double) ELSE 0 END AS metric_value
+        sql = f"""{CACHE_HINT}
+SELECT CASE WHEN {den_expr} > 0 THEN CAST(100.0 * CAST({num_expr} AS double) / {den_expr} AS double) ELSE 0 END AS metric_value
 FROM {table} {where}"""
         return sql
     return "SELECT NULL AS metric_value"
@@ -385,7 +388,8 @@ def _build_chart_sql(
     else:
         x_expr = group_col
         order_by = "2 DESC"
-    return f"""SELECT {x_expr} AS x, COUNT(DISTINCT sys_id) AS y
+    return f"""{CACHE_HINT}
+SELECT {x_expr} AS x, COUNT(DISTINCT sys_id) AS y
 FROM {table} {where}
 GROUP BY 1
 ORDER BY {order_by}"""
@@ -451,7 +455,7 @@ async def compute_dashboard(
     chart_metrics = [m for m in metrics if m.group_by]
     charts: list[ChartResult] = []
     if len(chart_metrics) >= 2:
-        async def _build_chart(chart_metric: MetricDefinition) -> ChartResult | BaseException:
+        async def _build_chart(dashboard: str, chart_metric: MetricDefinition) -> ChartResult | BaseException:
             assert chart_metric.group_by is not None
             sql = _build_chart_sql(chart_metric, current_period, chart_metric.group_by, site_code, date_unit)
             rows = await _run_sql(*teiid_endpoint, sql)
@@ -461,17 +465,18 @@ async def compute_dashboard(
                 chart_metric.group_by.endswith(("_at", "_date"))
                 or chart_metric.group_by in {"begin", "end_col"}
             )
+            title = chart_metric.chart_label or chart_metric.label
             return ChartResult(
-                chart_key=f"{dashboard_key}_{chart_metric.key}",
-                title=chart_metric.label,
+                chart_key=f"{dashboard}_{chart_metric.key}",
+                title=title,
                 chart_type="line" if is_date_chart else "bar",
                 x_axis_label=chart_metric.group_by,
                 y_axis_label="Count",
-                series=[ChartSeries(name=chart_metric.label, x=x, y=y)],
+                series=[ChartSeries(name=title, x=x, y=y)],
                 categories=x,
             )
 
-        chart_tasks = [_build_chart(m) for m in chart_metrics[:2]]
+        chart_tasks = [_build_chart(dashboard_key, m) for m in chart_metrics[:2]]
         chart_results = await asyncio.gather(*chart_tasks, return_exceptions=True)
         for result in chart_results:
             if isinstance(result, ChartResult):

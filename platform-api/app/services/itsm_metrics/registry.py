@@ -441,6 +441,7 @@ _CHARTS: dict[str, list[tuple[str, str, str]]] = {
 
 
 def _attach_chart_group_bys(metrics: list[MetricDefinition], dashboard: str) -> list[MetricDefinition]:
+    """Attach chart group_by and chart_label to the first two KPIs without changing KPI labels."""
     chart_defs = _CHARTS.get(dashboard, [])
     if not chart_defs:
         return metrics
@@ -449,7 +450,7 @@ def _attach_chart_group_bys(metrics: list[MetricDefinition], dashboard: str) -> 
     updated: list[MetricDefinition] = []
     for i, m in enumerate(first_two):
         if i < len(chart_defs):
-            updated.append(MetricDefinition(**{**m.__dict__, "group_by": chart_defs[i][2], "label": chart_defs[i][1]}))
+            updated.append(MetricDefinition(**{**m.__dict__, "group_by": chart_defs[i][2], "chart_label": chart_defs[i][1]}))
         else:
             updated.append(m)
     return updated + rest

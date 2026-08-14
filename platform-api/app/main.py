@@ -119,6 +119,7 @@ from app.routes import users as users_routes
 from app.services.connection_pool import pool_manager
 from app.services.llm_framework import ensure_primary_runtime_target_registered
 from app.services.project_context import ProjectContextConcurrencyError
+from app.services.vdb_warming import warm_vdb
 
 logger = logging.getLogger(__name__)
 
@@ -257,10 +258,37 @@ async def _warm_all_vdbs_on_startup() -> None:
         ]
         logger.info("Pre-warming %d active VDB pools", len(vdbs))
 
-        # Pre-warming every VDB's pg_catalog was serializing connections to the
-        # single Teiid PG port and making user queries time out. Pools are now
-        # warmed lazily on first use by pool_manager; skip the startup storm.
-        logger.info("Skipping VDB pool pre-warm; %d pools will warm lazily", len(vdbs))
+        # Pre-warm is best-effort background work; it must never block
+        # application startup. Warm each VDB's pg_catalog with a cheap
+        # SELECT 1. We intentionally skip per-view warming: touching every
+        # MyCompany view (especially remote CSV-backed ones) fetches files and
+        # can overwhelm the single Teiid container without improving steady-state
+        # query performance.
+        semaphore = asyncio.Semaphore(1)
+
+        async def _warm_one(v: dict) -> None:
+            async with semaphore:
+                await warm_vdb(
+                    v["vdb_id"],
+                    vdb_host=v["host"],
+                    vdb_port=v["port"],
+                    connect_timeout=60.0,
+                    timeout=60.0,
+                    warm_views=False,
+                    max_concurrent_views=1,
+                    max_attempts=3,
+                    retry_delay=5.0,
+                )
+
+        async def _background_warm() -> None:
+            await asyncio.gather(
+                *[_warm_one(v) for v in vdbs],
+                return_exceptions=True,
+            )
+            logger.info("VDB pool pre-warm complete")
+
+        # Best-effort background warm; fire-and-forget is intentional here.
+        asyncio.create_task(_background_warm())  # noqa: RUF006
     except Exception as exc:
         logger.warning("VDB pool pre-warm failed: %s", exc)
 
