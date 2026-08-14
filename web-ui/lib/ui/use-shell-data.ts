@@ -20,6 +20,7 @@ interface CurrentUserResponse {
   avatar_url: string | null;
   company_logo_url: string | null;
   voice_input_enabled: boolean;
+  chat_attachments_enabled: boolean;
   permissions: string[] | null;
 }
 
@@ -87,6 +88,7 @@ export function useCurrentUser() {
           initials: initials(me.tenant_name),
           logoUrl: absoluteUrl(me.company_logo_url),
           voiceInputEnabled: me.voice_input_enabled,
+          chatAttachmentsEnabled: me.chat_attachments_enabled,
         },
       };
     },

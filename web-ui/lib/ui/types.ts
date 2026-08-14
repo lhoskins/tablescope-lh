@@ -76,6 +76,8 @@ export interface TenantSummary {
   logoUrl?: string | null;
   /** Whether voice input is enabled for the current tenant. */
   voiceInputEnabled?: boolean;
+  /** Whether file/image attachments are enabled for the current tenant. */
+  chatAttachmentsEnabled?: boolean;
 }
 
 export interface CurrentUser {

@@ -12,13 +12,19 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select, text
+from sqlalchemy import inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import NO_VALUE
 
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.database import get_db
-from app.models import AnalyticsConversation, AnalyticsConversationTurn, Project, ProjectMember
+from app.models import (
+    AnalyticsConversation,
+    AnalyticsConversationTurn,
+    Project,
+    ProjectMember,
+)
 from app.services.business_insight_project_resolver import (
     resolve_business_insight_project,
 )
@@ -86,6 +92,15 @@ class RecentConversationsResponse(BaseModel):
     items: list[RecentConversationItem]
 
 
+class ChatAttachmentSummary(BaseModel):
+    id: int
+    original_filename: str
+    safe_filename: str
+    mime_type: str
+    byte_size: int
+    status: str
+
+
 class TurnResponse(BaseModel):
     id: int
     sequence: int
@@ -100,6 +115,7 @@ class TurnResponse(BaseModel):
     error_code: str | None
     matched_insight: dict[str, Any] | None
     result_metadata: dict[str, Any] | None
+    attachments: list[ChatAttachmentSummary] = Field(default_factory=list)
 
 
 class ConversationResponse(BaseModel):
@@ -155,6 +171,21 @@ async def _load_conversation(
 
 
 def _turn_to_response(turn: AnalyticsConversationTurn) -> TurnResponse:
+    # Avoid a lazy-load of chat_attachments when the relationship was not eager
+    # loaded (e.g. a freshly created turn). Only serialize it when it is present.
+    att_state = inspect(turn).attrs.chat_attachments
+    att_list = att_state.loaded_value if att_state.loaded_value is not NO_VALUE else []
+    attachments = [
+        ChatAttachmentSummary(
+            id=att.id,
+            original_filename=att.original_filename,
+            safe_filename=att.safe_filename,
+            mime_type=att.mime_type,
+            byte_size=att.byte_size,
+            status=att.status,
+        )
+        for att in (att_list or [])
+    ]
     return TurnResponse(
         id=turn.id,
         sequence=turn.sequence,
@@ -169,6 +200,7 @@ def _turn_to_response(turn: AnalyticsConversationTurn) -> TurnResponse:
         error_code=turn.error_code,
         matched_insight=turn.matched_insight,
         result_metadata=turn.result_metadata,
+        attachments=attachments,
     )
 
 

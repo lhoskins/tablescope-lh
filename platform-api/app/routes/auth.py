@@ -104,6 +104,7 @@ async def get_current_user(
         avatar_url=user.avatar_url,
         company_logo_url=tenant.logo_url if tenant else None,
         voice_input_enabled=tenant.voice_input_enabled if tenant else False,
+        chat_attachments_enabled=tenant.chat_attachments_enabled if tenant else False,
         permissions=_permissions_for_user(user.role, user.is_super_admin),
     )
 

@@ -52,6 +52,11 @@ class Tenant(TimestampMixin, Base):
     voice_input_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False, server_default=text("false")
     )
+    # When true, users can attach images and files to AI Assistant messages.
+    # Controlled by the CHAT_ATTACHMENTS_V1 feature gate.
+    chat_attachments_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default=text("false")
+    )
     # The original tenant admin / owner — always exempt from domain restriction
     # so an admin can never lock themselves out.
     owner_user_id: Mapped[int | None] = mapped_column(

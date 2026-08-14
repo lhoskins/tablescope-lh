@@ -42,6 +42,7 @@ from app.models.billing import (
     TenantProvisioningRequest,
 )
 from app.models.business_insight_result import BusinessInsightResult
+from app.models.chat_attachment import ChatAttachment
 from app.models.connector_credential import ConnectorCredential
 from app.models.dashboard import Dashboard
 from app.models.data_source_ai_profile import (
@@ -162,6 +163,7 @@ __all__ = [
     "BillingEvent",
     "BillingSubscription",
     "BusinessInsightResult",
+    "ChatAttachment",
     "ConnectorCredential",
     "Dashboard",
     "DataSourceAIProfile",

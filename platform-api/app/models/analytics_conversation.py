@@ -66,6 +66,11 @@ class AnalyticsConversation(Base, TimestampMixin):
         order_by="AnalyticsConversationTurn.sequence",
         foreign_keys="AnalyticsConversationTurn.conversation_id",
     )
+    chat_attachments: Mapped[list[ChatAttachment]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        foreign_keys="ChatAttachment.conversation_id",
+    )
     last_successful_turn: Mapped[AnalyticsConversationTurn | None] = relationship(
         foreign_keys=[last_successful_turn_id],
     )
@@ -134,6 +139,11 @@ class AnalyticsConversationTurn(Base, TimestampMixin):
     conversation: Mapped[AnalyticsConversation] = relationship(
         back_populates="turns",
         foreign_keys=[conversation_id],
+    )
+    chat_attachments: Mapped[list[ChatAttachment]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+        back_populates="message",
+        cascade="all, delete-orphan",
+        foreign_keys="ChatAttachment.message_id",
     )
     parent_turn: Mapped[AnalyticsConversationTurn | None] = relationship(
         remote_side="AnalyticsConversationTurn.id",

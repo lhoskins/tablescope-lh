@@ -29,6 +29,7 @@ from app.routes import auth as auth_routes
 from app.routes import auth_sso as auth_sso_routes
 from app.routes import billing as billing_routes
 from app.routes import billing_admin as billing_admin_routes
+from app.routes import chat_attachments as chat_attachments_routes
 from app.routes import connected_sources as connected_sources_routes
 from app.routes import connectors as connectors_routes
 from app.routes import (
@@ -550,6 +551,7 @@ def create_app() -> FastAPI:
     app.include_router(home_intelligence_dashboard_save_routes.router, prefix=api_prefix)
     app.include_router(home_pins_routes.router, prefix=api_prefix)
     app.include_router(insight_chart_selection_routes.router, prefix=api_prefix)
+    app.include_router(chat_attachments_routes.router, prefix=api_prefix)
     app.include_router(conversational_analytics_conversations_routes.router, prefix=api_prefix)
     app.include_router(conversational_analytics_turns_routes.router, prefix=api_prefix)
     # Review router first: its literal /review paths must be matched before the

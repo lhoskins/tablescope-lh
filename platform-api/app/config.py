@@ -148,6 +148,12 @@ class Settings(BaseSettings):
     tablescope_ai_cross_project_enabled: bool = False
     tablescope_ai_tenant_scope_enabled: bool = False
 
+    # --- Chat attachments (CHAT_ATTACHMENTS_V1) ---
+    chat_attachments_v1_enabled: bool = False  # master switch; per-tenant flag also required
+    chat_attachment_max_bytes: int = 100 * 1024 * 1024  # 100 MiB
+    chat_attachment_allowed_extensions: str = ".png,.jpg,.jpeg,.webp,.csv,.xlsx,.xls,.json,.xml,.txt,.md,.pdf,.docx,.pptx"
+    chat_attachment_max_count_per_message: int = 10
+
     # --- Voice transcription (private STT pipeline) ---
     voice_input_enabled: bool = False  # master switch; per-tenant flag also required
     voice_max_duration_seconds: int = 120

@@ -31,9 +31,12 @@ import {
   submitTurn,
   renameConversation,
   deleteConversation,
+  uploadChatAttachment,
+  deleteChatAttachment,
   type Conversation,
   type ConversationSummary,
   type ConversationTurn,
+  type ChatAttachmentSummary,
 } from "@/lib/api/conversational-analytics";
 import { ResultChart, ResultTable } from "@/components/ai/ai-result-view";
 import type { SuggestedVisualization } from "@/lib/api/ai-actions";
@@ -179,12 +182,14 @@ function AiAssistantPageInner() {
     mutationFn: async ({
       question,
       pid,
+      attachmentIds,
     }: {
       question: string;
       // Omitted when the user hasn't narrowed to a project — the backend
       // (resolve_business_insight_project) picks the best authorized project
       // from the question itself, the same resolver Business Insights uses.
       pid: number | undefined;
+      attachmentIds: number[];
     }): Promise<Conversation | { conversation_id: number }> => {
       const signal = abortControllerRef.current?.signal;
       if (activeId == null) {
@@ -195,7 +200,7 @@ function AiAssistantPageInner() {
         setActiveId(convo.id);
         return convo;
       }
-      return submitTurn(activeId, { message: question }, signal);
+      return submitTurn(activeId, { message: question, attachment_ids: attachmentIds }, signal);
     },
     onSuccess: (res) => {
       const id = "conversation_id" in res ? res.conversation_id : res.id;
@@ -237,7 +242,7 @@ function AiAssistantPageInner() {
   }, [pendingTurnId, turnCount]);
 
   const send = useCallback(
-    (raw: string) => {
+    (raw: string, attachments: ChatAttachmentSummary[] = []) => {
       const question = raw.trim();
       if (!question || busy) return;
       setInput("");
@@ -245,10 +250,30 @@ function AiAssistantPageInner() {
       // the backend resolves the project from the question.
       const pid = active?.project_id ?? projectId ?? undefined;
       abortControllerRef.current = new AbortController();
-      sendMutation.mutate({ question, pid });
+      sendMutation.mutate({ question, pid, attachmentIds: attachments.map((a) => a.id) });
     },
     [active, projectId, busy, sendMutation],
   );
+
+  const handleUploadAttachment = useCallback(
+    async (file: File) => {
+      let conversationId = activeId;
+      if (conversationId == null) {
+        const convo = await createConversation({
+          project_id: projectId ?? undefined,
+          initial_message: "",
+        });
+        setActiveId(convo.id);
+        conversationId = convo.id;
+      }
+      return uploadChatAttachment(conversationId, file, projectId);
+    },
+    [activeId, projectId],
+  );
+
+  const handleRemoveAttachment = useCallback(async (id: number) => {
+    await deleteChatAttachment(id);
+  }, []);
 
   // Auto-start a conversation seeded from the deep-link parameters once.
   // Only the ?q=... param should trigger an automatic send; user typing should
@@ -433,11 +458,14 @@ function AiAssistantPageInner() {
             <AskAnythingComposer
               value={input}
               onChange={setInput}
-              onSubmit={send}
+              onSubmitWithAttachments={send}
+              onUploadAttachment={handleUploadAttachment}
+              onRemoveAttachment={handleRemoveAttachment}
               onCancel={busy ? cancelLast : undefined}
               placeholder="Message Tablescope AI…"
               ariaLabel="Message Tablescope AI"
               busy={busy}
+              attachmentsEnabled={tenant.chatAttachmentsEnabled === true}
               projectId={projectId}
               className="mx-auto max-w-3xl"
             />

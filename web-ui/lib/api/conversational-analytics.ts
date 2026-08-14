@@ -47,6 +47,15 @@ export interface ChartConfig {
   valueFormat?: string;
 }
 
+export interface ChatAttachmentSummary {
+  id: number;
+  original_filename: string;
+  safe_filename: string;
+  mime_type: string;
+  byte_size: number;
+  status: string;
+}
+
 export interface ConversationTurn {
   id: number;
   sequence: number;
@@ -60,6 +69,7 @@ export interface ConversationTurn {
   explanation: Record<string, unknown> | null;
   error_code: string | null;
   matched_insight: MatchedInsight | null;
+  attachments: ChatAttachmentSummary[];
 }
 
 export interface Conversation {
@@ -98,6 +108,7 @@ export interface CreateConversationRequest {
 export interface SubmitTurnRequest {
   message: string;
   data_source_id?: number;
+  attachment_ids?: number[];
   client_request_id?: string;
 }
 
@@ -106,6 +117,7 @@ export interface SubmitCanonicalTurnRequest {
   project_id?: number;
   message: string;
   data_source_id?: number;
+  attachment_ids?: number[];
   client_request_id: string;
 }
 
@@ -185,6 +197,26 @@ export function retryTurn(
     `/api/conversational-analytics/conversations/${conversationId}/turns/${turnId}/retry`,
     {}
   );
+}
+
+export function uploadChatAttachment(
+  conversationId: number,
+  file: File,
+  projectId?: number | null,
+): Promise<ChatAttachmentSummary> {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (projectId != null) {
+    formData.append("project_id", String(projectId));
+  }
+  return apiClient.postForm<ChatAttachmentSummary>(
+    `/api/chat/attachments/${conversationId}`,
+    formData,
+  );
+}
+
+export function deleteChatAttachment(attachmentId: number): Promise<void> {
+  return apiClient.delete(`/api/chat/attachments/${attachmentId}`);
 }
 
 export function submitCanonicalTurn(

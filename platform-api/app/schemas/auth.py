@@ -64,4 +64,5 @@ class CurrentUserResponse(BaseModel):
     avatar_url: str | None = None
     company_logo_url: str | None = None
     voice_input_enabled: bool = False
+    chat_attachments_enabled: bool = False
     permissions: list[str] = Field(default_factory=list)

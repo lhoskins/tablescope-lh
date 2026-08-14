@@ -33,6 +33,7 @@ router = APIRouter(prefix="/conversational-analytics", tags=["Conversational Ana
 class SubmitTurnRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=4000)
     data_source_id: int | None = Field(default=None)
+    attachment_ids: list[int] = Field(default_factory=list)
     client_request_id: str | None = Field(default=None, max_length=64)
 
 
@@ -93,7 +94,12 @@ async def submit_turn(
     await session.flush()
 
     await execute_turn(
-        session, context, conversation, turn, datasource_id=req.data_source_id
+        session,
+        context,
+        conversation,
+        turn,
+        datasource_id=req.data_source_id,
+        attachment_ids=req.attachment_ids,
     )
     if turn.status == "success" and turn.id is not None:
         conversation.last_successful_turn_id = turn.id
@@ -112,6 +118,7 @@ class SubmitCanonicalTurnRequest(BaseModel):
     project_id: int | None = Field(default=None)
     message: str = Field(..., min_length=1, max_length=4000)
     data_source_id: int | None = Field(default=None)
+    attachment_ids: list[int] = Field(default_factory=list)
     client_request_id: str = Field(..., max_length=64)
 
 
@@ -149,6 +156,7 @@ async def submit_canonical_turn(
             project_id=req.project_id,
             message=req.message,
             data_source_id=req.data_source_id,
+            attachment_ids=req.attachment_ids,
             client_request_id=req.client_request_id,
         )
     except CanonicalProjectError as exc:

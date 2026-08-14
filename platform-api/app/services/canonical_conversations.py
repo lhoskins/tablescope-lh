@@ -129,6 +129,7 @@ async def append_canonical_turn(
     message: str,
     client_request_id: str,
     data_source_id: int | None = None,
+    attachment_ids: list[int] | None = None,
 ) -> CanonicalTurnResult:
     """Append one turn to the canonical Insight thread for this scope.
 
@@ -214,7 +215,12 @@ async def append_canonical_turn(
     await session.flush()
 
     await execute_turn(
-        session, context, conversation, turn, datasource_id=data_source_id
+        session,
+        context,
+        conversation,
+        turn,
+        datasource_id=data_source_id,
+        attachment_ids=attachment_ids or [],
     )
 
     if turn.status == "success":
@@ -249,7 +255,11 @@ async def load_canonical_conversation(
         if with_turns:
             result = await session.execute(
                 select(AnalyticsConversation)
-                .options(selectinload(AnalyticsConversation.turns))
+                .options(
+                    selectinload(AnalyticsConversation.turns).selectinload(
+                        AnalyticsConversationTurn.chat_attachments
+                    )
+                )
                 .where(AnalyticsConversation.id == conversation_id)
             )
             conversation = result.scalar_one_or_none()

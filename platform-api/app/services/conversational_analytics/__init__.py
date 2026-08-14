@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
 from app.models.analytics_conversation import AnalyticsConversation, AnalyticsConversationTurn
+from app.models.chat_attachment import ChatAttachment
 from app.routes.ai_proxy import _ask_and_run_core, _forward_prose_answer
 from app.services import ai_intelligence_client as ai_intelligence_client
 from app.services.ai_governance import ai_governance_service, infer_governance_key
@@ -16,6 +17,7 @@ from app.services.ai_intelligence_client import AIUnavailableError as AIUnavaila
 from app.services.business_insight_project_resolver import (
     resolve_business_insight_project,
 )
+from app.services.chat_attachment_adapter import build_attachment_context
 from app.services.insight_card_match import (
     _extract_terms as _extract_insight_terms,
 )
@@ -265,6 +267,7 @@ async def execute_turn(
     turn: AnalyticsConversationTurn,
     *,
     datasource_id: int | None = None,
+    attachment_ids: list[int] | None = None,
 ) -> None:
     """Execute a single turn and mutate its persisted fields in place.
 
@@ -276,6 +279,22 @@ async def execute_turn(
     if conversation.last_successful_turn_id is not None:
         prior_turn = await session.get(AnalyticsConversationTurn, conversation.last_successful_turn_id)
     question = turn.user_message
+
+    attachment_context = await build_attachment_context(
+        session, context.tenant_id, attachment_ids or []
+    )
+    if attachment_ids:
+        from sqlalchemy import update
+        await session.execute(
+            update(ChatAttachment)
+            .where(
+                ChatAttachment.id.in_(attachment_ids),
+                ChatAttachment.tenant_id == context.tenant_id,
+                ChatAttachment.conversation_id == conversation.id,
+                ChatAttachment.deleted_at.is_(None),
+            )
+            .values(message_id=turn.id)
+        )
 
     intent, chart_patch, data_question = await classify_turn(
         question,
@@ -289,6 +308,13 @@ async def execute_turn(
     # does not try to interpret "horizontal", "donut", etc. as data intent.
     sql_question = data_question if data_question else question
     turn.intent_type = intent
+
+    if attachment_context:
+        # Inject authorized attachment context only into model prompts, not into
+        # the persisted user message. This preserves the existing classifier and
+        # grounding behavior for text-only turns.
+        question = f"{attachment_context}\n\n{question}"
+        sql_question = f"{attachment_context}\n\n{sql_question}"
 
     # A clarification intent from the classifier is an ambiguous phrasing, not a
     # reason to give up. Treat it like a new analysis so the SQL path gets a

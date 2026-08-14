@@ -26,6 +26,7 @@ function turn(overrides: Partial<ConversationTurn> = {}): ConversationTurn {
     explanation: null,
     error_code: null,
     matched_insight: null,
+    attachments: [],
     ...overrides,
   };
 }

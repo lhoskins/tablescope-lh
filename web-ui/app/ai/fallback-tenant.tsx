@@ -39,4 +39,5 @@ export const FALLBACK_TENANT: TenantSummary = {
   name: "Tablescope",
   slug: "",
   initials: "TS",
+  chatAttachmentsEnabled: false,
 };
