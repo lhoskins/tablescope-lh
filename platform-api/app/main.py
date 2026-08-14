@@ -293,6 +293,75 @@ async def _warm_all_vdbs_on_startup() -> None:
         logger.warning("VDB pool pre-warm failed: %s", exc)
 
 
+async def _warm_itsm_dashboards_on_startup(warm_vdbs_task: asyncio.Task) -> None:
+    """Pre-compute ITSM dashboard caches after VDB pools are warm.
+
+    Keeps the cache hot by re-warming on a schedule; the Teiid result-set
+    cache hint means subsequent warm cycles are cheap once the first pass is
+    complete. We limit concurrency to avoid swamping the single Teiid node.
+    """
+    await asyncio.sleep(30)  # Let other startup work finish first
+    await warm_vdbs_task
+
+    from sqlalchemy import select
+
+    from app.database import SessionLocal
+    from app.models.project import Project
+    from app.models.tenant import Tenant
+    from app.services.itsm_metrics import list_dashboards, warm_itsm_dashboards_for_project
+
+    try:
+        async with SessionLocal() as session:
+            rows = (
+                await session.execute(
+                    select(Project.id, Project.tenant_id, Project.owner_id)
+                    .join(Tenant, Project.tenant_id == Tenant.id)
+                    .where(
+                        Tenant.servicenow_itsm_dashboards_v2_enabled.is_(True),
+                        Project.owner_id.isnot(None),
+                    )
+                )
+            ).all()
+        projects = list(rows)
+    except Exception as exc:
+        logger.warning("Could not enumerate ITSM projects for warm: %s", exc)
+        return
+
+    if not projects:
+        logger.info("No ITSM-enabled projects to warm")
+        return
+
+    presets = list(list_dashboards())
+    warm_interval = 240  # seconds
+    semaphore = asyncio.Semaphore(1)
+
+    async def _warm_one(project_id: int, tenant_id: int, user_id: int) -> None:
+        async with semaphore:
+            try:
+                async with SessionLocal() as session:
+                    await warm_itsm_dashboards_for_project(
+                        session=session,
+                        project_id=project_id,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        presets=presets,
+                    )
+            except Exception as exc:
+                logger.warning("ITSM dashboard warm failed for project %s: %s", project_id, exc)
+
+    async def _warm_all() -> None:
+        while True:
+            logger.info("Warming ITSM dashboards for %d projects", len(projects))
+            await asyncio.gather(
+                *[_warm_one(p, t, u) for p, t, u in projects],
+                return_exceptions=True,
+            )
+            logger.info("ITSM dashboard warm complete; next warm in %ss", warm_interval)
+            await asyncio.sleep(warm_interval)
+
+    await _warm_all()
+
+
 async def _check_kg_snapshot_pipeline_version_on_startup() -> None:
     """Proactively rebuild stale KG snapshots for recently-active projects.
 
@@ -427,6 +496,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         _check_kg_snapshot_pipeline_version_on_startup()
     )
     warm_vdbs_task = asyncio.create_task(_warm_after_reconcile())
+    warm_itsm_task = asyncio.create_task(_warm_itsm_dashboards_on_startup(warm_vdbs_task))
     try:
         yield
     finally:
@@ -435,6 +505,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         seed_task.cancel()
         kg_pipeline_check_task.cancel()
         warm_vdbs_task.cancel()
+        warm_itsm_task.cancel()
         await pool_manager.close_all()
         logger.info("Platform API shutdown complete")
 

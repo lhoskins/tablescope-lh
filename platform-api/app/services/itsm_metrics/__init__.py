@@ -1,7 +1,7 @@
 """ServiceNow ITSM metric engine."""
 
 from .comparison import compute_comparison, outcome_color_class, utc_now_iso
-from .engine import compute_dashboard, compute_metric
+from .engine import compute_dashboard, compute_metric, warm_itsm_dashboards_for_project
 from .models import (
     ChartResult,
     ChartSeries,
@@ -20,6 +20,7 @@ __all__ = [
     "compute_dashboard",
     "compute_metric",
     "outcome_color_class",
+    "warm_itsm_dashboards_for_project",
     "utc_now_iso",
     "ChartResult",
     "ChartSeries",

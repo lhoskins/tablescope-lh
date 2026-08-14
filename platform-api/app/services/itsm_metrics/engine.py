@@ -29,7 +29,7 @@ from .models import (
     MetricValue,
     PeriodBounds,
 )
-from .registry import get_dashboard_metrics
+from .registry import get_dashboard_metrics, list_dashboards
 
 logger = logging.getLogger(__name__)
 
@@ -498,3 +498,34 @@ async def compute_dashboard(
             "warnings": warnings,
         },
     )
+
+
+async def warm_itsm_dashboards_for_project(
+    session: AsyncSession,
+    project_id: int,
+    tenant_id: int,
+    user_id: int,
+    presets: list[str] | None = None,
+    site_code: str | None = None,
+    date_unit: str = "seconds",
+) -> None:
+    """Pre-compute all ITSM dashboard presets for a project to populate Teiid caches.
+
+    This is best-effort: any failures are logged and ignored so the warm never
+    blocks user traffic.
+    """
+    presets = presets or list(list_dashboards())
+    for preset in presets:
+        try:
+            await compute_dashboard(
+                dashboard_key=preset,
+                project_id=project_id,
+                session=session,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                site_code=site_code,
+                date_unit=date_unit,
+            )
+            logger.info("Warmed ITSM dashboard preset %s for project %s", preset, project_id)
+        except Exception as exc:
+            logger.warning("ITSM dashboard warm failed for %s/%s: %s", project_id, preset, exc)
