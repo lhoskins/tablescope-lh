@@ -17,6 +17,7 @@ from typing import Any, cast
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import SessionLocal
 from app.routes.dashboards_widget_query import _run_widget_sql
 from app.services.connection_pool import pool_manager
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
@@ -675,34 +676,42 @@ async def warm_itsm_dashboards_for_project(
     """Pre-compute all ITSM dashboard presets for a project to populate Teiid caches.
 
     This is best-effort: any failures are logged and ignored so the warm never
-    blocks user traffic.
+    blocks user traffic. Dashboards are warmed concurrently up to the limit
+    supported by the Teiid connection pool, and each completed dashboard also
+    populates the assembled-response cache.
     """
     presets = presets or list(list_dashboards())
-    for preset in presets:
-        try:
-            result = await compute_dashboard(
-                dashboard_key=preset,
-                project_id=project_id,
-                session=session,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                site_code=site_code,
-                date_unit=date_unit,
-                duration_unit=duration_unit,
-            )
-            from .cache import make_cache_key, set_cached_dashboard
+    sem = asyncio.Semaphore(max(1, min(2, pool_manager.max_size // 8)))
 
-            set_cached_dashboard(
-                make_cache_key(
-                    tenant_id=tenant_id,
-                    project_id=project_id,
-                    dashboard_key=preset,
-                    site_code=site_code,
-                    as_of=None,
-                    duration_unit=duration_unit,
-                ),
-                result,
-            )
-            logger.info("Warmed ITSM dashboard preset %s for project %s", preset, project_id)
-        except Exception as exc:
-            logger.warning("ITSM dashboard warm failed for %s/%s: %s", project_id, preset, exc)
+    async def _warm_one(preset: str) -> None:
+        async with sem:
+            try:
+                async with SessionLocal() as warm_session:
+                    result = await compute_dashboard(
+                        dashboard_key=preset,
+                        project_id=project_id,
+                        session=warm_session,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        site_code=site_code,
+                        date_unit=date_unit,
+                        duration_unit=duration_unit,
+                    )
+                from .cache import make_cache_key, set_cached_dashboard
+
+                set_cached_dashboard(
+                    make_cache_key(
+                        tenant_id=tenant_id,
+                        project_id=project_id,
+                        dashboard_key=preset,
+                        site_code=site_code,
+                        as_of=None,
+                        duration_unit=duration_unit,
+                    ),
+                    result,
+                )
+                logger.info("Warmed ITSM dashboard preset %s for project %s", preset, project_id)
+            except Exception as exc:
+                logger.warning("ITSM dashboard warm failed for %s/%s: %s", project_id, preset, exc)
+
+    await asyncio.gather(*[_warm_one(preset) for preset in presets], return_exceptions=True)
