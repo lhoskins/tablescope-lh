@@ -748,7 +748,7 @@ GROUP BY 1 ORDER BY 2 DESC LIMIT 7"""
             title="Where SLA risk originates",
             chart_type="skinny_bar",
             y_axis_label="Breached incidents",
-            series=[ChartSeries(name="Breaches", x=sla_categories, y=sla_values)],
+            series=[ChartSeries(name="Breaches", x=sla_categories, y=cast(list[float | None], sla_values))],
             categories=sla_categories,
             unit="count",
             description="Sites contributing the most completed resolution SLA breaches.",
@@ -782,7 +782,7 @@ GROUP BY 1 ORDER BY 2 DESC LIMIT 7"""
             title="Category contribution",
             chart_type="skinny_bar",
             y_axis_label="Incidents",
-            series=[ChartSeries(name="Incidents", x=category_names, y=category_values)],
+            series=[ChartSeries(name="Incidents", x=category_names, y=cast(list[float | None], category_values))],
             categories=category_names,
             unit="count",
             description="Highest-volume incident categories in the selected period.",
@@ -896,7 +896,7 @@ GROUP BY 1 ORDER BY 2 DESC LIMIT 7"""
         title="Delay source",
         chart_type="skinny_bar",
         y_axis_label="Open requests",
-        series=[ChartSeries(name="Open requests", x=friction_names, y=friction_values)],
+        series=[ChartSeries(name="Open requests", x=friction_names, y=cast(list[float | None], friction_values))],
         categories=friction_names,
         unit="count",
         description="Current workflow states contributing to request fulfillment delay.",
@@ -911,7 +911,7 @@ GROUP BY 1 ORDER BY 2 DESC LIMIT 7"""
         title="Catalog demand",
         chart_type="skinny_bar",
         y_axis_label="Requested items",
-        series=[ChartSeries(name="Requested items", x=catalog_names, y=catalog_values)],
+        series=[ChartSeries(name="Requested items", x=catalog_names, y=cast(list[float | None], catalog_values))],
         categories=catalog_names,
         unit="count",
         description="Catalog items generating the most demand in the selected period.",
@@ -926,7 +926,7 @@ GROUP BY 1 ORDER BY 2 DESC LIMIT 7"""
         title="Queue load",
         chart_type="skinny_bar",
         y_axis_label="Open tasks",
-        series=[ChartSeries(name="Open catalog tasks", x=queue_names, y=queue_values)],
+        series=[ChartSeries(name="Open catalog tasks", x=queue_names, y=cast(list[float | None], queue_values))],
         categories=queue_names,
         unit="count",
         description="Assignment groups carrying the largest active catalog-task workload.",
@@ -1085,9 +1085,9 @@ ORDER BY 2""",
             if isinstance(chart_result, ChartResult):
                 charts.append(chart_result)
             else:
-                exc = chart_result if isinstance(chart_result, BaseException) else Exception(chart_result)
-                logger.warning("Chart build failed: %s", exc)
-                warnings.append(f"chart: {exc}")
+                chart_exc = chart_result if isinstance(chart_result, BaseException) else Exception(chart_result)
+                logger.warning("Chart build failed: %s", chart_exc)
+                warnings.append(f"chart: {chart_exc}")
 
     return DashboardResult(
         dashboard=dashboard_key,
