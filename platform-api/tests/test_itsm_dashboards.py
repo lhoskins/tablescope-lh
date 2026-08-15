@@ -46,8 +46,14 @@ async def test_list_itsm_dashboards(client, service_headers, _enable_flag):
 
 async def test_get_itsm_dashboard_returns_metric_shape(client, service_headers, _enable_flag, monkeypatch):
     from app.routes import itsm_dashboards
+    from app.services.itsm_metrics.cache import clear_dashboard_cache
+
+    clear_dashboard_cache()
+    compute_calls = 0
 
     async def _fake_compute(*args, **kwargs):
+        nonlocal compute_calls
+        compute_calls += 1
         return DashboardResult(
             dashboard="incident",
             as_of="2026-07-31T23:59:59Z",
@@ -69,6 +75,9 @@ async def test_get_itsm_dashboard_returns_metric_shape(client, service_headers, 
                     comparison_label="↑ 10.5% vs Jun 2026",
                     status="measured",
                     as_of="2026-07-31T23:59:59Z",
+                    unit="count",
+                    description="Incidents opened during the month.",
+                    calculation="Distinct incidents opened in the month.",
                 ),
             ],
             charts=[
@@ -95,8 +104,16 @@ async def test_get_itsm_dashboard_returns_metric_shape(client, service_headers, 
     assert body["metrics"][0]["metricKey"] == "incident_volume"
     assert body["metrics"][0]["value"] == 42.0
     assert body["metrics"][0]["deltaPercent"] == 10.5
+    assert body["metrics"][0]["unit"] == "count"
+    assert body["metrics"][0]["calculation"]
     assert body["charts"][0]["chartKey"] == "incident_incident_volume"
     assert body["dataQuality"]["latestCompleteMonth"] == "Jul 2026"
+    assert body["dataQuality"]["cacheStatus"] == "miss"
+
+    cached = await client.get("/api/projects/1/itsm-dashboards/incident", headers={"Authorization": f"Bearer {token}"})
+    assert cached.status_code == 200
+    assert cached.json()["dataQuality"]["cacheStatus"] == "fresh"
+    assert compute_calls == 1
 
 
 async def test_unknown_preset_returns_404(client, service_headers, _enable_flag):
