@@ -12,6 +12,7 @@ from app.services.itsm_metrics.engine import (
     _format_filter,
     _month_bounds,
     _period_epoch,
+    _reporting_bounds,
     _rolling_month_bounds,
 )
 from app.services.itsm_metrics.registry import get_dashboard_metrics, get_metric, list_dashboards
@@ -109,6 +110,22 @@ class TestMonthBounds:
         assert rolling.start == "2025-08-01"
         assert rolling.end == "2026-07-31"
 
+    def test_reporting_windows_compare_equal_30_day_periods(self) -> None:
+        current, previous = _reporting_bounds(
+            "30_days",
+            datetime.datetime(2026, 8, 14, tzinfo=datetime.UTC),
+        )
+        assert (current.start, current.end) == ("2026-07-02", "2026-07-31")
+        assert (previous.start, previous.end) == ("2026-06-02", "2026-07-01")
+
+    def test_reporting_windows_compare_equal_years(self) -> None:
+        current, previous = _reporting_bounds(
+            "1_year",
+            datetime.datetime(2026, 8, 14, tzinfo=datetime.UTC),
+        )
+        assert (current.start, current.end) == ("2025-08-01", "2026-07-31")
+        assert (previous.start, previous.end) == ("2024-08-01", "2025-07-31")
+
 
 class TestFilterFormatting:
     def test_boolean_eq(self) -> None:
@@ -131,7 +148,15 @@ class TestFilterFormatting:
 
 class TestRegistry:
     def test_list_dashboards(self) -> None:
-        assert list_dashboards() == ["availability", "incident", "problem", "productivity", "service_request"]
+        assert list_dashboards() == [
+            "availability",
+            "incident",
+            "incident_insights",
+            "problem",
+            "productivity",
+            "service_request",
+            "service_request_insights",
+        ]
 
     def test_incident_metrics_have_order(self) -> None:
         metrics = get_dashboard_metrics("incident")
@@ -140,6 +165,18 @@ class TestRegistry:
 
     def test_get_metric_unknown_returns_none(self) -> None:
         assert get_metric("incident", "not_a_key") is None
+
+    def test_insight_metrics_follow_kpi_definition_directions(self) -> None:
+        incident = {metric.key: metric for metric in get_dashboard_metrics("incident_insights")}
+        request = {metric.key: metric for metric in get_dashboard_metrics("service_request_insights")}
+        assert incident["open_backlog"].polarity == "lower_is_better"
+        assert incident["resolution_sla"].polarity == "higher_is_better"
+        assert incident["median_resolution"].calculation == "Median open-to-resolution duration."
+        assert incident["major_incidents"].polarity == "lower_is_better"
+        assert request["request_backlog"].polarity == "lower_is_better"
+        assert request["request_sla"].polarity == "higher_is_better"
+        assert request["median_fulfillment"].aggregation == "median"
+        assert request["automated_fulfillment_rate"].polarity == "higher_is_better"
 
 
 class TestSqlGeneration:
@@ -194,3 +231,15 @@ class TestSqlGeneration:
         sql = _build_metric_sql(metric, period)
         assert '"resolved_at"' in sql
         assert '"state" IN' not in sql
+
+    def test_automated_fulfillment_uses_available_task_proxy(self) -> None:
+        from app.services.itsm_metrics.models import PeriodBounds
+
+        metric = get_metric("service_request_insights", "automated_fulfillment_rate")
+        assert metric is not None
+        period = PeriodBounds(start="2026-07-01", end="2026-07-31", label="Jul 2026")
+        sql = _build_metric_sql(metric, period, "US01")
+        assert '"09_catalog_tasks_CSV"' in sql
+        assert "task_count" in sql
+        assert "automated / fulfilled" in sql
+        assert '"site_code" = \'US01\'' in sql

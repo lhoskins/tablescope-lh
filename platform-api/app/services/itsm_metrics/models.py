@@ -93,6 +93,19 @@ class ChartResult:
     series: list[ChartSeries] = field(default_factory=list)
     categories: list[str] = field(default_factory=list)
     unit: str | None = None
+    description: str | None = None
+    calculation: str | None = None
+    drilldown_metric_key: str | None = None
+    drilldown_dimension: str | None = None
+
+
+@dataclass
+class InsightSummary:
+    insight_type: Literal["risk", "driver", "action"]
+    title: str
+    detail: str
+    tone: Literal["critical", "warning", "positive", "neutral"] = "neutral"
+    metric_key: str | None = None
 
 
 @dataclass
@@ -137,3 +150,4 @@ class DashboardResult:
     metrics: list[MetricValue]
     charts: list[ChartResult]
     data_quality: dict[str, Any]
+    insights: list[InsightSummary] = field(default_factory=list)

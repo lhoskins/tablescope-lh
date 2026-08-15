@@ -1,6 +1,6 @@
 """ServiceNow ITSM dashboard preset endpoints.
 
-Returns batched KPI cards and chart datasets for the five approved presets.
+Returns batched KPI cards and chart datasets for the KPI and insight presets.
 The feature is gated by the ``servicenow_itsm_dashboards_v2_enabled`` setting.
 """
 
@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
@@ -26,6 +26,8 @@ from app.services.itsm_metrics.drilldown import compute_metric_drilldown
 from app.services.itsm_metrics.models import DashboardResult
 
 router = APIRouter(prefix="/projects/{project_id}/itsm-dashboards", tags=["itsm-dashboards"])
+
+PeriodKey = Literal["latest_month", "30_days", "60_days", "90_days", "6_months", "1_year", "2_years"]
 
 
 class MetricValueOut(BaseModel):
@@ -65,6 +67,18 @@ class ChartResultOut(BaseModel):
     series: list[ChartSeriesOut]
     categories: list[str]
     unit: str | None = None
+    description: str | None = None
+    calculation: str | None = None
+    drilldownMetricKey: str | None = None
+    drilldownDimension: str | None = None
+
+
+class InsightSummaryOut(BaseModel):
+    insightType: str
+    title: str
+    detail: str
+    tone: str
+    metricKey: str | None = None
 
 
 class DrilldownContributorOut(BaseModel):
@@ -105,6 +119,7 @@ class DashboardResultOut(BaseModel):
     metrics: list[MetricValueOut]
     charts: list[ChartResultOut]
     dataQuality: dict[str, Any]
+    insights: list[InsightSummaryOut] = Field(default_factory=list)
 
 
 def _metric_value_to_dict(mv: Any) -> dict[str, Any]:
@@ -141,6 +156,20 @@ def _chart_to_dict(chart: Any) -> dict[str, Any]:
         "series": [{"name": s.name, "x": s.x, "y": s.y} for s in chart.series],
         "categories": chart.categories,
         "unit": chart.unit,
+        "description": chart.description,
+        "calculation": chart.calculation,
+        "drilldownMetricKey": chart.drilldown_metric_key,
+        "drilldownDimension": chart.drilldown_dimension,
+    }
+
+
+def _insight_to_dict(insight: Any) -> dict[str, Any]:
+    return {
+        "insightType": insight.insight_type,
+        "title": insight.title,
+        "detail": insight.detail,
+        "tone": insight.tone,
+        "metricKey": insight.metric_key,
     }
 
 
@@ -152,6 +181,7 @@ def _dashboard_to_dict(result: DashboardResult) -> dict[str, Any]:
         "metrics": [_metric_value_to_dict(m) for m in result.metrics],
         "charts": [_chart_to_dict(c) for c in result.charts],
         "dataQuality": result.data_quality,
+        "insights": [_insight_to_dict(insight) for insight in result.insights],
     }
 
 
@@ -182,6 +212,7 @@ async def get_itsm_dashboard(
     site: str | None = Query(default=None),
     as_of: datetime | None = Query(default=None, alias="asOf"),
     duration_unit: Literal["hours", "minutes"] = Query(default="hours", alias="durationUnit"),
+    period_key: PeriodKey = Query(default="latest_month", alias="period"),
     refresh: bool = Query(default=False),
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
@@ -199,6 +230,7 @@ async def get_itsm_dashboard(
             site_code=site,
             as_of=as_of,
             duration_unit=duration_unit,
+            period_key=period_key,
         )
 
         async def _compute() -> DashboardResult:
@@ -211,6 +243,7 @@ async def get_itsm_dashboard(
                 as_of=as_of,
                 site_code=site,
                 duration_unit=duration_unit,
+                period_key=period_key,
             )
 
         result, cache_status, cache_age = await get_or_compute_dashboard(
@@ -242,6 +275,7 @@ async def get_itsm_metric_drilldown(
     site: str | None = Query(default=None),
     as_of: datetime | None = Query(default=None, alias="asOf"),
     duration_unit: Literal["hours", "minutes"] = Query(default="hours", alias="durationUnit"),
+    period_key: PeriodKey = Query(default="latest_month", alias="period"),
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> MetricDrilldownOut:
@@ -260,6 +294,7 @@ async def get_itsm_metric_drilldown(
             as_of=as_of,
             site_code=site,
             duration_unit=duration_unit,
+            period_key=period_key,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

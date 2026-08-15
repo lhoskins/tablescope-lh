@@ -41,7 +41,15 @@ async def test_list_itsm_dashboards(client, service_headers, _enable_flag):
     token = create_access_token(sub="u", tenant_id=1, user_id=1, role="editor")
     r = await client.get("/api/projects/1/itsm-dashboards", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
-    assert sorted(r.json()) == ["availability", "incident", "problem", "productivity", "service_request"]
+    assert sorted(r.json()) == [
+        "availability",
+        "incident",
+        "incident_insights",
+        "problem",
+        "productivity",
+        "service_request",
+        "service_request_insights",
+    ]
 
 
 async def test_get_itsm_dashboard_returns_metric_shape(client, service_headers, _enable_flag, monkeypatch):
@@ -120,3 +128,34 @@ async def test_unknown_preset_returns_404(client, service_headers, _enable_flag)
     token = create_access_token(sub="u", tenant_id=1, user_id=1, role="editor")
     r = await client.get("/api/projects/1/itsm-dashboards/not-a-preset", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 404
+
+
+async def test_period_is_forwarded_and_separates_cached_results(client, service_headers, _enable_flag, monkeypatch):
+    from app.routes import itsm_dashboards
+    from app.services.itsm_metrics.cache import clear_dashboard_cache
+
+    clear_dashboard_cache()
+    seen_periods: list[str] = []
+
+    async def _fake_compute(*args, **kwargs):
+        period = kwargs["period_key"]
+        seen_periods.append(period)
+        return DashboardResult(
+            dashboard="incident_insights",
+            as_of="2026-07-31T23:59:59Z",
+            filters={"period": period},
+            metrics=[],
+            charts=[],
+            data_quality={"latestCompleteMonth": "Jul 2026", "missingMetrics": [], "warnings": []},
+        )
+
+    monkeypatch.setattr(itsm_dashboards, "compute_dashboard", _fake_compute)
+    token = create_access_token(sub="u", tenant_id=1, user_id=1, role="editor")
+    headers = {"Authorization": f"Bearer {token}"}
+    first = await client.get("/api/projects/1/itsm-dashboards/incident_insights?period=30_days", headers=headers)
+    second = await client.get("/api/projects/1/itsm-dashboards/incident_insights?period=1_year", headers=headers)
+    cached = await client.get("/api/projects/1/itsm-dashboards/incident_insights?period=30_days", headers=headers)
+
+    assert first.status_code == second.status_code == cached.status_code == 200
+    assert seen_periods == ["30_days", "1_year"]
+    assert cached.json()["dataQuality"]["cacheStatus"] == "fresh"

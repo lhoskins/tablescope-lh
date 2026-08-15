@@ -19,7 +19,7 @@ from .engine import (
     _format_value,
     _metric_calculation,
     _metric_description,
-    _month_bounds,
+    _reporting_bounds,
     _period_epoch,
     _quote_identifier,
     _resolve_teiid,
@@ -101,12 +101,13 @@ async def compute_metric_drilldown(
     as_of: datetime | None = None,
     site_code: str | None = None,
     duration_unit: str = "hours",
+    period_key: str | None = None,
 ) -> MetricDrilldown:
     metric = get_metric(dashboard_key, metric_key)
     if metric is None:
         raise ValueError(f"Unknown metric: {dashboard_key}/{metric_key}")
 
-    current_period, _ = _month_bounds(as_of)
+    current_period, _ = _reporting_bounds(period_key, as_of)
     start, end = _period_epoch(current_period)
     table, where, dimension = _context(metric, start, end, site_code)
     endpoint = await _resolve_teiid(project_id, session, tenant_id, user_id)
