@@ -117,6 +117,10 @@ class TeiidConnectionPoolManager:
                     logger.info("Evicting stale Teiid pool %s", key)
                     await pool.close()
 
+    @property
+    def max_size(self) -> int:
+        return self._max_size
+
     async def close_all(self) -> None:
         async with self._lock:
             for key, pool in list(self._pools.items()):
@@ -128,6 +132,6 @@ class TeiidConnectionPoolManager:
 _settings = get_settings()
 pool_manager = TeiidConnectionPoolManager(
     min_size=0,
-    max_size=min(_settings.database_pool_max_size, 5),
+    max_size=min(_settings.database_pool_max_size, 20),
     max_inactive_connection_lifetime=120.0,
 )

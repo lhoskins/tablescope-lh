@@ -17,6 +17,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.routes.dashboards_widget_query import _run_widget_sql
+from app.services.connection_pool import pool_manager
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
 from .comparison import compute_comparison, utc_now_iso
@@ -417,21 +418,27 @@ async def compute_dashboard(
     values: list[MetricValue] = []
     warnings: list[str] = []
 
-    metric_tasks = [
-        compute_metric(
-            metric=metric,
-            project_id=project_id,
-            session=session,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            current_period=current_period,
-            previous_period=previous_period,
-            site_code=site_code,
-            date_unit=date_unit,
-            teiid_endpoint=teiid_endpoint,
-        )
-        for metric in metrics
-    ]
+    # Bound concurrency so we do not exhaust the small Teiid connection pool
+    # (default max 20) and trigger acquisition/command timeouts.
+    max_concurrent_metrics = max(1, pool_manager.max_size // 2)
+    metric_sem = asyncio.Semaphore(max_concurrent_metrics)
+
+    async def _compute_metric(metric: MetricDefinition) -> MetricValue | BaseException:
+        async with metric_sem:
+            return await compute_metric(
+                metric=metric,
+                project_id=project_id,
+                session=session,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                current_period=current_period,
+                previous_period=previous_period,
+                site_code=site_code,
+                date_unit=date_unit,
+                teiid_endpoint=teiid_endpoint,
+            )
+
+    metric_tasks = [_compute_metric(metric) for metric in metrics]
     metric_results = await asyncio.gather(*metric_tasks, return_exceptions=True)
     for metric, result in zip(metrics, metric_results, strict=True):
         if isinstance(result, MetricValue):
@@ -476,7 +483,13 @@ async def compute_dashboard(
                 categories=x,
             )
 
-        chart_tasks = [_build_chart(dashboard_key, m) for m in chart_metrics[:2]]
+        chart_sem = asyncio.Semaphore(max(2, pool_manager.max_size // 2))
+
+        async def _build_chart_guarded(dashboard: str, chart_metric: MetricDefinition) -> ChartResult | BaseException:
+            async with chart_sem:
+                return await _build_chart(dashboard, chart_metric)
+
+        chart_tasks = [_build_chart_guarded(dashboard_key, m) for m in chart_metrics[:2]]
         chart_results = await asyncio.gather(*chart_tasks, return_exceptions=True)
         for chart_result in chart_results:
             if isinstance(chart_result, ChartResult):
