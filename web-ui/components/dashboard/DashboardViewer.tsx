@@ -47,7 +47,7 @@ import type { DashboardTemplateMetadata } from "@/components/tablescope/project/
 
 function templateMetadata(dashboard: Dashboard): DashboardTemplateMetadata | undefined {
   const value = dashboard.config?.dashboardTemplate;
-  return value && typeof value === "object" ? value as DashboardTemplateMetadata : undefined;
+  return value && typeof value === "object" ? (value as unknown as DashboardTemplateMetadata) : undefined;
 }
 
 function normalizedPeriod(period?: string): DatePresetId | undefined {

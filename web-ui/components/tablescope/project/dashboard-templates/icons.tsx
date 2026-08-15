@@ -12,11 +12,11 @@ import {
   IconShieldCheck,
   IconTrendingUp,
   IconUsers,
-  type TablerIconProps,
+  type IconProps,
 } from "@tabler/icons-react";
 import type { DashboardTemplateIcon } from "./types";
 
-const ICONS: Record<DashboardTemplateIcon, ComponentType<TablerIconProps>> = {
+const ICONS: Record<DashboardTemplateIcon, ComponentType<IconProps>> = {
   activity: IconActivity,
   alert: IconAlertTriangle,
   availability: IconShieldCheck,
