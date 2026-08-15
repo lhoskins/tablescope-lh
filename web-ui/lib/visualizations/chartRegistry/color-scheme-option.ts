@@ -18,8 +18,9 @@ export const COLOR_SCHEME_OPTION: ChartOptionDefinition = {
   label: "Color scheme",
   type: "select",
   group: "style",
-  defaultValue: "tablescope",
+  defaultValue: "operational_insight",
   options: [
+    { label: "Operational Insight", value: "operational_insight" },
     { label: "TableScope", value: "tablescope" },
     { label: "Ocean", value: "ocean" },
     { label: "Forest", value: "forest" },

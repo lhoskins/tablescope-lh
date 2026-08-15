@@ -14,6 +14,7 @@ import {
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { cn } from "@/lib/cn";
+import { OPERATIONAL_INSIGHT_THEME } from "@/components/dashboard/operational-insight-theme";
 
 echarts.use([
   BarChart,
@@ -102,7 +103,7 @@ export function ItsmChart({ chart, onElementClick, className }: ItsmChartProps) 
           name: series.name,
           data: series.y,
           barMaxWidth: chart.chartType === "skinny_bar" ? 10 : 16,
-          itemStyle: { color: ["#4f7cff", "#22c55e", "#f59e0b"][index % 3], borderRadius: [0, 5, 5, 0] },
+          itemStyle: { color: OPERATIONAL_INSIGHT_THEME.palette[index % OPERATIONAL_INSIGHT_THEME.palette.length], borderRadius: [0, 5, 5, 0] },
           label: { show: true, position: "right", fontSize: 10, color: "#475569" },
         })),
       };
@@ -131,8 +132,8 @@ export function ItsmChart({ chart, onElementClick, className }: ItsmChartProps) 
           smooth: true,
           symbolSize: 6,
           connectNulls: false,
-          lineStyle: { width: 2, color: ["#3b82f6", "#22c55e", "#f59e0b"][index % 3] },
-          itemStyle: { color: ["#3b82f6", "#22c55e", "#f59e0b"][index % 3] },
+          lineStyle: { width: 2, color: OPERATIONAL_INSIGHT_THEME.palette[index % OPERATIONAL_INSIGHT_THEME.palette.length] },
+          itemStyle: { color: OPERATIONAL_INSIGHT_THEME.palette[index % OPERATIONAL_INSIGHT_THEME.palette.length] },
           areaStyle: index === 0 ? { color: "rgba(59, 130, 246, 0.10)" } : undefined,
         })),
       };

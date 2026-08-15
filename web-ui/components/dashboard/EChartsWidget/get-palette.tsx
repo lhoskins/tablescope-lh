@@ -66,6 +66,8 @@ import { CanvasRenderer } from "echarts/renderers";import { BASE_COLORS } from "
 
 export function getPalette(scheme: string | undefined, isDark: boolean): string[] {
   switch (scheme) {
+    case "operational_insight":
+      return BASE_COLORS;
     case "ocean":
       return ["#0ea5e9", "#06b6d4", "#14b8a6", "#3b82f6", "#6366f1", "#a855f7"];
     case "forest":

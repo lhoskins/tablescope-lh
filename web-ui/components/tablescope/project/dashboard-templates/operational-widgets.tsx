@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { IconEdit, IconSparkles } from "@tabler/icons-react";
+import { useRef, useState } from "react";
+import { IconArrowsMove, IconEdit, IconSparkles } from "@tabler/icons-react";
 import { apiClient } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -31,6 +31,8 @@ export function OperationalInsightWidgets({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [arranging, setArranging] = useState(false);
+  const dragged = useRef<string | undefined>(undefined);
   if (widgets.length === 0) return null;
 
   const persist = async (next: OperationalInsightWidgetConfig[]) => {
@@ -70,16 +72,32 @@ export function OperationalInsightWidgets({
     }
   };
 
+  const reorder = async (targetId: string) => {
+    const sourceId = dragged.current;
+    if (!sourceId || sourceId === targetId) return;
+    const ordered = [...widgets].sort((a, b) => (a.layout?.position ?? 0) - (b.layout?.position ?? 0));
+    const sourceIndex = ordered.findIndex((item) => item.id === sourceId);
+    const targetIndex = ordered.findIndex((item) => item.id === targetId);
+    if (sourceIndex < 0 || targetIndex < 0) return;
+    const [source] = ordered.splice(sourceIndex, 1);
+    ordered.splice(targetIndex, 0, source);
+    await persist(ordered.map((item, position) => ({ ...item, layout: { position, width: item.layout?.width ?? "standard" } })));
+  };
+  const resize = (id: string) => persist(widgets.map((item) => item.id === id ? { ...item, layout: { position: item.layout?.position ?? 0, width: item.layout?.width === "wide" ? "standard" : "wide" } } : item));
+
   return (
-    <div className="mb-3 grid gap-3 lg:grid-cols-[1.35fr_.65fr]">
-      {widgets.map((widget) => (
-        <Card key={widget.id} className="p-4">
+    <div className="mb-3">
+      <div className="mb-2 flex justify-end"><Button variant="secondary" size="sm" onClick={() => setArranging((value) => !value)}><IconArrowsMove size={13} />{arranging ? "Done arranging" : "Arrange insight widgets"}</Button></div>
+      <div className="grid grid-cols-12 gap-3">
+      {[...widgets].sort((a, b) => (a.layout?.position ?? 0) - (b.layout?.position ?? 0)).map((widget) => (
+        <Card key={widget.id} draggable={arranging} onDragStart={() => { dragged.current = widget.id; }} onDragOver={(event) => arranging && event.preventDefault()} onDrop={(event) => { if (arranging) { event.preventDefault(); void reorder(widget.id); } }} className={`${widget.layout?.width === "wide" ? "col-span-12" : "col-span-12 lg:col-span-6"} p-4 ${arranging ? "cursor-grab border-dashed" : ""}`}>
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-small font-semibold text-ink-primary">{widget.title}</div>
               <div className="mt-0.5 text-[11px] text-ink-tertiary">AI-managed · editable · updated {widget.updatedAt ? new Date(widget.updatedAt).toLocaleString() : "when created"}</div>
             </div>
             <div className="flex gap-1">
+              {arranging && <Button variant="secondary" size="sm" onClick={() => resize(widget.id)}>{widget.layout?.width === "wide" ? "Half width" : "Full width"}</Button>}
               <Button variant="secondary" size="sm" onClick={() => setEditingId(editingId === widget.id ? null : widget.id)}><IconEdit size={13} />Edit</Button>
               <Button variant="secondary" size="sm" onClick={() => refresh(widget)} disabled={refreshingId !== null}><IconSparkles size={13} />{refreshingId === widget.id ? "Refreshing…" : "Refresh AI"}</Button>
             </div>
@@ -105,7 +123,8 @@ export function OperationalInsightWidgets({
           )}
         </Card>
       ))}
-      {error && <div className="lg:col-span-2 rounded-md bg-red-50 px-3 py-2 text-small text-red-700">{error}</div>}
+      {error && <div className="col-span-12 rounded-md bg-red-50 px-3 py-2 text-small text-red-700">{error}</div>}
+      </div>
     </div>
   );
 }

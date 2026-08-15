@@ -45,6 +45,7 @@ export interface DashboardTemplateDefinition {
 
 export interface DashboardTemplateParameters {
   dimensionLabel: string;
+  dimensionField?: string;
   valueSource: "query" | "manual";
   queryId?: number;
   queryName?: string;
@@ -63,6 +64,8 @@ export interface DashboardTemplateMetadata {
   dashboardKey: string;
   dashboardIcon: DashboardTemplateIcon;
   parameters: DashboardTemplateParameters;
+  bindingId?: number;
+  dashboardGroupId?: number;
 }
 
 export interface OperationalInsightWidgetConfig {
@@ -75,14 +78,34 @@ export interface OperationalInsightWidgetConfig {
   summary?: string;
   items?: string[];
   updatedAt?: string;
+  layout?: { position: number; width: "standard" | "wide" };
+}
+
+export interface TemplateBindingDraft {
+  metricManifest: Array<Record<string, unknown>>;
+  sourceMapping: Record<string, string>;
+  fieldMapping: Record<string, Record<string, string>>;
+  dimensionConfig: { label: string; field: string; valueSource: "query" | "manual" };
+  validation: { valid: boolean; errors: string[]; warnings?: string[] };
+}
+
+export interface DashboardGroupRecord {
+  id: number;
+  name: string;
+  icon: DashboardTemplateIcon;
+  templateId?: string;
+  collapsedDefault: boolean;
+  dashboardIds: number[];
 }
 
 export interface DashboardGroup {
   id: string;
+  persistentId?: number;
   name: string;
   icon: DashboardTemplateIcon;
   templateId?: string;
   dashboards: Dashboard[];
+  collapsedDefault?: boolean;
 }
 
 export function templateMetadataOf(dashboard: Dashboard): DashboardTemplateMetadata | undefined {

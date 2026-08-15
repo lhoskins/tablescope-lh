@@ -105,4 +105,6 @@ export type ItsmCardSize = "compact" | "standard" | "wide";
 export interface ItsmDashboardLayout {
   order: string[];
   sizes: Record<string, ItsmCardSize>;
+  chartOrder?: string[];
+  chartHeights?: Record<string, "compact" | "standard" | "tall">;
 }

@@ -5,6 +5,7 @@ import type {
   DashboardTemplateMetadata,
   DashboardTemplateParameters,
   OperationalInsightWidgetConfig,
+  TemplateBindingDraft,
 } from "./types";
 
 interface SuggestionWidget {
@@ -43,6 +44,7 @@ export interface InstantiateTemplateRequest {
   template: DashboardTemplateDefinition;
   groupName: string;
   parameters: DashboardTemplateParameters;
+  binding?: TemplateBindingDraft;
   onProgress?: (completed: number, total: number, dashboardName: string) => void;
 }
 
@@ -93,6 +95,8 @@ function operationalWidgets(
 async function generateDashboard(
   request: InstantiateTemplateRequest,
   dashboardIndex: number,
+  dashboardGroupId: number,
+  bindingId: number,
 ): Promise<number> {
   const definition = request.template.dashboards[dashboardIndex];
   const prompt = [
@@ -130,12 +134,14 @@ async function generateDashboard(
     presentation: "operational_insight",
     templateId: request.template.id,
     templateName: request.template.name,
-    groupId: `${request.template.id}:${request.groupName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+    groupId: `group:${dashboardGroupId}`,
     groupName: request.groupName,
     groupIcon: request.template.icon,
     dashboardKey: definition.key,
     dashboardIcon: definition.icon,
     parameters: request.parameters,
+    bindingId,
+    dashboardGroupId,
   };
   await apiClient.put(`/api/projects/${request.projectId}/dashboards/${saved.dashboard_id}`, {
     name: definition.name,
@@ -145,6 +151,8 @@ async function generateDashboard(
     config: {
       ...dashboard.config,
       presentation: "operational_insight",
+      dashboardGroupId,
+      templateBindingId: bindingId,
       dashboardTemplate: metadata,
       operationalWidgets: operationalWidgets(definition.name, prompt, suggestion),
     },
@@ -158,18 +166,26 @@ export async function instantiateDashboardTemplate(
   if (request.template.dashboards.some((dashboard) => dashboard.itsmPreset)) {
     throw new Error("This ServiceNow template is already available in the current project.");
   }
+  const mapping = request.binding;
+  if (!mapping?.validation.valid) throw new Error("Approve a valid datasource mapping before creating the template.");
   const created: number[] = [];
+  let dashboardGroupId: number | undefined;
   try {
+    const group = await apiClient.post<{ id: number }>(`/api/projects/${request.projectId}/dashboard-groups`, { name: request.groupName, icon: request.template.icon, template_id: request.template.id, collapsed_default: true });
+    dashboardGroupId = group.id;
+    const binding = await apiClient.post<{ id: number }>(`/api/projects/${request.projectId}/dashboard-template-bindings`, { template_id: request.template.id, template_name: request.template.name, group_key: `group:${group.id}`, dashboard_group_id: group.id, dimension_config: mapping.dimensionConfig, source_mapping: mapping.sourceMapping, field_mapping: mapping.fieldMapping, metric_manifest: mapping.metricManifest });
     for (let index = 0; index < request.template.dashboards.length; index += 1) {
-      const id = await generateDashboard(request, index);
+      const id = await generateDashboard(request, index, group.id, binding.id);
       created.push(id);
       request.onProgress?.(index + 1, request.template.dashboards.length, request.template.dashboards[index].name);
     }
+    await apiClient.post(`/api/projects/${request.projectId}/dashboard-template-bindings/${binding.id}/approve`, { dashboard_ids: created, period: request.parameters.defaultPeriod });
     return created;
   } catch (error) {
     await Promise.allSettled(
       created.map((id) => apiClient.delete(`/api/projects/${request.projectId}/dashboards/${id}`)),
     );
+    if (dashboardGroupId) await apiClient.delete(`/api/projects/${request.projectId}/dashboard-groups/${dashboardGroupId}`).catch(() => undefined);
     throw error;
   }
 }

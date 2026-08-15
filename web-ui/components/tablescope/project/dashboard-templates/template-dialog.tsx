@@ -1,18 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconCheck, IconSparkles, IconX } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import type { SavedQuery } from "@/lib/ui/use-project-data";
+import type { DataSource, SavedQuery } from "@/lib/ui/use-project-data";
 import { cn } from "@/lib/cn";
 import { DASHBOARD_TEMPLATES } from "./registry";
 import { DashboardTemplateIconView } from "./icons";
 import { instantiateDashboardTemplate } from "./instantiate";
+import { TemplateBindingEditor } from "./template-binding-editor";
 import type {
   DashboardTemplateCategory,
   DashboardTemplateDefinition,
   DashboardTemplateParameters,
+  TemplateBindingDraft,
 } from "./types";
 
 const CATEGORIES: Array<{ value: "all" | DashboardTemplateCategory; label: string }> = [
@@ -28,6 +30,7 @@ interface DashboardTemplateDialogProps {
   open: boolean;
   projectId: string;
   savedQueries: SavedQuery[];
+  datasources: DataSource[];
   existingTemplateIds: Set<string>;
   onClose: () => void;
   onCreated: (dashboardIds: number[]) => void;
@@ -39,6 +42,7 @@ export function DashboardTemplateDialog({
   open,
   projectId,
   savedQueries,
+  datasources,
   existingTemplateIds,
   onClose,
   onCreated,
@@ -56,12 +60,17 @@ export function DashboardTemplateDialog({
   const [defaultPeriod, setDefaultPeriod] = useState(selected.defaultPeriod);
   const [creating, setCreating] = useState(false);
   const [progress, setProgress] = useState("");
+  const [binding, setBinding] = useState<TemplateBindingDraft>();
+  const [mappingApproved, setMappingApproved] = useState(false);
+  const handleBindingChange = useCallback((next: TemplateBindingDraft) => { setBinding(next); setMappingApproved(false); }, []);
 
   useEffect(() => {
     setGroupName(selected.name);
     setDimensionLabel(selected.defaultDimensionLabel);
     setDefaultPeriod(selected.defaultPeriod);
     setProgress("");
+    setBinding(undefined);
+    setMappingApproved(false);
   }, [selected]);
 
   useEffect(() => {
@@ -92,9 +101,14 @@ export function DashboardTemplateDialog({
       notify("Enter one or more comma-separated values", "error");
       return;
     }
+    if (!builtIn && (!binding?.validation.valid || !mappingApproved)) {
+      notify("Complete and approve the datasource mapping before creating dashboards", "error");
+      return;
+    }
     const query = savedQueries.find((item) => item.id === queryId);
     const parameters: DashboardTemplateParameters = {
       dimensionLabel: dimensionLabel.trim() || selected.defaultDimensionLabel,
+      dimensionField: binding?.dimensionConfig.field,
       valueSource,
       queryId: valueSource === "query" ? queryId : undefined,
       queryName: valueSource === "query" ? query?.name : undefined,
@@ -109,6 +123,7 @@ export function DashboardTemplateDialog({
         template: selected,
         groupName: groupName.trim(),
         parameters,
+        binding,
         onProgress: (complete, total, name) => setProgress(`${complete} of ${total} created · ${name}`),
       });
       notify(`Created ${ids.length} dashboards in “${groupName.trim()}”`, "success");
@@ -218,6 +233,11 @@ export function DashboardTemplateDialog({
               <option value="30_days">30 days</option><option value="60_days">60 days</option><option value="90_days">90 days</option><option value="6_months">6 months</option><option value="1_year">1 year</option><option value="2_years">2 years</option>
             </select>
 
+            {!builtIn && <>
+              <TemplateBindingEditor projectId={projectId} template={selected} datasources={datasources} dimensionLabel={dimensionLabel} valueSource={valueSource} value={binding} onChange={handleBindingChange} />
+              <label className="mt-3 flex items-start gap-2 rounded-md border p-2.5 text-[11px]"><input type="checkbox" className="mt-0.5" checked={mappingApproved} disabled={!binding?.validation.valid} onChange={(event) => setMappingApproved(event.target.checked)} /><span><strong>Approve datasource mapping.</strong> Tablescope will generate, validate, save, bind, cache and version the batch queries automatically.</span></label>
+            </>}
+
             <div className="mt-4 rounded-md bg-bg-secondary/60 p-3 text-small text-ink-secondary">
               <div className="flex items-center gap-2 font-medium text-ink-primary"><IconSparkles size={15} />AI-managed insight widgets</div>
               <div className="mt-1">Operational Brief and Best Improvement Opportunities are created from governed project data and remain editable.</div>
@@ -229,7 +249,7 @@ export function DashboardTemplateDialog({
               {builtIn && alreadyAdded ? (
                 <Button variant="primary" onClick={() => onOpenExisting(selected.id)}>Open dashboard group</Button>
               ) : (
-                <Button variant="primary" onClick={create} disabled={creating}>
+                <Button variant="primary" onClick={create} disabled={creating || (!builtIn && (!binding?.validation.valid || !mappingApproved))}>
                   <IconSparkles size={14} />
                   {creating ? "Creating with AI…" : `Create ${selected.dashboards.length} dashboards`}
                 </Button>

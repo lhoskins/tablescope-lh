@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { IconSparkles, IconPlus } from "@tabler/icons-react";
 import { apiClient } from "@/lib/api-client";
 import { ProjectShell } from "@/components/tablescope/project-shell";
@@ -25,6 +25,7 @@ import {
 import { useToasts, ToastViewport } from "@/components/ui/toast";
 import { createHomePin } from "@/lib/api/home-pins";
 import type { WidgetConfig } from "@/components/dashboard/types";
+import type { DashboardGroup, DashboardGroupRecord } from "@/components/tablescope/project/dashboard-templates/types";
 
 export function DashboardsScreen({
   projectId,
@@ -58,7 +59,8 @@ export function DashboardsScreen({
     }));
   }, [currentUser, projectId]);
   const rows = useMemo(() => [...itsmPresets, ...realRows], [itsmPresets, realRows]);
-  const groups = useMemo(() => groupDashboards(rows), [rows]);
+  const { data: persistedGroups } = useQuery<DashboardGroupRecord[]>({ queryKey: ["project", projectId, "dashboard-groups"], queryFn: () => apiClient.get(`/api/projects/${projectId}/dashboard-groups`), enabled: Boolean(projectId) });
+  const groups = useMemo(() => groupDashboards(rows, persistedGroups ?? []), [persistedGroups, rows]);
   const [viewingId, setViewingId] = useState<number | null>(
     dashboardId ? Number(dashboardId) : null,
   );
@@ -87,7 +89,7 @@ export function DashboardsScreen({
       apiClient.post<Dashboard>(`/api/projects/${projectId}/dashboards`, {
         name: `Dashboard ${realRows.length + 1}`,
         description: "",
-        config: { widgets: [], globalFilters: [] },
+        config: { widgets: [], globalFilters: [], presentation: "operational_insight", dashboardTemplate: { schemaVersion: 1, presentation: "operational_insight", templateId: "custom", templateName: "Custom dashboards", groupId: "custom-dashboards", groupName: "Custom dashboards", groupIcon: "activity", dashboardKey: `custom-${Date.now()}`, dashboardIcon: "activity", parameters: { dimensionLabel: "Dimension", dimensionField: "dimension", valueSource: "manual", manualValues: [], defaultPeriod: "30_days" } } },
       }),
     onSuccess: async (newDash) => {
       draftIdRef.current = newDash.id;
@@ -97,6 +99,17 @@ export function DashboardsScreen({
       setViewingId(newDash.id);
     },
   });
+
+  const createGroupMutation = useMutation({ mutationFn: (name: string) => apiClient.post(`/api/projects/${projectId}/dashboard-groups`, { name, icon: "activity", collapsed_default: true }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["project", projectId, "dashboard-groups"] }) });
+  const renameGroupMutation = useMutation({ mutationFn: ({ group, name }: { group: DashboardGroup; name: string }) => apiClient.put(`/api/projects/${projectId}/dashboard-groups/${group.persistentId}`, { name }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["project", projectId, "dashboard-groups"] }) });
+  const addDashboardToGroup = useCallback(async (group: DashboardGroup) => {
+    let groupId = group.persistentId;
+    if (!groupId) groupId = (await apiClient.post<{ id: number }>(`/api/projects/${projectId}/dashboard-groups`, { name: group.name, icon: group.icon, template_id: group.templateId, collapsed_default: true })).id;
+    const dashboard = await apiClient.post<Dashboard>(`/api/projects/${projectId}/dashboards`, { name: `New ${group.name} dashboard`, description: "", config: { widgets: [], globalFilters: [], presentation: "operational_insight", dashboardGroupId: groupId, dashboardTemplate: { schemaVersion: 1, presentation: "operational_insight", templateId: group.templateId ?? "custom", templateName: group.name, groupId: `group:${groupId}`, groupName: group.name, groupIcon: group.icon, dashboardKey: `custom-${Date.now()}`, dashboardIcon: group.icon, parameters: { dimensionLabel: "Dimension", dimensionField: "dimension", valueSource: "manual", manualValues: [], defaultPeriod: "30_days" } } } });
+    await apiClient.post(`/api/projects/${projectId}/dashboard-groups/${groupId}/dashboards/${dashboard.id}`, {});
+    await Promise.all([queryClient.invalidateQueries({ queryKey: ["project", projectId, "dashboards"] }), queryClient.invalidateQueries({ queryKey: ["project", projectId, "dashboard-groups"] })]);
+    setViewingId(dashboard.id);
+  }, [projectId, queryClient]);
 
   // A draft becomes "kept" the moment the user persists any change in the editor.
   const handlePersisted = useCallback(() => {
@@ -230,6 +243,9 @@ export function DashboardsScreen({
           onAddTemplate={() => setTemplateOpen(true)}
           onNewDashboard={() => createMutation.mutate()}
           onDeleteDashboard={handleDeleteDashboard}
+          onCreateGroup={(name) => createGroupMutation.mutate(name)}
+          onRenameGroup={(group, name) => renameGroupMutation.mutate({ group, name })}
+          onAddDashboardToGroup={(group) => { void addDashboardToGroup(group); }}
         />
       )}
       <AIDashboardSuggestionsModal
@@ -249,11 +265,13 @@ export function DashboardsScreen({
         open={templateOpen}
         projectId={projectId}
         savedQueries={queries ?? []}
+        datasources={sources ?? []}
         existingTemplateIds={existingTemplateIds}
         onClose={() => setTemplateOpen(false)}
         onCreated={async (ids) => {
           setTemplateOpen(false);
           await queryClient.invalidateQueries({ queryKey: ["project", projectId, "dashboards"] });
+          await queryClient.invalidateQueries({ queryKey: ["project", projectId, "dashboard-groups"] });
           if (ids[0]) setViewingId(ids[0]);
         }}
         onOpenExisting={(templateId) => {

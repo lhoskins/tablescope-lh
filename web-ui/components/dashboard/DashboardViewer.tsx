@@ -44,6 +44,7 @@ import { buildRuntimeWidgetFilters } from "@/lib/dashboard/runtimeFilters";impor
 import { Props } from "./DashboardViewer/props";
 import { resolveDatePreset, type DatePresetId } from "@/lib/dashboard/dateRange";
 import type { DashboardTemplateMetadata } from "@/components/tablescope/project/dashboard-templates/types";
+import { DimensionLabelEditor } from "@/components/tablescope/project/dashboard-templates/dimension-label-editor";
 
 function templateMetadata(dashboard: Dashboard): DashboardTemplateMetadata | undefined {
   const value = dashboard.config?.dashboardTemplate;
@@ -61,6 +62,12 @@ function normalizedPeriod(period?: string): DatePresetId | undefined {
   };
   return period ? (mapping[period] ?? period) as DatePresetId : undefined;
 }
+
+function bindingPeriod(period: DatePresetId | undefined, fallback = "30_days"): string {
+  const mapping: Partial<Record<DatePresetId, string>> = { last_30_days: "30_days", last_60_days: "60_days", last_90_days: "90_days", last_6_months: "6_months", last_1_year: "1_year", last_2_years: "2_years" };
+  return (period && mapping[period]) || fallback;
+}
+interface TemplateHydration { metrics: Record<string, { value: unknown; previousValue: unknown; deltaPercent: number | null }>; batches: Array<{ metricKeys: string[]; lineage: { kind?: string }; rows: Array<Record<string, unknown>> }>; }
 
 
 export function DashboardViewer({ dashboard, projectId, savedQueries, datasources, onBack, onPersisted, onPinWidget }: Props) {
@@ -91,6 +98,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   );
   const [templateField, setTemplateField] = useState(template?.parameters.dimensionLabel ?? "");
   const [templateValue, setTemplateValue] = useState("");
+  const [dimensionLabel, setDimensionLabel] = useState(template?.parameters.dimensionLabel ?? "Dimension");
   const [templateOptionsLoading, setTemplateOptionsLoading] = useState(false);
   const [drilldown, setDrilldown] = useState<DrilldownState>({
     open: false, loading: false, error: null, title: "", targetQueryName: null, columns: [], rows: [],
@@ -110,6 +118,14 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
     },
   });
   const [editingWidget, setEditingWidget] = useState<WidgetConfig | null>(null);
+
+  const saveDimensionLabel = useCallback(async (nextLabel: string) => {
+    if (!template) return;
+    const nextTemplate = { ...template, parameters: { ...template.parameters, dimensionLabel: nextLabel } };
+    await apiClient.put(`/api/projects/${projectId}/dashboards/${dashboard.id}`, { config: { ...dashboard.config, dashboardTemplate: nextTemplate } });
+    if (template.bindingId) await apiClient.put(`/api/projects/${projectId}/dashboard-template-bindings/${template.bindingId}`, { dimension_config: { label: nextLabel, field: template.parameters.dimensionField ?? "site", valueSource: template.parameters.valueSource } });
+    setDimensionLabel(nextLabel); onPersisted?.();
+  }, [dashboard.config, dashboard.id, onPersisted, projectId, template]);
 
   // Collect query IDs referenced by widgets that aren't in the provided savedQueries
   const missingQueryIds = useMemo(() => {
@@ -181,11 +197,11 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
           sourceWidgetId: "dashboard-template",
           sourceField: templateField,
           value,
-          label: `${template?.parameters.dimensionLabel ?? templateField}: ${value}`,
+          label: `${dimensionLabel || templateField}: ${value}`,
         }] : []),
       ],
     }));
-  }, [template, templateField]);
+  }, [dimensionLabel, templateField]);
 
   const viewNames = useMemo(() => {
     const names = new Set<string>();
@@ -320,17 +336,38 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   useEffect(() => {
     const loadAll = async () => {
       const entries = await Promise.all(
-        widgets.map(async (w) => {
+        widgets.filter((w) => !w.templateMetricKey || !template?.bindingId).map(async (w) => {
           const rows = await fetchWidgetData(w);
           return [w.id, rows] as const;
         }),
       );
       const results: Record<string, Array<Record<string, unknown>>> = {};
       for (const [id, rows] of entries) results[id] = rows;
-      setWidgetData(results);
+      setWidgetData((previous) => ({ ...previous, ...results }));
     };
     if (widgets.length > 0) loadAll();
-  }, [widgets, fetchWidgetData]);
+  }, [widgets, fetchWidgetData, template?.bindingId]);
+
+  useEffect(() => {
+    if (!template?.bindingId) return;
+    let active = true;
+    const period = bindingPeriod(runtime.dateRange?.preset as DatePresetId | undefined, template.parameters.defaultPeriod);
+    const selected = templateValue ? `&dimension=${encodeURIComponent(templateValue)}` : "";
+    apiClient.get<TemplateHydration>(`/api/projects/${projectId}/dashboard-template-bindings/${template.bindingId}/hydrate?period=${period}${selected}`).then((hydration) => {
+      if (!active) return;
+      setWidgetData((previous) => {
+        const next = { ...previous };
+        widgets.forEach((widget) => {
+          const key = widget.templateMetricKey; if (!key) return;
+          const metric = hydration.metrics[key];
+          if (widget.type === "kpi") next[widget.id] = [{ [widget.yColumn || "value"]: metric?.value ?? null, previousValue: metric?.previousValue ?? null, deltaPercent: metric?.deltaPercent ?? null }];
+          else { const batch = hydration.batches.find((item) => item.lineage.kind === "dimension" && item.metricKeys.includes(key)); if (batch) next[widget.id] = batch.rows.map((row) => ({ [widget.xColumn || "dimension"]: row.dimension, [widget.yColumn || key]: row[key] })); }
+        });
+        return next;
+      });
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [projectId, runtime.dateRange?.preset, template, templateValue, widgets]);
 
   const handleSaveWidget = (widget: WidgetConfig) => {
     let updatedWidgets: WidgetConfig[];
@@ -559,14 +596,14 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
         <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
           {template?.parameters && (
             <label className="flex items-center gap-1.5 text-[11px] font-medium text-ink-secondary">
-              <span>{template.parameters.dimensionLabel}</span>
+              <DimensionLabelEditor label={dimensionLabel} onSave={saveDimensionLabel} />
               <select
                 value={templateValue}
                 onChange={(event) => changeTemplateValue(event.target.value)}
                 disabled={templateOptionsLoading}
                 className="rounded-md border border-line-secondary bg-bg-primary px-2 py-1 text-[11px] text-ink-primary"
               >
-                <option value="">All {template.parameters.dimensionLabel}</option>
+                <option value="">All {dimensionLabel}</option>
                 {templateOptions.map((value) => <option key={value} value={value}>{value}</option>)}
               </select>
             </label>
