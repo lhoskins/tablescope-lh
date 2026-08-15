@@ -44,7 +44,7 @@ _METRIC_COPY: dict[str, tuple[str, str]] = {
     ),
     "incident_rate": (
         "Monthly incident demand normalized for organization size.",
-        "Distinct incidents opened ÷ employee population × 100.",
+        "Distinct incidents opened ÷ employee population x 100.",
     ),
     "mean_response": (
         "Average time from incident creation to the first recorded response.",
@@ -64,11 +64,11 @@ _METRIC_COPY: dict[str, tuple[str, str]] = {
     ),
     "fcr_proxy": (
         "Resolved incidents with no reopen or reassignment activity.",
-        "Resolved incidents with zero reopens and zero reassignments ÷ resolved incidents × 100.",
+        "Resolved incidents with zero reopens and zero reassignments ÷ resolved incidents x 100.",
     ),
     "reassignment_rate": (
         "Share of incidents assigned more than once.",
-        "Incidents with one or more reassignments ÷ incidents opened × 100.",
+        "Incidents with one or more reassignments ÷ incidents opened x 100.",
     ),
     "average_assignments": (
         "Average number of assignment touches per resolved incident.",
@@ -76,7 +76,7 @@ _METRIC_COPY: dict[str, tuple[str, str]] = {
     ),
     "reopen_rate": (
         "Share of resolved incidents that were reopened.",
-        "Resolved incidents with one or more reopens ÷ resolved incidents × 100.",
+        "Resolved incidents with one or more reopens ÷ resolved incidents x 100.",
     ),
     "major_incidents": (
         "Incidents flagged as major during the month.",
@@ -100,15 +100,15 @@ _METRIC_COPY: dict[str, tuple[str, str]] = {
     ),
     "resolution_sla": (
         "Resolution SLA records completed within their target.",
-        "Non-breached incident resolution SLAs ÷ completed incident resolution SLAs × 100.",
+        "Non-breached incident resolution SLAs ÷ completed incident resolution SLAs x 100.",
     ),
     "sla_breach_rate": (
         "Resolution SLA records that exceeded their target.",
-        "Breached incident resolution SLAs ÷ completed incident resolution SLAs × 100.",
+        "Breached incident resolution SLAs ÷ completed incident resolution SLAs x 100.",
     ),
     "knowledge_reuse": (
         "Resolved incidents where a knowledge article was used.",
-        "Resolved incidents with knowledge used ÷ resolved incidents × 100.",
+        "Resolved incidents with knowledge used ÷ resolved incidents x 100.",
     ),
 }
 
@@ -371,7 +371,7 @@ def _metric_calculation(metric: MetricDefinition) -> str:
         "event_period": "Distinct records in the reporting period.",
         "snapshot_eom": "Records open at calendar month-end.",
         "duration_period": "Average duration for records completed in the reporting period.",
-        "ratio_period": "Qualified records ÷ eligible records × 100.",
+        "ratio_period": "Qualified records ÷ eligible records x 100.",
     }[metric.kind]
     return metric.calculation or _METRIC_COPY.get(metric.key, ("", fallback))[1] or fallback
 
