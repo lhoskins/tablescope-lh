@@ -92,6 +92,7 @@ export interface TemplateBindingDraft {
 export interface DashboardGroupRecord {
   id: number;
   name: string;
+  slug: string;
   icon: DashboardTemplateIcon;
   templateId?: string;
   collapsedDefault: boolean;

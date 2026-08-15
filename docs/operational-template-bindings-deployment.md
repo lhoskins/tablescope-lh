@@ -31,6 +31,22 @@ After review, apply and repeat the dry-run to confirm zero remaining changes:
 docker compose exec platform-api python scripts/migrate_operational_insight_dashboards.py --tenant simplicit --tenant scaitis --apply
 ```
 
+Numeric tenant IDs are supported. To repair and fully convert tenant 33,
+including legacy duplicate Custom dashboard groups, run the dry-run first:
+
+```bash
+docker compose exec platform-api python scripts/migrate_operational_insight_dashboards.py --tenant-id 33
+```
+
+After reviewing the dashboard IDs and group assignments, apply it and repeat
+the dry-run. The final dry-run must report `changed: 0` and
+`duplicateGroupsRemoved: 0`.
+
+```bash
+docker compose exec platform-api python scripts/migrate_operational_insight_dashboards.py --tenant-id 33 --apply
+docker compose exec platform-api python scripts/migrate_operational_insight_dashboards.py --tenant-id 33
+```
+
 ## Acceptance checks
 
 - Dashboard groups are collapsed initially and can be created or renamed.
@@ -40,6 +56,8 @@ docker compose exec platform-api python scripts/migrate_operational_insight_dash
 - Approved bindings create versioned saved batch queries and a second hydration request is served from cache.
 - Custom dashboards in `simplicit` and `scaitis` use Operational Insight styling without changing query wiring.
 - Existing drilldown drawers and ITSM pipelines still work.
+- New blank, AI-generated and save-to-dashboard flows use the complete Operational Insight renderer and reuse the existing Custom dashboards group.
+- Incident KPI cards and charts share one grid; a chart can be dropped above or between KPI cards and the remaining items reflow.
 
 ## Rollback
 

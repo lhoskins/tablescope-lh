@@ -93,9 +93,10 @@ export function DashboardsScreen({
       }),
     onSuccess: async (newDash) => {
       draftIdRef.current = newDash.id;
-      await queryClient.invalidateQueries({
-        queryKey: ["project", projectId, "dashboards"],
-      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["project", projectId, "dashboards"] }),
+        queryClient.invalidateQueries({ queryKey: ["project", projectId, "dashboard-groups"] }),
+      ]);
       setViewingId(newDash.id);
     },
   });

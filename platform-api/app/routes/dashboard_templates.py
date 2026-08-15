@@ -24,6 +24,10 @@ from app.services.dashboard_templates import compile_batch_queries, render_sql_t
 from app.services.dashboard_templates.compiler import period_bounds
 from app.services.dashboard_widget import find_or_create_saved_query
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
+from app.services.operational_insight_dashboards import (
+    CUSTOM_GROUP_SLUG,
+    get_or_create_custom_group,
+)
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["dashboard-templates"])
 
@@ -130,6 +134,15 @@ async def list_dashboard_groups(project_id: int, session: AsyncSession = Depends
 async def create_dashboard_group(project_id: int, body: GroupCreate, session: AsyncSession = Depends(get_db), context: RequestContext = Depends(require_role(Role.EDITOR))) -> dict[str, Any]:
     await _require_project_access(project_id, session, context)
     base, slug, suffix = _slug(body.name), _slug(body.name), 2
+    if slug == CUSTOM_GROUP_SLUG:
+        group = await get_or_create_custom_group(
+            session,
+            tenant_id=context.tenant_id,
+            project_id=project_id,
+        )
+        await session.commit()
+        await session.refresh(group)
+        return _group_out(group)
     while await session.scalar(select(DashboardGroup.id).where(DashboardGroup.tenant_id == context.tenant_id, DashboardGroup.project_id == project_id, DashboardGroup.slug == slug)):
         slug, suffix = f"{base}-{suffix}", suffix + 1
     position = int(await session.scalar(select(func.count()).select_from(DashboardGroup).where(DashboardGroup.project_id == project_id, DashboardGroup.tenant_id == context.tenant_id)) or 0)
@@ -331,6 +344,7 @@ async def approve_template_binding(project_id: int, binding_id: int, body: Bindi
                     next_widget["templateMetricKey"] = metric["key"]
                     options = dict(next_widget.get("visualizationOptions") or {})
                     options["colorScheme"] = "operational_insight"
+                    options["favorableDirection"] = metric.get("polarity", "neutral")
                     next_widget["visualizationOptions"] = options
                 widgets.append(next_widget)
             config["widgets"] = widgets

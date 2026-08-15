@@ -528,8 +528,8 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   );
 
   return (
-    <div className={operational ? "min-h-screen bg-bg-primary" : "min-h-screen bg-gray-50"}>
-      <div className={operational ? "rounded-xl border border-line-tertiary bg-bg-primary px-4 py-3" : "rounded-t-xl bg-slate-800 px-5 py-3"}>
+    <div className={operational ? "bg-bg-primary text-ink-primary" : "min-h-screen bg-gray-50"}>
+      <div className={operational ? "px-2 py-1" : "rounded-t-xl bg-slate-800 px-5 py-3"}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button onClick={onBack} className={`flex items-center gap-1 text-[11px] font-medium transition-colors ${operational ? "text-brand-700 hover:text-brand-800" : "text-slate-400 hover:text-white"}`}>
@@ -538,11 +538,13 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
             </button>
             <div className={`h-4 w-px ${operational ? "bg-line-secondary" : "bg-slate-600"}`} />
             <h2 className={`text-sm font-bold ${operational ? "text-ink-primary" : "text-white"}`}>{dashboard.name}</h2>
-            {dashboardStatus !== "published" && (
-              <span className="rounded-full bg-amber-900/50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-300">
+            {dashboardStatus === "published" && operational ? (
+              <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[9px] font-semibold text-blue-600">Live</span>
+            ) : dashboardStatus !== "published" ? (
+              <span className={operational ? "rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-700" : "rounded-full bg-amber-900/50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-300"}>
                 {dashboardStatus}
               </span>
-            )}
+            ) : null}
             <button
               onClick={() => toggleStatusMutation.mutate()}
               disabled={toggleStatusMutation.isPending}
@@ -592,7 +594,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
       </div>
 
       {/* ── Filter Bar ───────────────────────────────────────────── */}
-      <div className={operational ? "mt-3 rounded-lg border border-line-tertiary bg-bg-primary px-4 py-2" : "border-b border-slate-200 bg-white px-5 py-2"}>
+      <div className={operational ? "mt-2 border-y border-line-tertiary bg-bg-primary px-2 py-2" : "border-b border-slate-200 bg-white px-5 py-2"}>
         <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
           {template?.parameters && (
             <label className="flex items-center gap-1.5 text-[11px] font-medium text-ink-secondary">
@@ -629,7 +631,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
 
       {/* ── Widget Config Panel (slide-down) ──────────────────────── */}
       {showConfigPanel && (
-        <div className="mx-4 mt-4">
+        <div className={operational ? "mt-3" : "mx-4 mt-4"}>
           <WidgetConfigPanel
             projectId={projectId}
             savedQueries={savedQueries}
@@ -642,9 +644,9 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
       )}
 
       {/* ── Widget Grid ──────────────────────────────────────────── */}
-      <div className="px-4 py-4">
+      <div className={operational ? "py-3" : "px-4 py-4"}>
         {widgets.length === 0 && !showConfigPanel ? (
-          <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-white py-20">
+          <div className={operational ? "flex flex-col items-center justify-center rounded-xl border border-dashed border-line-secondary bg-bg-primary py-20" : "flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-white py-20"}>
             <svg className="mb-3 h-12 w-12 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
             <p className="text-sm font-semibold text-slate-600">No widgets yet</p>
             <p className="mt-1 text-xs text-slate-400">Click &quot;+ Add Widget&quot; to start building your dashboard</p>
@@ -668,15 +670,15 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
               >
             {widgets.map((w) => (
               <div key={w.id}>
-                <div className={`h-full overflow-hidden rounded-lg border bg-white transition-shadow hover:shadow-md ${operational ? "border-line-tertiary shadow-none" : "border-slate-200 shadow-sm"}`}>
+                <div className={`h-full overflow-hidden border bg-white transition-shadow ${operational ? "rounded-xl border-line-tertiary shadow-none hover:border-brand-200" : "rounded-lg border-slate-200 shadow-sm hover:shadow-md"}`}>
                   {/* Widget header — drag handle + metadata badges */}
-                  <div className="widget-drag-handle flex items-center justify-between border-b border-slate-100 bg-white px-3 py-2 cursor-grab active:cursor-grabbing">
+                  <div className={`widget-drag-handle flex cursor-grab items-center justify-between bg-white px-3 active:cursor-grabbing ${operational ? "pb-1 pt-3" : "border-b border-slate-100 py-2"}`}>
                     <div className="flex flex-col gap-0.5 min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <svg className="h-3 w-3 flex-shrink-0 text-slate-300" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="5" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="12" cy="19" r="2"/></svg>
-                        <h4 className="truncate text-xs font-bold text-slate-800">{w.title || "Untitled"}</h4>
+                        {!operational && <svg className="h-3 w-3 flex-shrink-0 text-slate-300" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="5" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="12" cy="19" r="2"/></svg>}
+                        <h4 className={operational ? "truncate text-sm font-semibold text-ink-primary" : "truncate text-xs font-bold text-slate-800"}>{w.title || "Untitled"}</h4>
                       </div>
-                      {w.aggregation && w.yColumn && (
+                      {!operational && w.aggregation && w.yColumn && (
                         <div className="flex flex-wrap items-center gap-1 pl-5">
                           <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[8px] font-bold uppercase text-blue-600">
                             {w.aggregation}({w.yColumn})
@@ -705,7 +707,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
                         </div>
                       )}
                     </div>
-                    <div className="flex gap-0.5 flex-shrink-0 ml-2">
+                    <div className={`ml-2 flex flex-shrink-0 gap-0.5 ${operational ? "opacity-60 transition-opacity hover:opacity-100" : ""}`}>
                       {onPinWidget && (
                         <button
                           onClick={() => onPinWidget(w, widgetData[w.id] ?? [], dashboard.id)}
@@ -724,10 +726,11 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
                     </div>
                   </div>
                   {/* Chart */}
-                  <div className="p-3 overflow-hidden" style={{ height: "calc(100% - 52px)" }}>
+                  <div className={operational ? "overflow-hidden px-3 pb-3 pt-1" : "overflow-hidden p-3"} style={{ height: operational ? "calc(100% - 38px)" : "calc(100% - 52px)" }}>
                     <WidgetRenderer
                       widget={w}
                       data={widgetData[w.id] ?? []}
+                      operational={operational}
                       onElementClick={(ev) => handleElementClick(w, ev)}
                     />
                   </div>

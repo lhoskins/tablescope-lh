@@ -25,6 +25,10 @@ from app.models.saved_query import SavedQuery
 from app.routes.home_intelligence_suggestions import _derive_dashboard_title
 from app.routes.home_intelligence_suite import _has_project_edit
 from app.services import dashboard_widget as dw
+from app.services.operational_insight_dashboards import (
+    get_or_create_custom_group,
+    operational_insight_config,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ai", tags=["AI Intelligence"])
@@ -117,22 +121,31 @@ async def home_save_dashboard(
             )
         )
 
+    group = await get_or_create_custom_group(
+        session, tenant_id=context.tenant_id, project_id=project.id
+    )
+    dashboard_name = req.title or _derive_dashboard_title(
+        project.name, [w.model_dump() for w in req.widgets]
+    )
     dashboard = Dashboard(
         project_id=project.id,
         owner_id=context.user_id,
         tenant_id=context.tenant_id,
-        name=req.title or _derive_dashboard_title(project.name, [w.model_dump() for w in req.widgets]),
+        name=dashboard_name,
         description="",
         status="draft",
-        config={
-            "widgets": widgets_config,
-            "globalFilters": [],
-            "layout": "grid",
-            "ai_generated": True,
-            "summary": req.summary or "",
-            "keyFindings": req.keyFindings,
-            "recommendedActions": req.recommendedActions,
-        },
+        config=operational_insight_config(
+            {
+                "widgets": widgets_config,
+                "globalFilters": [],
+                "ai_generated": True,
+                "summary": req.summary or "",
+                "keyFindings": req.keyFindings,
+                "recommendedActions": req.recommendedActions,
+            },
+            group=group,
+            dashboard_name=dashboard_name,
+        ),
     )
     session.add(dashboard)
     await session.commit()
@@ -249,6 +262,9 @@ async def save_card_to_dashboard(
 
     if dashboard is None:
         assert req.dashboard_name is not None
+        group = await get_or_create_custom_group(
+            session, tenant_id=context.tenant_id, project_id=project.id
+        )
         widget_id = f"ai_widget_0_{int(datetime.now(UTC).timestamp() * 1000) % 100000}"
         widget_config = dw.build_widget_config(
             title=req.title,
@@ -268,12 +284,15 @@ async def save_card_to_dashboard(
             name=req.dashboard_name.strip(),
             description="",
             status="draft",
-            config={
-                "widgets": [widget_config],
-                "globalFilters": [],
-                "layout": "grid",
-                "ai_generated": True,
-            },
+            config=operational_insight_config(
+                {
+                    "widgets": [widget_config],
+                    "globalFilters": [],
+                    "ai_generated": True,
+                },
+                group=group,
+                dashboard_name=req.dashboard_name.strip(),
+            ),
         )
         session.add(dashboard)
     else:

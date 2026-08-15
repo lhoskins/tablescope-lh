@@ -63,13 +63,26 @@ export function virtualItsmDashboardConfig(preset: string): Record<string, unkno
 export function groupDashboards(rows: Dashboard[], persisted: DashboardGroupRecord[] = []): DashboardGroup[] {
   const groups = new Map<string, DashboardGroup>();
   const persistedByDashboard = new Map<number, DashboardGroupRecord>();
-  for (const record of persisted) {
-    groups.set(`group:${record.id}`, { id: `group:${record.id}`, persistentId: record.id, name: record.name, icon: record.icon, templateId: record.templateId, dashboards: [], collapsedDefault: record.collapsedDefault });
-    record.dashboardIds.forEach((dashboardId) => persistedByDashboard.set(dashboardId, record));
+  const persistedBySlug = new Map<string, DashboardGroupRecord>();
+  const customRecords = persisted.filter((record) =>
+    record.slug === "custom-dashboards"
+    || (record.slug.startsWith("custom-dashboards-") && record.name.trim().toLowerCase() === "custom dashboards"),
+  );
+  const canonicalCustom = customRecords.find((record) => record.slug === "custom-dashboards") ?? customRecords[0];
+  for (const original of persisted) {
+    const record = canonicalCustom && customRecords.includes(original) ? canonicalCustom : original;
+    const id = `group:${record.id}`;
+    if (!groups.has(id)) {
+      groups.set(id, { id, persistentId: record.id, name: record.name, icon: record.icon, templateId: record.templateId, dashboards: [], collapsedDefault: record.collapsedDefault });
+    }
+    persistedBySlug.set(original.slug, record);
+    original.dashboardIds.forEach((dashboardId) => persistedByDashboard.set(dashboardId, record));
   }
   for (const dashboard of rows) {
     const metadata = templateMetadataOf(dashboard);
-    const record = persistedByDashboard.get(dashboard.id);
+    const record = persistedByDashboard.get(dashboard.id)
+      ?? (metadata?.groupId ? persistedBySlug.get(metadata.groupId) : undefined)
+      ?? (metadata?.groupId === "custom-dashboards" ? canonicalCustom : undefined);
     const configuredId = typeof dashboard.config?.dashboardGroupId === "number" ? dashboard.config.dashboardGroupId : undefined;
     const id = record ? `group:${record.id}` : configuredId ? `group:${configuredId}` : metadata?.groupId ?? "custom-dashboards";
     const current = groups.get(id) ?? {

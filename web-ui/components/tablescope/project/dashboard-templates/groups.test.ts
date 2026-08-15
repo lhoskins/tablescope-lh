@@ -36,4 +36,25 @@ describe("dashboard template groups", () => {
     expect(groups[0].name).toBe("Custom dashboards");
     expect(groups[0].dashboards[0].id).toBe(8);
   });
+
+  it("merges legacy and persisted custom collections into one group", () => {
+    const groups = groupDashboards(
+      [dashboard(8, "Supplier Dashboard", {
+        widgets: [],
+        dashboardTemplate: {
+          groupId: "custom-dashboards",
+          groupName: "Custom dashboards",
+          dashboardKey: "supplier",
+        },
+      })],
+      [
+        { id: 41, slug: "custom-dashboards", name: "Custom dashboards", icon: "activity", collapsedDefault: true, dashboardIds: [] },
+        { id: 42, slug: "custom-dashboards-2", name: "Custom dashboards", icon: "activity", collapsedDefault: true, dashboardIds: [8] },
+      ],
+    );
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].persistentId).toBe(41);
+    expect(groups[0].dashboards.map((item) => item.id)).toEqual([8]);
+  });
 });

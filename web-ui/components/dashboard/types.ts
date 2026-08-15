@@ -95,6 +95,8 @@ export type VisualizationOptions = {
   signedPercentAxis?: boolean;
   percentChangeTooltip?: boolean;
   comparisonLabel?: string;
+  /** Defines whether an increase or decrease is a favorable KPI outcome. */
+  favorableDirection?: "higher" | "lower" | "neutral";
   // Radar / Radial bar
   domainMin?: number;
   domainMax?: number;
