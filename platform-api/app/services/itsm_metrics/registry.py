@@ -163,7 +163,7 @@ FROM (
         table="01_incidents_CSV",
         date_field="resolved_at",
         numerator="reassign_count",
-        value_expression="""SELECT AVG(1.0 + CAST(reassign_count AS double)) AS metric_value
+        value_expression="""SELECT AVG(CAST(reassign_count AS double) + CAST(1 AS double)) AS metric_value
 FROM {table}
 WHERE unix_timestamp(CAST(resolved_at AS timestamp)) >= {start} AND unix_timestamp(CAST(resolved_at AS timestamp)) <= {end}
   AND reassign_count IS NOT NULL AND {site_filter}""",
