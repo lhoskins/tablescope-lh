@@ -11,6 +11,7 @@ import logging
 import math
 from calendar import monthrange
 from datetime import UTC, date, datetime, timedelta, timezone
+from statistics import median
 from typing import Any, cast
 
 from fastapi import HTTPException
@@ -36,6 +37,81 @@ logger = logging.getLogger(__name__)
 
 CACHE_HINT = "/*+ cache(pref_mem ttl:300000) */"
 
+_METRIC_COPY: dict[str, tuple[str, str]] = {
+    "incident_volume": (
+        "Incidents opened during the latest complete calendar month.",
+        "Distinct incidents opened in the month.",
+    ),
+    "incident_rate": (
+        "Monthly incident demand normalized for organization size.",
+        "Distinct incidents opened ÷ employee population × 100.",
+    ),
+    "mean_response": (
+        "Average time from incident creation to the first recorded response.",
+        "Sum of first-response duration ÷ incidents with a first response.",
+    ),
+    "mttr": (
+        "Average elapsed time to resolve incidents completed in the month.",
+        "Sum of resolution duration ÷ resolved incidents.",
+    ),
+    "median_resolution": (
+        "The midpoint resolution time, reducing the influence of extreme cases.",
+        "Median resolution duration of incidents resolved in the month.",
+    ),
+    "mean_restore": (
+        "Average duration of unplanned service outages ending in the month.",
+        "Sum of unplanned outage duration ÷ unplanned outages.",
+    ),
+    "fcr_proxy": (
+        "Resolved incidents with no reopen or reassignment activity.",
+        "Resolved incidents with zero reopens and zero reassignments ÷ resolved incidents × 100.",
+    ),
+    "reassignment_rate": (
+        "Share of incidents assigned more than once.",
+        "Incidents with one or more reassignments ÷ incidents opened × 100.",
+    ),
+    "average_assignments": (
+        "Average number of assignment touches per resolved incident.",
+        "Average of initial assignment plus reassignment count.",
+    ),
+    "reopen_rate": (
+        "Share of resolved incidents that were reopened.",
+        "Resolved incidents with one or more reopens ÷ resolved incidents × 100.",
+    ),
+    "major_incidents": (
+        "Incidents flagged as major during the month.",
+        "Distinct major incidents opened in the month.",
+    ),
+    "major_incident_mttr": (
+        "Average resolution time for major incidents.",
+        "Sum of major-incident resolution duration ÷ resolved major incidents.",
+    ),
+    "open_backlog": (
+        "Incidents still unresolved at the close of the latest complete month.",
+        "Opened by month-end and unresolved or resolved after month-end.",
+    ),
+    "backlog_older_than_30_days": (
+        "Month-end backlog opened more than 30 days earlier.",
+        "Open month-end incidents with age greater than 30 days.",
+    ),
+    "average_open_age": (
+        "Average age of unresolved incidents at month-end.",
+        "Sum of open incident age at month-end ÷ open incidents.",
+    ),
+    "resolution_sla": (
+        "Resolution SLA records completed within their target.",
+        "Non-breached incident resolution SLAs ÷ completed incident resolution SLAs × 100.",
+    ),
+    "sla_breach_rate": (
+        "Resolution SLA records that exceeded their target.",
+        "Breached incident resolution SLAs ÷ completed incident resolution SLAs × 100.",
+    ),
+    "knowledge_reuse": (
+        "Resolved incidents where a knowledge article was used.",
+        "Resolved incidents with knowledge used ÷ resolved incidents × 100.",
+    ),
+}
+
 
 def _month_bounds(as_of: datetime | None = None, tz: timezone = UTC) -> tuple[PeriodBounds, PeriodBounds]:
     """Return current and previous complete calendar month bounds."""
@@ -54,6 +130,15 @@ def _month_bounds(as_of: datetime | None = None, tz: timezone = UTC) -> tuple[Pe
     current = PeriodBounds(start=current_start.isoformat(), end=current_end.isoformat(), label=current_start.strftime("%b %Y"))
     previous = PeriodBounds(start=previous_start.isoformat(), end=previous_end.isoformat(), label=previous_start.strftime("%b %Y"))
     return current, previous
+
+
+def _rolling_month_bounds(current: PeriodBounds, months: int = 12) -> PeriodBounds:
+    """Return bounds ending with ``current`` and spanning whole calendar months."""
+    current_start = date.fromisoformat(current.start)
+    month_index = current_start.year * 12 + current_start.month - months
+    start_year, zero_based_month = divmod(month_index, 12)
+    start = date(start_year, zero_based_month + 1, 1)
+    return PeriodBounds(start=start.isoformat(), end=current.end, label=f"Last {months} months")
 
 
 def _period_epoch(period: PeriodBounds) -> tuple[float, float]:
@@ -187,10 +272,9 @@ def _build_metric_sql(
         close_expr = _date_expression(close_field, date_unit)
         where_clauses.append(f"{open_expr} <= {end_epoch}")
         where_clauses.append(f"({close_expr} IS NULL OR {close_expr} > {end_epoch})")
-        if metric.state_field:
-            states = [f"'{s}'" for s in (metric.open_states or ["New", "In Progress", "On Hold"])]
-            state_col = _quote_identifier(metric.state_field)
-            where_clauses.append(f"{state_col} IN ({', '.join(states)})")
+        # Reconstruct the historical snapshot from opened/resolved timestamps.
+        # Filtering on today's state would wrongly remove incidents that were
+        # open at month-end and resolved later.
         select = "COUNT(DISTINCT sys_id)"
         where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
         return f"{CACHE_HINT}\nSELECT {select} AS metric_value FROM {table} {where}"
@@ -199,7 +283,10 @@ def _build_metric_sql(
         duration_col = metric.numerator or "resolution_minutes"
         where_clauses.append(f"{date_expr} >= {start_epoch} AND {date_expr} <= {end_epoch}")
         where_clauses.append(f"{_quote_identifier(duration_col)} IS NOT NULL")
-        select = f"AVG(CAST({_quote_identifier(duration_col)} AS double))"
+        if metric.aggregation == "median":
+            select = f"CAST({_quote_identifier(duration_col)} AS double)"
+        else:
+            select = f"AVG(CAST({_quote_identifier(duration_col)} AS double))"
         where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
         return f"{CACHE_HINT}\nSELECT {select} AS metric_value FROM {table} {where}"
 
@@ -249,17 +336,64 @@ def _extract_single_value(rows: list[dict[str, Any]]) -> float | None:
         return None
 
 
-def _format_value(value: float | None, metric: MetricDefinition) -> str:
+def _extract_metric_value(rows: list[dict[str, Any]], metric: MetricDefinition) -> float | None:
+    if metric.aggregation != "median":
+        return _extract_single_value(rows)
+    values = [_extract_single_value([row]) for row in rows]
+    measured = [value for value in values if value is not None]
+    return float(median(measured)) if measured else None
+
+
+def _convert_duration(value: float | None, source_unit: str | None, display_unit: str) -> float | None:
+    if value is None:
+        return None
+    if source_unit == "minutes" and display_unit == "hours":
+        return value / 60.0
+    if source_unit == "minutes" and display_unit == "minutes":
+        return value
+    return value
+
+
+def _display_unit(metric: MetricDefinition, duration_unit: str) -> str | None:
+    if metric.unit == "minutes":
+        return duration_unit
+    if metric.key == "incident_rate":
+        return "per 100 employees"
+    return metric.unit
+
+
+def _metric_description(metric: MetricDefinition) -> str:
+    return metric.description or _METRIC_COPY.get(metric.key, (f"{metric.label} for the latest complete month.", ""))[0]
+
+
+def _metric_calculation(metric: MetricDefinition) -> str:
+    fallback = {
+        "event_period": "Distinct records in the reporting period.",
+        "snapshot_eom": "Records open at calendar month-end.",
+        "duration_period": "Average duration for records completed in the reporting period.",
+        "ratio_period": "Qualified records ÷ eligible records × 100.",
+    }[metric.kind]
+    return metric.calculation or _METRIC_COPY.get(metric.key, ("", fallback))[1] or fallback
+
+
+def _format_value(value: float | None, metric: MetricDefinition, unit: str | None = None) -> str:
     if value is None:
         return "—"
     if math.isnan(value) or math.isinf(value):
         return "—"
-    if metric.unit == "percent":
+    display_unit = unit or metric.unit
+    if display_unit == "percent":
         return f"{value:.{metric.precision}f}%"
-    if metric.unit == "count":
-        return f"{int(value):,}"
-    if metric.unit in ("minutes", "hours"):
-        return f"{value:.{metric.precision}f}"
+    if display_unit == "count":
+        return f"{int(value):,}" if metric.precision == 0 else f"{value:,.{metric.precision}f}"
+    if display_unit == "hours":
+        return f"{value:.{metric.precision}f} hr"
+    if display_unit == "minutes":
+        return f"{value:.{metric.precision}f} min"
+    if display_unit == "days":
+        return f"{value:.{metric.precision}f} days"
+    if display_unit == "per 100 employees":
+        return f"{value:.{metric.precision}f} per 100"
     return f"{value:.{metric.precision}f}"
 
 
@@ -316,6 +450,7 @@ async def compute_metric(
     previous_period: PeriodBounds,
     site_code: str | None = None,
     date_unit: str = "seconds",
+    duration_unit: str = "hours",
     teiid_endpoint: tuple[str, str, int] | None = None,
 ) -> MetricValue:
     """Run a metric for current and previous month and assemble a KPI card value."""
@@ -332,8 +467,9 @@ async def compute_metric(
         _run_sql(database, host, port, previous_sql),
     )
 
-    current_value = _extract_single_value(current_rows)
-    previous_value = _extract_single_value(previous_rows)
+    current_value = _convert_duration(_extract_metric_value(current_rows, metric), metric.unit, duration_unit)
+    previous_value = _convert_duration(_extract_metric_value(previous_rows, metric), metric.unit, duration_unit)
+    unit = _display_unit(metric, duration_unit)
 
     comparison = compute_comparison(
         current_value=current_value,
@@ -348,7 +484,7 @@ async def compute_metric(
         metric_key=metric.key,
         label=metric.label,
         value=current_value,
-        display_value=_format_value(current_value, metric),
+        display_value=_format_value(current_value, metric, unit),
         period_start=current_period.start,
         period_end=current_period.end,
         previous_value=previous_value,
@@ -360,6 +496,10 @@ async def compute_metric(
         comparison_label=cast(str | None, comparison.get("comparison_label")),
         status=metric.status,
         as_of=utc_now_iso(),
+        unit=unit,
+        description=_metric_description(metric),
+        calculation=_metric_calculation(metric),
+        target=metric.target,
     )
 
 
@@ -405,6 +545,7 @@ async def compute_dashboard(
     as_of: datetime | None = None,
     site_code: str | None = None,
     date_unit: str = "seconds",
+    duration_unit: str = "hours",
 ) -> DashboardResult:
     """Compute all KPIs and charts for an ITSM dashboard preset.
 
@@ -436,6 +577,7 @@ async def compute_dashboard(
                 previous_period=previous_period,
                 site_code=site_code,
                 date_unit=date_unit,
+                duration_unit=duration_unit,
                 teiid_endpoint=teiid_endpoint,
             )
 
@@ -457,6 +599,10 @@ async def compute_dashboard(
                 period_end=current_period.end,
                 status="not_implemented",
                 as_of=utc_now_iso(),
+                unit=_display_unit(metric, duration_unit),
+                description=_metric_description(metric),
+                calculation=_metric_calculation(metric),
+                target=metric.target,
             ))
 
     # Build charts from the first two metrics that define a group_by.
@@ -465,23 +611,25 @@ async def compute_dashboard(
     if len(chart_metrics) >= 2:
         async def _build_chart(dashboard: str, chart_metric: MetricDefinition) -> ChartResult | BaseException:
             assert chart_metric.group_by is not None
-            sql = _build_chart_sql(chart_metric, current_period, chart_metric.group_by, site_code, date_unit)
-            rows = await _run_sql(*teiid_endpoint, sql)
-            x = [str(r.get("x", "")) for r in rows]
-            y = [_extract_single_value([r]) for r in rows]
             is_date_chart = bool(
                 chart_metric.group_by.endswith(("_at", "_date"))
                 or chart_metric.group_by in {"begin", "end_col"}
             )
+            chart_period = _rolling_month_bounds(current_period) if is_date_chart else current_period
+            sql = _build_chart_sql(chart_metric, chart_period, chart_metric.group_by, site_code, date_unit)
+            rows = await _run_sql(*teiid_endpoint, sql)
+            x = [str(r.get("x", "")) for r in rows]
+            y = [_extract_single_value([r]) for r in rows]
             title = chart_metric.chart_label or chart_metric.label
             return ChartResult(
                 chart_key=f"{dashboard}_{chart_metric.key}",
                 title=title,
                 chart_type="line" if is_date_chart else "bar",
                 x_axis_label=chart_metric.group_by,
-                y_axis_label="Count",
+                y_axis_label="Incidents" if dashboard == "incident" else "Records",
                 series=[ChartSeries(name=title, x=x, y=y)],
                 categories=x,
+                unit="count",
             )
 
         chart_sem = asyncio.Semaphore(min(2, max(1, pool_manager.max_size // 4)))
@@ -503,7 +651,7 @@ async def compute_dashboard(
     return DashboardResult(
         dashboard=dashboard_key,
         as_of=utc_now_iso(),
-        filters={"site": site_code or "all", "date_unit": date_unit},
+        filters={"site": site_code or "all", "date_unit": date_unit, "durationUnit": duration_unit},
         metrics=values,
         charts=charts,
         data_quality={
@@ -522,6 +670,7 @@ async def warm_itsm_dashboards_for_project(
     presets: list[str] | None = None,
     site_code: str | None = None,
     date_unit: str = "seconds",
+    duration_unit: str = "hours",
 ) -> None:
     """Pre-compute all ITSM dashboard presets for a project to populate Teiid caches.
 
@@ -531,7 +680,7 @@ async def warm_itsm_dashboards_for_project(
     presets = presets or list(list_dashboards())
     for preset in presets:
         try:
-            await compute_dashboard(
+            result = await compute_dashboard(
                 dashboard_key=preset,
                 project_id=project_id,
                 session=session,
@@ -539,6 +688,20 @@ async def warm_itsm_dashboards_for_project(
                 user_id=user_id,
                 site_code=site_code,
                 date_unit=date_unit,
+                duration_unit=duration_unit,
+            )
+            from .cache import make_cache_key, set_cached_dashboard
+
+            set_cached_dashboard(
+                make_cache_key(
+                    tenant_id=tenant_id,
+                    project_id=project_id,
+                    dashboard_key=preset,
+                    site_code=site_code,
+                    as_of=None,
+                    duration_unit=duration_unit,
+                ),
+                result,
             )
             logger.info("Warmed ITSM dashboard preset %s for project %s", preset, project_id)
         except Exception as exc:
