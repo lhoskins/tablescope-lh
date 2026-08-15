@@ -73,10 +73,8 @@ class TeiidConnectionPoolManager:
                 return pool
             logger.info("Creating new Teiid asyncpg pool for %s@%s:%s/%s", username, host, port, database)
             # Teiid's PG wire does not support SSL; disable it to avoid a
-            # negotiation hang and cap the initial connection handshake.
-            # min_size=0 makes pool creation instant; connections are created
-            # lazily by the first pool.fetch, which happens during background
-            # warming so real user queries reuse an already-hot pool.
+            # negotiation hang.  Give the first connection and long-running
+            # CSV queries enough time without an indefinite hang.
             pool = await asyncpg.create_pool(
                 host=host,
                 port=port,
@@ -87,8 +85,8 @@ class TeiidConnectionPoolManager:
                 max_size=self._max_size,
                 max_inactive_connection_lifetime=self._max_inactive_connection_lifetime,
                 ssl=False,
-                timeout=60,
-                command_timeout=60,
+                timeout=120,
+                command_timeout=180,
                 statement_cache_size=0,
                 server_settings={"application_name": "tablescope-platform-api"},
                 reset=_teiid_reset,

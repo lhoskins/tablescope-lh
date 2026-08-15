@@ -12,6 +12,7 @@ import logging
 import re
 from typing import Any
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -426,9 +427,21 @@ async def _run_widget_sql(
             last_exc = exc
             logger.warning("Widget query attempt %d failed: %s | SQL: %s", attempt + 1, exc, sql)
             if attempt == 0:
-                await pool_manager.evict_pool(
-                    host=host, port=port, database=database, username="test",
+                # Evict the pool only when we suspect the pool or connection is
+                # broken.  Timeouts and query cancellations are often transient
+                # (slow cold CSV, queue pressure) and should not close the pool
+                # on other concurrent callers.
+                evict = isinstance(
+                    exc,
+                    asyncpg.exceptions.InterfaceError
+                    | asyncpg.exceptions.PostgresConnectionError
+                    | ConnectionError
+                    | OSError,
                 )
+                if evict:
+                    await pool_manager.evict_pool(
+                        host=host, port=port, database=database, username="test",
+                    )
                 continue
     else:
         logger.error("Widget query failed after retries: %s | SQL: %s", last_exc, sql)

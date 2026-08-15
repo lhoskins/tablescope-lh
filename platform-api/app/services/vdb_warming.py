@@ -18,7 +18,6 @@ import logging
 import asyncpg
 
 from app.config import get_settings
-from app.services.connection_pool import pool_manager
 
 logger = logging.getLogger(__name__)
 
@@ -50,12 +49,10 @@ async def warm_vdb(
 
     logger.info("Warming VDB %s at %s:%s/%s", vdb_id, host, port, database)
 
-    # Drop any cached pool for this VDB first. A redeploy invalidates the
-    # PG sessions it contains, and a stuck pool can block subsequent attempts.
-    try:
-        await asyncio.wait_for(pool_manager.evict_by_vdb_id(vdb_id), timeout=5.0)
-    except Exception as exc:
-        logger.debug("Could not evict stale pool for %s: %s", vdb_id, exc)
+    # NOTE: we intentionally do NOT evict the pool here.  Warming is a
+    # best-effort background task and must not close pools that are currently
+    # serving user queries.  Callers that redeploy a VDB are responsible for
+    # evicting stale pools themselves.
 
     last_exc: Exception | None = None
     conn_timeout = connect_timeout or timeout
