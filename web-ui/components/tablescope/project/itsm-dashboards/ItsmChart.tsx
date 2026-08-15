@@ -8,7 +8,6 @@ import {
   GridComponent,
   LegendComponent,
   TooltipComponent,
-  TitleComponent,
   AriaComponent,
   DatasetComponent,
 } from "echarts/components";
@@ -22,7 +21,6 @@ echarts.use([
   GridComponent,
   LegendComponent,
   TooltipComponent,
-  TitleComponent,
   AriaComponent,
   DatasetComponent,
   CanvasRenderer,
@@ -36,75 +34,106 @@ export interface ItsmChartProps {
 
 export function ItsmChart({ chart, onElementClick, className }: ItsmChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<echarts.ECharts | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
     const instance = echarts.init(containerRef.current, undefined, { renderer: "canvas" });
-    chartRef.current = instance;
-
     const data = chart.series[0]?.y ?? [];
     const categories = chart.categories.length ? chart.categories : chart.series[0]?.x ?? [];
 
     let option: echarts.EChartsCoreOption;
-
     if (chart.chartType === "pie" || chart.chartType === "doughnut") {
-      const pieData = categories.map((name, i) => ({ name, value: data[i] ?? 0 }));
       option = {
-        title: { text: chart.title, left: "center", textStyle: { fontSize: 13 } },
         tooltip: { trigger: "item" },
         legend: { bottom: 0, type: "scroll" },
         series: [
           {
             type: "pie",
-            radius: ["40%", "70%"],
-            data: pieData,
-            emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: "rgba(0,0,0,0.2)" } },
+            radius: ["44%", "72%"],
+            data: categories.map((name, index) => ({ name, value: data[index] })),
+            emphasis: { itemStyle: { shadowBlur: 10, shadowColor: "rgba(0,0,0,0.18)" } },
+          },
+        ],
+      };
+    } else if (chart.chartType === "bar") {
+      option = {
+        tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+        grid: { left: 8, right: 42, bottom: 8, top: 8, containLabel: true },
+        xAxis: {
+          type: "value",
+          name: chart.yAxisLabel ?? undefined,
+          nameGap: 10,
+          splitLine: { lineStyle: { color: "#e8edf3" } },
+        },
+        yAxis: {
+          type: "category",
+          inverse: true,
+          data: categories,
+          axisTick: { show: false },
+          axisLabel: { width: 126, overflow: "truncate", fontSize: 11 },
+        },
+        series: [
+          {
+            type: "bar",
+            data,
+            barMaxWidth: 16,
+            itemStyle: { color: "#4f7cff", borderRadius: [0, 5, 5, 0] },
+            label: { show: true, position: "right", fontSize: 10, color: "#475569" },
           },
         ],
       };
     } else {
-      const type = chart.chartType === "line" ? "line" : "bar";
       option = {
-        title: { text: chart.title, left: "left", textStyle: { fontSize: 13 } },
         tooltip: { trigger: "axis" },
-        grid: { left: "3%", right: "4%", bottom: "12%", top: "18%", containLabel: true },
+        grid: { left: 10, right: 16, bottom: 12, top: 12, containLabel: true },
         xAxis: {
           type: "category",
+          boundaryGap: false,
           data: categories,
-          axisLabel: { interval: 0, rotate: categories.length > 8 ? 45 : 0, fontSize: 11 },
+          axisTick: { show: false },
+          axisLabel: { interval: Math.max(0, Math.ceil(categories.length / 7) - 1), fontSize: 10 },
         },
-        yAxis: { type: "value", name: chart.yAxisLabel ?? undefined },
+        yAxis: {
+          type: "value",
+          name: chart.yAxisLabel ?? undefined,
+          nameGap: 12,
+          splitLine: { lineStyle: { color: "#e8edf3" } },
+        },
         series: [
           {
-            type,
-            data: data.map((v) => (v === null ? 0 : v)),
-            itemStyle: { borderRadius: type === "bar" ? [4, 4, 0, 0] : undefined },
+            type: "line",
+            data,
             smooth: true,
+            symbolSize: 6,
+            connectNulls: false,
+            lineStyle: { width: 2, color: "#3b82f6" },
+            itemStyle: { color: "#3b82f6" },
+            areaStyle: { color: "rgba(59, 130, 246, 0.12)" },
           },
         ],
       };
     }
 
     instance.setOption(option, true);
-
     if (onElementClick) {
       instance.on("click", (params) => {
         if (params && typeof params.name === "string") {
-          onElementClick(params.name, typeof params.value === "number" ? params.value : null);
+          const rawValue = Array.isArray(params.value) ? params.value[params.value.length - 1] : params.value;
+          onElementClick(params.name, typeof rawValue === "number" ? rawValue : null);
         }
       });
     }
 
-    const handleResize = () => instance.resize();
-    window.addEventListener("resize", handleResize);
-
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => instance.resize());
+    observer?.observe(containerRef.current);
+    const handleWindowResize = () => instance.resize();
+    if (!observer) window.addEventListener("resize", handleWindowResize);
     return () => {
-      window.removeEventListener("resize", handleResize);
+      observer?.disconnect();
+      window.removeEventListener("resize", handleWindowResize);
       instance.dispose();
-      chartRef.current = null;
     };
   }, [chart, onElementClick]);
 
-  return <div ref={containerRef} className={cn("h-72 w-full", className)} />;
+  return <div ref={containerRef} className={cn("h-56 w-full", className)} />;
 }
