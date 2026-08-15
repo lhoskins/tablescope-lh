@@ -120,7 +120,7 @@ async def compute_metric_drilldown(
     else:
         raw_value = "COUNT(DISTINCT sys_id)"
     contributor_sql = f"""{CACHE_HINT}
-SELECT CAST({_quote_identifier(dimension)} AS string) AS name, {raw_value} AS value
+SELECT CAST({_quote_identifier(dimension)} AS string) AS name, {raw_value} AS {_quote_identifier('value')}
 FROM {table}
 WHERE {where} AND {_quote_identifier(dimension)} IS NOT NULL
 GROUP BY 1
@@ -160,8 +160,8 @@ LIMIT 7"""
     else:
         record_fields.append("CAST(site_code AS string) AS site")
     if is_duration:
-        record_fields.append(f"CAST({_quote_identifier(metric.numerator or '')} AS double) AS value")
-    record_order = "value DESC" if is_duration else "record_id ASC"
+        record_fields.append(f"CAST({_quote_identifier(metric.numerator or '')} AS double) AS {_quote_identifier('value')}")
+    record_order = f"{_quote_identifier('value')} DESC" if is_duration else "record_id ASC"
     record_sql = f"""{CACHE_HINT}
 SELECT {', '.join(record_fields)}
 FROM {table}
