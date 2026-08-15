@@ -65,16 +65,17 @@ class TeiidConnectionPoolManager:
     ) -> asyncpg.Pool:
         key = PoolKey(host=host, port=port, database=database, username=username)
         pool = self._pools.get(key)
-        if pool is not None:
+        if pool is not None and not pool._closed:
             return pool
         async with self._lock:
             pool = self._pools.get(key)
-            if pool is not None:
+            if pool is not None and not pool._closed:
                 return pool
             logger.info("Creating new Teiid asyncpg pool for %s@%s:%s/%s", username, host, port, database)
             # Teiid's PG wire does not support SSL; disable it to avoid a
-            # negotiation hang.  Give the first connection and long-running
-            # CSV queries enough time without an indefinite hang.
+            # negotiation hang.  min_size=1 pre-warms one connection so the
+            # first user query does not pay the full handshake cost.  Timeouts
+            # are generous for cold CSV scans but not unbounded.
             pool = await asyncpg.create_pool(
                 host=host,
                 port=port,
@@ -129,7 +130,7 @@ class TeiidConnectionPoolManager:
 
 _settings = get_settings()
 pool_manager = TeiidConnectionPoolManager(
-    min_size=0,
+    min_size=1,
     max_size=min(_settings.database_pool_max_size, 20),
     max_inactive_connection_lifetime=120.0,
 )
