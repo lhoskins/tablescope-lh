@@ -37,6 +37,18 @@ export interface ItsmChart {
   series: ItsmChartSeries[];
   categories: string[];
   unit: string | null;
+  description?: string | null;
+  calculation?: string | null;
+  drilldownMetricKey?: string | null;
+  drilldownDimension?: string | null;
+}
+
+export interface ItsmInsightSummary {
+  insightType: "risk" | "driver" | "action";
+  title: string;
+  detail: string;
+  tone: "critical" | "warning" | "positive" | "neutral";
+  metricKey: string | null;
 }
 
 export interface ItsmDashboardResult {
@@ -45,8 +57,11 @@ export interface ItsmDashboardResult {
   filters: Record<string, unknown>;
   metrics: ItsmMetricValue[];
   charts: ItsmChart[];
+  insights?: ItsmInsightSummary[];
   dataQuality: {
     latestCompleteMonth: string;
+    reportingPeriod?: string;
+    availableSites?: Array<{ code: string; name: string }>;
     missingMetrics: string[];
     warnings: string[];
     cacheStatus?: "fresh" | "stale" | "miss" | "refreshed";

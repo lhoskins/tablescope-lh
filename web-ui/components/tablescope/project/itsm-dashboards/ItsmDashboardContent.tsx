@@ -16,6 +16,7 @@ import type {
 } from "./types";
 import { ItsmMetricCard } from "./ItsmMetricCard";
 import { ItsmChart } from "./ItsmChart";
+import { ItsmInsightsDashboardContent } from "./ItsmInsightsDashboardContent";
 import styles from "./ItsmDashboardScreen.module.css";
 
 export const PRESET_LABELS: Record<string, string> = {
@@ -24,7 +25,11 @@ export const PRESET_LABELS: Record<string, string> = {
   availability: "Availability & Reliability",
   productivity: "Service Desk Productivity",
   problem: "Problem Management",
+  incident_insights: "Incident Management Insights",
+  service_request_insights: "Request Management Insights",
 };
+
+const INSIGHT_PRESETS = new Set(["incident_insights", "service_request_insights"]);
 
 interface ItsmDashboardContentProps {
   projectId: string;
@@ -55,7 +60,7 @@ function formatPrevious(metric: ItsmMetricValue): string {
   return metric.previousValue.toFixed(1);
 }
 
-export function ItsmDashboardContent({ projectId, preset, onBack }: ItsmDashboardContentProps) {
+function ItsmKpiDashboardContent({ projectId, preset, onBack }: ItsmDashboardContentProps) {
   const queryClient = useQueryClient();
   const [selectedPreset, setSelectedPreset] = useState(preset);
   const [durationUnit, setDurationUnit] = useState<"hours" | "minutes">("hours");
@@ -292,7 +297,7 @@ export function ItsmDashboardContent({ projectId, preset, onBack }: ItsmDashboar
           >
             {presetsLoading && <option>Loading…</option>}
             {presetsError && <option>Error</option>}
-            {presets?.map((item) => (
+            {presets?.filter((item) => !INSIGHT_PRESETS.has(item)).map((item) => (
               <option key={item} value={item}>
                 {PRESET_LABELS[item] ?? item}
               </option>
@@ -568,4 +573,11 @@ export function ItsmDashboardContent({ projectId, preset, onBack }: ItsmDashboar
       )}
     </div>
   );
+}
+
+export function ItsmDashboardContent(props: ItsmDashboardContentProps) {
+  if (INSIGHT_PRESETS.has(props.preset)) {
+    return <ItsmInsightsDashboardContent {...props} />;
+  }
+  return <ItsmKpiDashboardContent {...props} />;
 }

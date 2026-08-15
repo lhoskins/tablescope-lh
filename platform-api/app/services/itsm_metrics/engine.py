@@ -28,6 +28,7 @@ from .models import (
     ChartSeries,
     DashboardResult,
     FilterSpec,
+    InsightSummary,
     MetricDefinition,
     MetricValue,
     PeriodBounds,
@@ -142,6 +143,65 @@ def _rolling_month_bounds(current: PeriodBounds, months: int = 12) -> PeriodBoun
     return PeriodBounds(start=start.isoformat(), end=current.end, label=f"Last {months} months")
 
 
+_PERIOD_DAYS: dict[str, int] = {
+    "30_days": 30,
+    "60_days": 60,
+    "90_days": 90,
+}
+_PERIOD_MONTHS: dict[str, tuple[int, str]] = {
+    "6_months": (6, "6 months"),
+    "1_year": (12, "1 year"),
+    "2_years": (24, "2 years"),
+}
+
+
+def _month_window_start(end: date, months: int) -> date:
+    month_index = end.year * 12 + end.month - 1 - (months - 1)
+    year, zero_based_month = divmod(month_index, 12)
+    return date(year, zero_based_month + 1, 1)
+
+
+def _reporting_bounds(
+    period_key: str | None,
+    as_of: datetime | None = None,
+) -> tuple[PeriodBounds, PeriodBounds]:
+    """Return a complete reporting window and the preceding equal window."""
+    latest_month, prior_month = _month_bounds(as_of)
+    if not period_key or period_key == "latest_month":
+        return latest_month, prior_month
+
+    end = date.fromisoformat(latest_month.end)
+    if period_key in _PERIOD_DAYS:
+        days = _PERIOD_DAYS[period_key]
+        start = end - timedelta(days=days - 1)
+        previous_end = start - timedelta(days=1)
+        previous_start = previous_end - timedelta(days=days - 1)
+        return (
+            PeriodBounds(start=start.isoformat(), end=end.isoformat(), label=f"Last {days} days"),
+            PeriodBounds(
+                start=previous_start.isoformat(),
+                end=previous_end.isoformat(),
+                label=f"prior {days} days",
+            ),
+        )
+
+    if period_key in _PERIOD_MONTHS:
+        months, label = _PERIOD_MONTHS[period_key]
+        start = _month_window_start(end, months)
+        previous_end = start - timedelta(days=1)
+        previous_start = _month_window_start(previous_end, months)
+        return (
+            PeriodBounds(start=start.isoformat(), end=end.isoformat(), label=f"Last {label}"),
+            PeriodBounds(
+                start=previous_start.isoformat(),
+                end=previous_end.isoformat(),
+                label=f"prior {label}",
+            ),
+        )
+
+    raise ValueError(f"Unsupported ITSM reporting period: {period_key}")
+
+
 def _period_epoch(period: PeriodBounds) -> tuple[float, float]:
     """Convert ISO date bounds to epoch seconds."""
     start_dt = datetime.fromisoformat(period.start).replace(tzinfo=UTC)
@@ -201,7 +261,7 @@ def _format_filter(f: FilterSpec) -> str:
 def _site_filter(site_code: str | None, site_column: str = "site_code") -> str:
     if not site_code or site_code.lower() == "all":
         return "1 = 1"
-    return f"{_quote_identifier(site_column)} = '{site_code}'"
+    return f"{_quote_identifier(site_column)} = {_literal(site_code)}"
 
 
 def _date_expression(date_field: str | None, date_unit: str = "seconds") -> str:
@@ -537,6 +597,355 @@ GROUP BY 1
 ORDER BY {order_by}"""
 
 
+def _row_text(row: dict[str, Any], key: str) -> str:
+    value = row.get(key, row.get(key.upper()))
+    return "Unspecified" if value is None or str(value).strip() == "" else str(value)
+
+
+def _row_number(row: dict[str, Any], key: str = "y") -> float:
+    value = row.get(key, row.get(key.upper()))
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _bucket_expression(field: str, period_key: str | None) -> str:
+    width = 10 if period_key in _PERIOD_DAYS else 7
+    return f"SUBSTRING(CAST({_quote_identifier(field)} AS string), 1, {width})"
+
+
+def _aligned_series(
+    first_name: str,
+    first_rows: list[dict[str, Any]],
+    second_name: str,
+    second_rows: list[dict[str, Any]],
+) -> tuple[list[str], list[ChartSeries]]:
+    first = {_row_text(row, "x"): _row_number(row) for row in first_rows}
+    second = {_row_text(row, "x"): _row_number(row) for row in second_rows}
+    categories = sorted(set(first) | set(second))
+    return categories, [
+        ChartSeries(name=first_name, x=categories, y=[first.get(item, 0) for item in categories]),
+        ChartSeries(name=second_name, x=categories, y=[second.get(item, 0) for item in categories]),
+    ]
+
+
+async def _build_insight_charts(
+    *,
+    dashboard_key: str,
+    endpoint: tuple[str, str, int],
+    period: PeriodBounds,
+    period_key: str | None,
+    site_code: str | None,
+    warnings: list[str],
+) -> tuple[list[ChartResult], list[InsightSummary]]:
+    """Build the richer, live insight charts without changing the KPI pipeline."""
+    database, host, port = endpoint
+    start, end = _period_epoch(period)
+    site_filter = _site_filter(site_code)
+    charts: list[ChartResult] = []
+
+    async def _safe(label: str, sql: str) -> list[dict[str, Any]]:
+        try:
+            return await _run_sql(database, host, port, f"{CACHE_HINT}\n{sql}")
+        except Exception as exc:
+            logger.warning("Insight chart %s failed: %s", label, exc)
+            warnings.append(f"{label}: supporting chart unavailable")
+            return []
+
+    if dashboard_key == "incident_insights":
+        opened_bucket = _bucket_expression("opened_at", period_key)
+        resolved_bucket = _bucket_expression("resolved_at", period_key)
+        opened_sql = f"""SELECT {opened_bucket} AS x, COUNT(DISTINCT sys_id) AS y
+FROM "01_incidents_CSV"
+WHERE unix_timestamp(CAST(opened_at AS timestamp)) >= {start}
+  AND unix_timestamp(CAST(opened_at AS timestamp)) <= {end}
+  AND {site_filter}
+GROUP BY 1 ORDER BY 1"""
+        resolved_sql = f"""SELECT {resolved_bucket} AS x, COUNT(DISTINCT sys_id) AS y
+FROM "01_incidents_CSV"
+WHERE unix_timestamp(CAST(resolved_at AS timestamp)) >= {start}
+  AND unix_timestamp(CAST(resolved_at AS timestamp)) <= {end}
+  AND {site_filter}
+GROUP BY 1 ORDER BY 1"""
+        age_sql = f"""SELECT CASE
+  WHEN ({end} - unix_timestamp(CAST(opened_at AS timestamp))) / 86400.0 <= 1 THEN '0-1 day'
+  WHEN ({end} - unix_timestamp(CAST(opened_at AS timestamp))) / 86400.0 <= 5 THEN '2-5 days'
+  WHEN ({end} - unix_timestamp(CAST(opened_at AS timestamp))) / 86400.0 <= 30 THEN '6-30 days'
+  WHEN ({end} - unix_timestamp(CAST(opened_at AS timestamp))) / 86400.0 <= 90 THEN '31-90 days'
+  ELSE '90+ days' END AS x,
+  COUNT(DISTINCT sys_id) AS y
+FROM "01_incidents_CSV"
+WHERE unix_timestamp(CAST(opened_at AS timestamp)) <= {end}
+  AND (resolved_at IS NULL OR unix_timestamp(CAST(resolved_at AS timestamp)) > {end})
+  AND {site_filter}
+GROUP BY 1"""
+        sla_site_sql = f"""SELECT CAST(site_code AS string) AS x, COUNT(DISTINCT sys_id) AS y
+FROM "02_task_slas_CSV"
+WHERE task_type = 'Incident' AND "metric" = 'Resolution'
+  AND CAST(has_breached AS boolean) = true
+  AND unix_timestamp(CAST(end_time AS timestamp)) >= {start}
+  AND unix_timestamp(CAST(end_time AS timestamp)) <= {end}
+  AND {site_filter}
+GROUP BY 1 ORDER BY 2 DESC LIMIT 8"""
+        heat_sql = f"""SELECT CAST(priority AS string) AS priority, CAST(state AS string) AS state,
+  COUNT(DISTINCT sys_id) AS y
+FROM "01_incidents_CSV"
+WHERE unix_timestamp(CAST(opened_at AS timestamp)) <= {end}
+  AND (resolved_at IS NULL OR unix_timestamp(CAST(resolved_at AS timestamp)) > {end})
+  AND {site_filter}
+GROUP BY 1, 2"""
+        category_sql = f"""SELECT CAST(category AS string) AS x, COUNT(DISTINCT sys_id) AS y
+FROM "01_incidents_CSV"
+WHERE unix_timestamp(CAST(opened_at AS timestamp)) >= {start}
+  AND unix_timestamp(CAST(opened_at AS timestamp)) <= {end}
+  AND {site_filter}
+GROUP BY 1 ORDER BY 2 DESC LIMIT 7"""
+        opened_rows, resolved_rows, age_rows, sla_rows, heat_rows, category_rows = await asyncio.gather(
+            _safe("incident-flow-opened", opened_sql),
+            _safe("incident-flow-resolved", resolved_sql),
+            _safe("incident-backlog-age", age_sql),
+            _safe("incident-sla-sites", sla_site_sql),
+            _safe("incident-priority-state", heat_sql),
+            _safe("incident-categories", category_sql),
+        )
+        categories, flow_series = _aligned_series("Opened", opened_rows, "Resolved", resolved_rows)
+        charts.append(ChartResult(
+            chart_key="incident_insight_flow",
+            title="Demand vs. resolution flow",
+            chart_type="line",
+            x_axis_label="Reporting period",
+            y_axis_label="Incidents",
+            series=flow_series,
+            categories=categories,
+            unit="count",
+            description="Incident inflow compared with completed resolution work.",
+            calculation="Incidents opened and resolved, grouped by reporting interval.",
+            drilldown_metric_key="open_backlog",
+            drilldown_dimension="period",
+        ))
+
+        age_order = ["0-1 day", "2-5 days", "6-30 days", "31-90 days", "90+ days"]
+        age_values = {_row_text(row, "x"): _row_number(row) for row in age_rows}
+        charts.append(ChartResult(
+            chart_key="incident_insight_age",
+            title="Backlog age & SLA risk",
+            chart_type="skinny_bar",
+            y_axis_label="Open incidents",
+            series=[ChartSeries(name="Open incidents", x=age_order, y=[age_values.get(item, 0) for item in age_order])],
+            categories=age_order,
+            unit="count",
+            description="Age distribution for incidents unresolved at the reporting period end.",
+            calculation="Count of unresolved incidents grouped by age at period end.",
+            drilldown_metric_key="open_backlog",
+            drilldown_dimension="age_band",
+        ))
+
+        sla_categories = [_row_text(row, "x") for row in sla_rows]
+        sla_values = [_row_number(row) for row in sla_rows]
+        charts.append(ChartResult(
+            chart_key="incident_insight_sla_sites",
+            title="Where SLA risk originates",
+            chart_type="skinny_bar",
+            y_axis_label="Breached incidents",
+            series=[ChartSeries(name="Breaches", x=sla_categories, y=cast(list[float | None], sla_values))],
+            categories=sla_categories,
+            unit="count",
+            description="Sites contributing the most completed resolution SLA breaches.",
+            calculation="Breached incident resolution SLA records grouped by site.",
+            drilldown_metric_key="resolution_sla",
+            drilldown_dimension="site_code",
+        ))
+
+        states = sorted({_row_text(row, "state") for row in heat_rows})
+        priorities = sorted({_row_text(row, "priority") for row in heat_rows})
+        heat_values = {(_row_text(row, "priority"), _row_text(row, "state")): _row_number(row) for row in heat_rows}
+        charts.append(ChartResult(
+            chart_key="incident_insight_priority_state",
+            title="Priority \u00d7 status concentration",
+            chart_type="heatmap",
+            x_axis_label="Status",
+            y_axis_label="Priority",
+            series=[ChartSeries(name=priority, x=states, y=[heat_values.get((priority, state), 0) for state in states]) for priority in priorities],
+            categories=states,
+            unit="count",
+            description="Active workload concentration by incident priority and lifecycle state.",
+            calculation="Count of unresolved incidents grouped by priority and state.",
+            drilldown_metric_key="open_backlog",
+            drilldown_dimension="priority_state",
+        ))
+
+        category_names = [_row_text(row, "x") for row in category_rows]
+        category_values = [_row_number(row) for row in category_rows]
+        charts.append(ChartResult(
+            chart_key="incident_insight_categories",
+            title="Category contribution",
+            chart_type="skinny_bar",
+            y_axis_label="Incidents",
+            series=[ChartSeries(name="Incidents", x=category_names, y=cast(list[float | None], category_values))],
+            categories=category_names,
+            unit="count",
+            description="Highest-volume incident categories in the selected period.",
+            calculation="Count of incidents opened, grouped by category.",
+            drilldown_metric_key="open_backlog",
+            drilldown_dimension="category",
+        ))
+
+        stale = sum(age_values.get(item, 0) for item in age_order[2:])
+        breach_total = sum(sla_values)
+        top_site = sla_categories[0] if sla_categories else "No site"
+        top_site_share = round(100 * sla_values[0] / breach_total) if breach_total and sla_values else 0
+        top_category = category_names[0] if category_names else "No category"
+        return charts, [
+            InsightSummary("risk", "Backlog risk", f"{int(stale):,} open incidents are older than five days.", "critical", "open_backlog"),
+            InsightSummary("driver", "Primary driver", f"{top_site} contributes {top_site_share}% of resolution SLA breaches.", "warning", "resolution_sla"),
+            InsightSummary("action", "Recommended action", f"Review {top_category} demand and the highest-breach site before rebalancing work.", "positive", "open_backlog"),
+        ]
+
+    requested_bucket = _bucket_expression("requested_date", period_key)
+    completed_bucket = _bucket_expression("closed_at", period_key)
+    requested_sql = f"""SELECT {requested_bucket} AS x, COUNT(DISTINCT sys_id) AS y
+FROM "07_requests_CSV"
+WHERE unix_timestamp(CAST(requested_date AS timestamp)) >= {start}
+  AND unix_timestamp(CAST(requested_date AS timestamp)) <= {end}
+  AND {site_filter}
+GROUP BY 1 ORDER BY 1"""
+    completed_sql = f"""SELECT {completed_bucket} AS x, COUNT(DISTINCT sys_id) AS y
+FROM "07_requests_CSV"
+WHERE unix_timestamp(CAST(closed_at AS timestamp)) >= {start}
+  AND unix_timestamp(CAST(closed_at AS timestamp)) <= {end}
+  AND {site_filter}
+GROUP BY 1 ORDER BY 1"""
+    request_age_sql = f"""SELECT CASE
+  WHEN ({end} - unix_timestamp(CAST(requested_date AS timestamp))) / 86400.0 <= 1 THEN '0-1 day'
+  WHEN ({end} - unix_timestamp(CAST(requested_date AS timestamp))) / 86400.0 <= 5 THEN '2-5 days'
+  WHEN ({end} - unix_timestamp(CAST(requested_date AS timestamp))) / 86400.0 <= 14 THEN '6-14 days'
+  WHEN ({end} - unix_timestamp(CAST(requested_date AS timestamp))) / 86400.0 <= 30 THEN '15-30 days'
+  ELSE '31+ days' END AS x,
+  COUNT(DISTINCT sys_id) AS y
+FROM "07_requests_CSV"
+WHERE unix_timestamp(CAST(requested_date AS timestamp)) <= {end}
+  AND (closed_at IS NULL OR unix_timestamp(CAST(closed_at AS timestamp)) > {end})
+  AND {site_filter}
+GROUP BY 1"""
+    friction_sql = f"""SELECT CASE
+  WHEN approval IS NULL OR approval NOT IN ('Approved', 'Not Required') THEN 'Pending approval'
+  WHEN stage = 'Fulfillment' THEN 'Fulfillment queue'
+  WHEN state = 'Open' THEN 'Intake queue'
+  ELSE COALESCE(stage, state) END AS x,
+  COUNT(DISTINCT sys_id) AS y
+FROM "07_requests_CSV"
+WHERE unix_timestamp(CAST(requested_date AS timestamp)) <= {end}
+  AND (closed_at IS NULL OR unix_timestamp(CAST(closed_at AS timestamp)) > {end})
+  AND {site_filter}
+GROUP BY 1 ORDER BY 2 DESC"""
+    catalog_sql = f"""SELECT CAST(catalog_item_name AS string) AS x, COUNT(DISTINCT sys_id) AS y
+FROM "08_requested_items_CSV"
+WHERE unix_timestamp(CAST(opened_at AS timestamp)) >= {start}
+  AND unix_timestamp(CAST(opened_at AS timestamp)) <= {end}
+  AND {site_filter}
+GROUP BY 1 ORDER BY 2 DESC LIMIT 7"""
+    queue_sql = f"""SELECT CAST(assignment_group_name AS string) AS x, COUNT(DISTINCT sys_id) AS y
+FROM "09_catalog_tasks_CSV"
+WHERE unix_timestamp(CAST(opened_at AS timestamp)) <= {end}
+  AND (closed_at IS NULL OR unix_timestamp(CAST(closed_at AS timestamp)) > {end})
+  AND {site_filter}
+GROUP BY 1 ORDER BY 2 DESC LIMIT 7"""
+    requested_rows, completed_rows, request_age_rows, friction_rows, catalog_rows, queue_rows = await asyncio.gather(
+        _safe("request-flow-requested", requested_sql),
+        _safe("request-flow-completed", completed_sql),
+        _safe("request-backlog-age", request_age_sql),
+        _safe("request-friction", friction_sql),
+        _safe("request-catalog", catalog_sql),
+        _safe("request-queues", queue_sql),
+    )
+    categories, flow_series = _aligned_series("Requested", requested_rows, "Completed", completed_rows)
+    charts.append(ChartResult(
+        chart_key="request_insight_flow",
+        title="Demand vs. fulfillment flow",
+        chart_type="line",
+        x_axis_label="Reporting period",
+        y_axis_label="Requests",
+        series=flow_series,
+        categories=categories,
+        unit="count",
+        description="Service request demand compared with completed fulfillment work.",
+        calculation="Requests submitted and completed, grouped by reporting interval.",
+        drilldown_metric_key="request_backlog",
+        drilldown_dimension="period",
+    ))
+    request_age_order = ["0-1 day", "2-5 days", "6-14 days", "15-30 days", "31+ days"]
+    request_age_values = {_row_text(row, "x"): _row_number(row) for row in request_age_rows}
+    charts.append(ChartResult(
+        chart_key="request_insight_age",
+        title="Open work by age & state",
+        chart_type="skinny_bar",
+        y_axis_label="Open requests",
+        series=[ChartSeries(name="Open requests", x=request_age_order, y=[request_age_values.get(item, 0) for item in request_age_order])],
+        categories=request_age_order,
+        unit="count",
+        description="Age distribution for requests that remain unfulfilled at period end.",
+        calculation="Unfulfilled requests grouped by age at reporting period end.",
+        drilldown_metric_key="request_backlog",
+        drilldown_dimension="age_band",
+    ))
+    friction_names = [_row_text(row, "x") for row in friction_rows]
+    friction_values = [_row_number(row) for row in friction_rows]
+    charts.append(ChartResult(
+        chart_key="request_insight_friction",
+        title="Delay source",
+        chart_type="skinny_bar",
+        y_axis_label="Open requests",
+        series=[ChartSeries(name="Open requests", x=friction_names, y=cast(list[float | None], friction_values))],
+        categories=friction_names,
+        unit="count",
+        description="Current workflow states contributing to request fulfillment delay.",
+        calculation="Open requests grouped by approval and fulfillment stage.",
+        drilldown_metric_key="request_backlog",
+        drilldown_dimension="workflow_stage",
+    ))
+    catalog_names = [_row_text(row, "x") for row in catalog_rows]
+    catalog_values = [_row_number(row) for row in catalog_rows]
+    charts.append(ChartResult(
+        chart_key="request_insight_catalog",
+        title="Catalog demand",
+        chart_type="skinny_bar",
+        y_axis_label="Requested items",
+        series=[ChartSeries(name="Requested items", x=catalog_names, y=cast(list[float | None], catalog_values))],
+        categories=catalog_names,
+        unit="count",
+        description="Catalog items generating the most demand in the selected period.",
+        calculation="Count of requested items grouped by catalog item.",
+        drilldown_metric_key="request_backlog",
+        drilldown_dimension="catalog_item",
+    ))
+    queue_names = [_row_text(row, "x") for row in queue_rows]
+    queue_values = [_row_number(row) for row in queue_rows]
+    charts.append(ChartResult(
+        chart_key="request_insight_queues",
+        title="Queue load",
+        chart_type="skinny_bar",
+        y_axis_label="Open tasks",
+        series=[ChartSeries(name="Open catalog tasks", x=queue_names, y=cast(list[float | None], queue_values))],
+        categories=queue_names,
+        unit="count",
+        description="Assignment groups carrying the largest active catalog-task workload.",
+        calculation="Open catalog tasks grouped by assignment group.",
+        drilldown_metric_key="request_backlog",
+        drilldown_dimension="assignment_group",
+    ))
+    friction_total = sum(friction_values)
+    top_friction = friction_names[0] if friction_names else "No workflow state"
+    friction_share = round(100 * friction_values[0] / friction_total) if friction_total and friction_values else 0
+    top_catalog = catalog_names[0] if catalog_names else "No catalog item"
+    top_queue = queue_names[0] if queue_names else "No assignment group"
+    return charts, [
+        InsightSummary("risk", "Fulfillment risk", f"{top_friction} represents {friction_share}% of open request delay.", "critical", "request_backlog"),
+        InsightSummary("driver", "Demand driver", f"{top_catalog} is the highest-volume catalog item in the selected period.", "warning", "request_backlog"),
+        InsightSummary("action", "Recommended action", f"Review automation and capacity for {top_queue} before adding headcount.", "positive", "automated_fulfillment_rate"),
+    ]
+
+
 async def compute_dashboard(
     dashboard_key: str,
     project_id: int,
@@ -547,6 +956,7 @@ async def compute_dashboard(
     site_code: str | None = None,
     date_unit: str = "seconds",
     duration_unit: str = "hours",
+    period_key: str | None = None,
 ) -> DashboardResult:
     """Compute all KPIs and charts for an ITSM dashboard preset.
 
@@ -554,7 +964,7 @@ async def compute_dashboard(
     control; each metric still runs current and previous periods independently.
     """
     metrics = get_dashboard_metrics(dashboard_key)
-    current_period, previous_period = _month_bounds(as_of)
+    current_period, previous_period = _reporting_bounds(period_key, as_of)
     teiid_endpoint = await _resolve_teiid(project_id, session, tenant_id, user_id)
 
     values: list[MetricValue] = []
@@ -606,10 +1016,40 @@ async def compute_dashboard(
                 target=metric.target,
             ))
 
-    # Build charts from the first two metrics that define a group_by.
+    # Insight presets use purpose-built multi-series and skinny-bar charts. The
+    # original five KPI presets retain their existing chart pipeline.
     chart_metrics = [m for m in metrics if m.group_by]
     charts: list[ChartResult] = []
-    if len(chart_metrics) >= 2:
+    insights: list[InsightSummary] = []
+    site_options: list[dict[str, str]] = []
+    if dashboard_key in {"incident_insights", "service_request_insights"}:
+        charts, insights = await _build_insight_charts(
+            dashboard_key=dashboard_key,
+            endpoint=teiid_endpoint,
+            period=current_period,
+            period_key=period_key,
+            site_code=site_code,
+            warnings=warnings,
+        )
+        site_table = "01_incidents_CSV" if dashboard_key == "incident_insights" else "07_requests_CSV"
+        try:
+            site_rows = await _run_sql(
+                *teiid_endpoint,
+                f"""{CACHE_HINT}
+SELECT CAST(site_code AS string) AS code, MAX(CAST(site_name AS string)) AS name
+FROM {_quote_identifier(site_table)}
+WHERE site_code IS NOT NULL
+GROUP BY site_code
+ORDER BY 2""",
+            )
+            site_options = [
+                {"code": _row_text(row, "code"), "name": _row_text(row, "name")}
+                for row in site_rows
+            ]
+        except Exception as exc:
+            logger.warning("ITSM insight site options failed: %s", exc)
+            warnings.append("site-filter: site options unavailable")
+    elif len(chart_metrics) >= 2:
         async def _build_chart(dashboard: str, chart_metric: MetricDefinition) -> ChartResult | BaseException:
             assert chart_metric.group_by is not None
             is_date_chart = bool(
@@ -645,21 +1085,29 @@ async def compute_dashboard(
             if isinstance(chart_result, ChartResult):
                 charts.append(chart_result)
             else:
-                exc = chart_result if isinstance(chart_result, BaseException) else Exception(chart_result)
-                logger.warning("Chart build failed: %s", exc)
-                warnings.append(f"chart: {exc}")
+                chart_exc = chart_result if isinstance(chart_result, BaseException) else Exception(chart_result)
+                logger.warning("Chart build failed: %s", chart_exc)
+                warnings.append(f"chart: {chart_exc}")
 
     return DashboardResult(
         dashboard=dashboard_key,
         as_of=utc_now_iso(),
-        filters={"site": site_code or "all", "date_unit": date_unit, "durationUnit": duration_unit},
+        filters={
+            "site": site_code or "all",
+            "date_unit": date_unit,
+            "durationUnit": duration_unit,
+            "period": period_key or "latest_month",
+        },
         metrics=values,
         charts=charts,
         data_quality={
-            "latestCompleteMonth": current_period.label,
+            "latestCompleteMonth": _month_bounds(as_of)[0].label,
+            "reportingPeriod": current_period.label,
+            "availableSites": site_options,
             "missingMetrics": [m.key for m in metrics if m.status == "not_implemented"],
             "warnings": warnings,
         },
+        insights=insights,
     )
 
 
@@ -686,6 +1134,7 @@ async def warm_itsm_dashboards_for_project(
     async def _warm_one(preset: str) -> None:
         async with sem:
             try:
+                period_key = "1_year" if preset in {"incident_insights", "service_request_insights"} else "latest_month"
                 async with SessionLocal() as warm_session:
                     result = await compute_dashboard(
                         dashboard_key=preset,
@@ -696,6 +1145,7 @@ async def warm_itsm_dashboards_for_project(
                         site_code=site_code,
                         date_unit=date_unit,
                         duration_unit=duration_unit,
+                        period_key=period_key,
                     )
                 from .cache import make_cache_key, set_cached_dashboard
 
@@ -707,6 +1157,7 @@ async def warm_itsm_dashboards_for_project(
                         site_code=site_code,
                         as_of=None,
                         duration_unit=duration_unit,
+                        period_key=period_key,
                     ),
                     result,
                 )

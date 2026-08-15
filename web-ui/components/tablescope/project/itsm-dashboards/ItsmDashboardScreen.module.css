@@ -53,8 +53,52 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.insightBrief {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.6fr) minmax(0, 2.4fr);
+  align-items: center;
+  gap: 1rem;
+  border-top: 1px solid var(--color-line-tertiary, #e2e8f0);
+  border-bottom: 1px solid var(--color-line-tertiary, #e2e8f0);
+  padding: 0.875rem 0.25rem;
+}
+
+.insightBriefGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.insightMainGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.85fr);
+  gap: 0.75rem;
+}
+
+.insightSideStack {
+  display: grid;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.insightBottomGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
 @container (max-width: 760px) {
   .chartGrid {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+
+  .insightBrief,
+  .insightMainGrid,
+  .insightBottomGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .insightBriefGrid {
     grid-template-columns: repeat(1, minmax(0, 1fr));
   }
 }
