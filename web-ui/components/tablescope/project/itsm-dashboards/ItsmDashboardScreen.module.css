@@ -4,31 +4,52 @@
 
 .kpiGrid {
   display: grid;
-  gap: 1rem;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.625rem;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
+
+.cardCompact {
+  grid-column: span 3;
+}
+
+.cardStandard {
+  grid-column: span 4;
+}
+
+.cardWide {
+  grid-column: span 6;
 }
 
 @container (max-width: 940px) {
-  .kpiGrid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .cardCompact {
+    grid-column: span 4;
+  }
+
+  .cardStandard,
+  .cardWide {
+    grid-column: span 6;
   }
 }
 
 @container (max-width: 660px) {
-  .kpiGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .cardCompact,
+  .cardStandard,
+  .cardWide {
+    grid-column: span 6;
   }
 }
 
 @container (max-width: 420px) {
-  .kpiGrid {
-    grid-template-columns: repeat(1, minmax(0, 1fr));
+  .cardCompact,
+  .cardStandard,
+  .cardWide {
+    grid-column: span 12;
   }
 }
 
 .chartGrid {
   display: grid;
-  gap: 1rem;
+  gap: 0.75rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -44,7 +65,8 @@
   left: 0;
   bottom: 0;
   z-index: 50;
-  width: clamp(360px, 42vw, 60vw);
+  width: min(60vw, 900px);
+  min-width: 420px;
   transform: translateX(-100%);
   transition: transform 300ms ease-in-out;
 }
@@ -56,5 +78,6 @@
 @media (max-width: 640px) {
   .drilldownPanel {
     width: 100%;
+    min-width: 0;
   }
 }
