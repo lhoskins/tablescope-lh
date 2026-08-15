@@ -302,7 +302,7 @@ FROM (
         polarity="higher_is_better",
         drill_down_dimensions=["site_code", "priority"],
         description="Resolved incidents completed within their applicable resolution SLA.",
-        calculation="SLA-compliant resolutions ÷ resolved incidents × 100.",
+        calculation="SLA-compliant resolutions ÷ resolved incidents \u00d7 100.",
     ),
     MetricDefinition(
         key="sla_breach_rate",
@@ -356,7 +356,7 @@ _SERVICE_REQUEST_METRICS: list[MetricDefinition] = [
     MetricDefinition(key="catalog_tasks", label="Catalog tasks", dashboard="service_request", order=3, kind="event_period", table="09_catalog_tasks_CSV", date_field="opened_at", aggregation="distinct", unit="count", precision=0, polarity="neutral"),
     MetricDefinition(key="average_fulfillment", label="Average fulfillment", dashboard="service_request", order=4, kind="duration_period", table="07_requests_CSV", date_field="closed_at", numerator="request_fulfillment_minutes", unit="minutes", precision=1, polarity="lower_is_better"),
     MetricDefinition(key="median_fulfillment", label="Median fulfillment", dashboard="service_request", order=5, kind="duration_period", table="07_requests_CSV", date_field="closed_at", numerator="request_fulfillment_minutes", aggregation="median", unit="minutes", precision=1, polarity="lower_is_better", status="calculated", description="The midpoint submitted-to-completed duration for fulfilled requests.", calculation="Median submitted-to-completed duration."),
-    MetricDefinition(key="request_sla", label="Request SLA compliance", dashboard="service_request", order=6, kind="ratio_period", table="07_requests_CSV", date_field="closed_at", value_expression="""SELECT CASE WHEN total > 0 THEN CAST(100.0 * met / total AS double) ELSE 0 END AS metric_value FROM (SELECT COUNT(DISTINCT sys_id) AS total, COUNT(DISTINCT CASE WHEN CAST(fulfillment_sla_met AS boolean) = true THEN sys_id END) AS met FROM {table} WHERE unix_timestamp(CAST(closed_at AS timestamp)) >= {start} AND unix_timestamp(CAST(closed_at AS timestamp)) <= {end} AND {site_filter}) t""", unit="percent", precision=1, polarity="higher_is_better", description="Completed service requests fulfilled within their applicable SLA.", calculation="Requests completed within SLA ÷ completed requests × 100."),
+    MetricDefinition(key="request_sla", label="Request SLA compliance", dashboard="service_request", order=6, kind="ratio_period", table="07_requests_CSV", date_field="closed_at", value_expression="""SELECT CASE WHEN total > 0 THEN CAST(100.0 * met / total AS double) ELSE 0 END AS metric_value FROM (SELECT COUNT(DISTINCT sys_id) AS total, COUNT(DISTINCT CASE WHEN CAST(fulfillment_sla_met AS boolean) = true THEN sys_id END) AS met FROM {table} WHERE unix_timestamp(CAST(closed_at AS timestamp)) >= {start} AND unix_timestamp(CAST(closed_at AS timestamp)) <= {end} AND {site_filter}) t""", unit="percent", precision=1, polarity="higher_is_better", description="Completed service requests fulfilled within their applicable SLA.", calculation="Requests completed within SLA ÷ completed requests \u00d7 100."),
     MetricDefinition(key="request_backlog", label="Request backlog", dashboard="service_request", order=7, kind="snapshot_eom", table="07_requests_CSV", date_field="requested_date", close_field="closed_at", state_field="state", open_states=["Open", "Work in Progress", "Pending Approval"], aggregation="distinct", unit="count", precision=0, polarity="lower_is_better", drill_down_dimensions=["site_code"], description="Service requests that remain unfulfilled at the end of the reporting period.", calculation="Count of unfulfilled requests."),
     MetricDefinition(key="backlog_older_than_30_days_requests", label="Backlog older than 30 days", dashboard="service_request", order=8, kind="snapshot_eom", table="07_requests_CSV", date_field="requested_date", value_expression="""SELECT COUNT(DISTINCT sys_id) AS metric_value FROM {table} WHERE unix_timestamp(CAST(requested_date AS timestamp)) <= {end} - 2592000 AND (closed_at IS NULL OR unix_timestamp(CAST(closed_at AS timestamp)) > {end}) AND {site_filter}""", unit="count", precision=0, polarity="lower_is_better", status="proxy"),
     MetricDefinition(key="open_requested_items", label="Open requested items", dashboard="service_request", order=9, kind="snapshot_eom", table="08_requested_items_CSV", date_field="opened_at", close_field="closed_at", aggregation="distinct", unit="count", precision=0, polarity="lower_is_better"),
@@ -393,7 +393,7 @@ FROM (
         status="proxy",
         drill_down_dimensions=["site_code", "catalog_item_category", "assignment_group_sys_id"],
         description="Fulfilled catalog items completed with no more than one fulfillment task, used as the available automation proxy.",
-        calculation="Automatically fulfilled requests ÷ fulfilled requests × 100.",
+        calculation="Automatically fulfilled requests ÷ fulfilled requests \u00d7 100.",
         note="The export has no automation flag; one-or-fewer catalog tasks is used as the proxy.",
     ),
 ]

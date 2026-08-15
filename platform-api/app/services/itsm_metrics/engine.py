@@ -762,7 +762,7 @@ GROUP BY 1 ORDER BY 2 DESC LIMIT 7"""
         heat_values = {(_row_text(row, "priority"), _row_text(row, "state")): _row_number(row) for row in heat_rows}
         charts.append(ChartResult(
             chart_key="incident_insight_priority_state",
-            title="Priority × status concentration",
+            title="Priority \u00d7 status concentration",
             chart_type="heatmap",
             x_axis_label="Status",
             y_axis_label="Priority",
