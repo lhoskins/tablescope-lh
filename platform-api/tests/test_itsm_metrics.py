@@ -6,7 +6,14 @@ import datetime
 import math
 
 from app.services.itsm_metrics.comparison import compute_comparison, outcome_color_class
-from app.services.itsm_metrics.engine import _build_metric_sql, _format_filter, _month_bounds, _period_epoch
+from app.services.itsm_metrics.engine import (
+    _build_metric_sql,
+    _extract_metric_value,
+    _format_filter,
+    _month_bounds,
+    _period_epoch,
+    _rolling_month_bounds,
+)
 from app.services.itsm_metrics.registry import get_dashboard_metrics, get_metric, list_dashboards
 
 
@@ -96,6 +103,12 @@ class TestMonthBounds:
         # End-of-day inclusive.
         assert end - start == 30 * 86400 + 86399
 
+    def test_rolling_window_contains_twelve_complete_months(self) -> None:
+        current, _ = _month_bounds(datetime.datetime(2026, 8, 14, tzinfo=datetime.UTC))
+        rolling = _rolling_month_bounds(current)
+        assert rolling.start == "2025-08-01"
+        assert rolling.end == "2026-07-31"
+
 
 class TestFilterFormatting:
     def test_boolean_eq(self) -> None:
@@ -160,3 +173,24 @@ class TestSqlGeneration:
         sql = _build_metric_sql(metric, period, "US01")
         assert "site_code" in sql
         assert "incident_count" in sql
+
+    def test_median_resolution_returns_rows_for_portable_python_median(self) -> None:
+        from app.services.itsm_metrics.models import PeriodBounds
+
+        metric = get_metric("incident", "median_resolution")
+        assert metric is not None
+        period = PeriodBounds(start="2026-07-01", end="2026-07-31", label="Jul 2026")
+        sql = _build_metric_sql(metric, period)
+        assert 'CAST("resolution_minutes" AS double) AS metric_value' in sql
+        assert "AVG(" not in sql
+        assert _extract_metric_value([{"metric_value": 10}, {"metric_value": 30}], metric) == 20
+
+    def test_snapshot_uses_historical_close_date_not_current_state(self) -> None:
+        from app.services.itsm_metrics.models import PeriodBounds
+
+        metric = get_metric("incident", "open_backlog")
+        assert metric is not None
+        period = PeriodBounds(start="2026-07-01", end="2026-07-31", label="Jul 2026")
+        sql = _build_metric_sql(metric, period)
+        assert '"resolved_at"' in sql
+        assert '"state" IN' not in sql
