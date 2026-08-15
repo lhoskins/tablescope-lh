@@ -90,15 +90,12 @@ FROM (
         table="01_incidents_CSV",
         date_field="resolved_at",
         numerator="resolution_minutes",
-        value_expression="""SELECT AVG(CAST(resolution_minutes AS double)) AS metric_value
-FROM {table}
-WHERE unix_timestamp(CAST(resolved_at AS timestamp)) >= {start} AND unix_timestamp(CAST(resolved_at AS timestamp)) <= {end}
-  AND resolution_minutes IS NOT NULL AND {site_filter}""",
+        aggregation="median",
         unit="minutes",
         precision=1,
         polarity="lower_is_better",
-        status="proxy",
-        note="PERCENTILE_CONT may need a Teiid-compatible approximation if the native aggregate is unavailable.",
+        status="calculated",
+        note="Median is calculated from the returned monthly duration values for Teiid portability.",
     ),
     MetricDefinition(
         key="mean_restore",
@@ -106,9 +103,10 @@ WHERE unix_timestamp(CAST(resolved_at AS timestamp)) >= {start} AND unix_timesta
         dashboard="incident",
         order=6,
         kind="duration_period",
-        table="01_incidents_CSV",
-        date_field="resolved_at",
-        numerator="business_duration_minutes",
+        table="15_service_outages_CSV",
+        date_field="end_col",
+        numerator="duration_minutes",
+        filters=[FilterSpec(column="planned", operator="eq", value=False)],
         unit="minutes",
         precision=1,
         polarity="lower_is_better",
@@ -165,6 +163,10 @@ FROM (
         table="01_incidents_CSV",
         date_field="resolved_at",
         numerator="reassign_count",
+        value_expression="""SELECT AVG(1.0 + CAST(reassign_count AS double)) AS metric_value
+FROM {table}
+WHERE unix_timestamp(CAST(resolved_at AS timestamp)) >= {start} AND unix_timestamp(CAST(resolved_at AS timestamp)) <= {end}
+  AND reassign_count IS NOT NULL AND {site_filter}""",
         unit="count",
         precision=1,
         polarity="lower_is_better",
