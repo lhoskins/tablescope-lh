@@ -42,6 +42,8 @@ class MetricDefinition:
     drill_down_dimensions: list[str] = field(default_factory=list)
     chart_label: str | None = None
     note: str | None = None
+    description: str | None = None
+    calculation: str | None = None
 
 
 @dataclass
@@ -68,6 +70,10 @@ class MetricValue:
     comparison_label: str | None = None
     status: MetricStatus = "measured"
     as_of: str | None = None
+    unit: str | None = None
+    description: str | None = None
+    calculation: str | None = None
+    target: float | None = None
 
 
 @dataclass
@@ -86,6 +92,41 @@ class ChartResult:
     y_axis_label: str | None = None
     series: list[ChartSeries] = field(default_factory=list)
     categories: list[str] = field(default_factory=list)
+    unit: str | None = None
+
+
+@dataclass
+class DrilldownContributor:
+    name: str
+    value: float | None
+    display_value: str
+    share_percent: float | None = None
+
+
+@dataclass
+class DrilldownRecord:
+    record_id: str
+    priority: str | None = None
+    site: str | None = None
+    category: str | None = None
+    value: float | None = None
+    display_value: str | None = None
+
+
+@dataclass
+class MetricDrilldown:
+    metric_key: str
+    label: str
+    description: str
+    calculation: str
+    unit: str | None
+    period_start: str
+    period_end: str
+    contributors_label: str
+    contributors: list[DrilldownContributor] = field(default_factory=list)
+    majority_share_percent: float | None = None
+    records: list[DrilldownRecord] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
