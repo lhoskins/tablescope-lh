@@ -251,6 +251,12 @@ export type DashboardFilter = {
 export type DashboardConfig = {
   widgets: WidgetConfig[];
   globalFilters?: DashboardFilter[];
+  /** Shared visual language used by template-created dashboards. */
+  presentation?: "operational_insight";
+  /** Template collection, group, icon and parameter bindings. */
+  dashboardTemplate?: Record<string, unknown>;
+  /** Reusable AI-managed narrative widgets rendered above the chart grid. */
+  operationalWidgets?: Array<Record<string, unknown>>;
 };
 
 export type Dashboard = {

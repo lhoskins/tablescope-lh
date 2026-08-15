@@ -1,18 +1,15 @@
-/**
- * Date-range presets for the dashboard date filter.
- *
- * `resolveDatePreset` returns an inclusive {start, end} pair of ISO dates
- * (yyyy-mm-dd) for a named preset, or `null` for "all" (no constraint).
- * All math is pure and timezone-stable (uses local calendar dates) so it can
- * be unit tested with a fixed `today`.
- */
-
+/** Named date ranges shared by editable dashboards. */
 export type DatePresetId =
   | "all"
   | "today"
   | "yesterday"
   | "last_7_days"
   | "last_30_days"
+  | "last_60_days"
+  | "last_90_days"
+  | "last_6_months"
+  | "last_1_year"
+  | "last_2_years"
   | "this_month"
   | "last_month"
   | "this_quarter"
@@ -25,6 +22,11 @@ export const DATE_PRESETS: { id: DatePresetId; label: string }[] = [
   { id: "yesterday", label: "Yesterday" },
   { id: "last_7_days", label: "Last 7 days" },
   { id: "last_30_days", label: "Last 30 days" },
+  { id: "last_60_days", label: "Last 60 days" },
+  { id: "last_90_days", label: "Last 90 days" },
+  { id: "last_6_months", label: "Last 6 months" },
+  { id: "last_1_year", label: "Last 1 year" },
+  { id: "last_2_years", label: "Last 2 years" },
   { id: "this_month", label: "This month" },
   { id: "last_month", label: "Last month" },
   { id: "this_quarter", label: "This quarter" },
@@ -32,60 +34,69 @@ export const DATE_PRESETS: { id: DatePresetId; label: string }[] = [
   { id: "custom", label: "Custom" },
 ];
 
-function iso(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+function iso(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
-function addDays(d: Date, n: number): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+function addDays(date: Date, days: number): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
 }
 
-/**
- * Resolve a preset to an inclusive {start, end} date pair, or null for "all"
- * / "custom" (custom ranges are supplied by the user, not derived here).
- */
+function rollingDays(today: Date, days: number) {
+  return { start: iso(addDays(today, -(days - 1))), end: iso(today) };
+}
+
 export function resolveDatePreset(
   preset: DatePresetId | string,
   today: Date = new Date(),
 ): { start: string; end: string } | null {
-  const t = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const current = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   switch (preset) {
     case "today":
-      return { start: iso(t), end: iso(t) };
+      return { start: iso(current), end: iso(current) };
     case "yesterday": {
-      const y = addDays(t, -1);
-      return { start: iso(y), end: iso(y) };
+      const yesterday = addDays(current, -1);
+      return { start: iso(yesterday), end: iso(yesterday) };
     }
     case "last_7_days":
-      return { start: iso(addDays(t, -6)), end: iso(t) };
+      return rollingDays(current, 7);
     case "last_30_days":
-      return { start: iso(addDays(t, -29)), end: iso(t) };
-    case "this_month": {
-      const start = new Date(t.getFullYear(), t.getMonth(), 1);
-      const end = new Date(t.getFullYear(), t.getMonth() + 1, 0);
-      return { start: iso(start), end: iso(end) };
-    }
-    case "last_month": {
-      const start = new Date(t.getFullYear(), t.getMonth() - 1, 1);
-      const end = new Date(t.getFullYear(), t.getMonth(), 0);
-      return { start: iso(start), end: iso(end) };
-    }
+      return rollingDays(current, 30);
+    case "last_60_days":
+      return rollingDays(current, 60);
+    case "last_90_days":
+      return rollingDays(current, 90);
+    case "last_6_months":
+      return rollingDays(current, 183);
+    case "last_1_year":
+      return rollingDays(current, 365);
+    case "last_2_years":
+      return rollingDays(current, 730);
+    case "this_month":
+      return {
+        start: iso(new Date(current.getFullYear(), current.getMonth(), 1)),
+        end: iso(new Date(current.getFullYear(), current.getMonth() + 1, 0)),
+      };
+    case "last_month":
+      return {
+        start: iso(new Date(current.getFullYear(), current.getMonth() - 1, 1)),
+        end: iso(new Date(current.getFullYear(), current.getMonth(), 0)),
+      };
     case "this_quarter": {
-      const q = Math.floor(t.getMonth() / 3);
-      const start = new Date(t.getFullYear(), q * 3, 1);
-      const end = new Date(t.getFullYear(), q * 3 + 3, 0);
-      return { start: iso(start), end: iso(end) };
+      const quarter = Math.floor(current.getMonth() / 3);
+      return {
+        start: iso(new Date(current.getFullYear(), quarter * 3, 1)),
+        end: iso(new Date(current.getFullYear(), quarter * 3 + 3, 0)),
+      };
     }
     case "this_year":
       return {
-        start: iso(new Date(t.getFullYear(), 0, 1)),
-        end: iso(new Date(t.getFullYear(), 11, 31)),
+        start: iso(new Date(current.getFullYear(), 0, 1)),
+        end: iso(new Date(current.getFullYear(), 11, 31)),
       };
-    case "all":
-    case "custom":
     default:
       return null;
   }

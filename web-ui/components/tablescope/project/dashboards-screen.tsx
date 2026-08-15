@@ -2,53 +2,29 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { IconSparkles, IconPlus, IconLayoutDashboard, IconTrash } from "@tabler/icons-react";
+import { IconSparkles, IconPlus } from "@tabler/icons-react";
 import { apiClient } from "@/lib/api-client";
 import { ProjectShell } from "@/components/tablescope/project-shell";
-import { StatTile } from "@/components/ui/stat-tile";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { cn } from "@/lib/cn";
-import { timeAgo } from "@/lib/ui/format";
-import { accentFor } from "@/lib/ui/color";
 import {
   useProjectDashboards,
   useProjectQueries,
   useProjectDataSources,
-  widgetCount,
   type Dashboard,
 } from "@/lib/ui/use-project-data";
 import { useCurrentUser } from "@/lib/ui/use-shell-data";
 import { DashboardDetailView } from "@/components/tablescope/project/detail-views";
 import { AIDashboardSuggestionsModal } from "@/components/tablescope/project/ai-dashboard-suggestions-modal";
 import { PRESET_LABELS } from "@/components/tablescope/project/itsm-dashboards/ItsmDashboardContent";
+import { DashboardOverview } from "@/components/tablescope/project/dashboard-templates/dashboard-overview";
+import { DashboardTemplateDialog } from "@/components/tablescope/project/dashboard-templates/template-dialog";
+import {
+  groupDashboards,
+  virtualItsmDashboardConfig,
+} from "@/components/tablescope/project/dashboard-templates/groups";
 import { useToasts, ToastViewport } from "@/components/ui/toast";
 import { createHomePin } from "@/lib/api/home-pins";
 import type { WidgetConfig } from "@/components/dashboard/types";
-
-function isPublished(d: Dashboard): boolean {
-  return d.status.toLowerCase() === "published";
-}
-
-function Thumb({ dashboard }: { dashboard: Dashboard }) {
-  const accent = accentFor(String(dashboard.id));
-  const heights = [40, 64, 52, 72, 48, 80, 56, 68];
-  return (
-    <div className="flex h-32 items-end gap-1.5 rounded-md bg-bg-secondary p-4">
-      {heights.map((h, i) => (
-        <div
-          key={i}
-          className="flex-1 rounded-sm"
-          style={{
-            height: `${h}%`,
-            background: i % 2 === 0 ? accent : `${accent}55`,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
 
 export function DashboardsScreen({
   projectId,
@@ -72,9 +48,9 @@ export function DashboardsScreen({
       tenant_id: 0,
       owner_id: null,
       name: label,
-      description: null,
+      description: "Live operational metrics, trends and supporting drilldown detail.",
       status: "published",
-      config: { itsm_dashboard: key },
+      config: virtualItsmDashboardConfig(key),
       ai_generated: true,
       view_count: 0,
       created_at: now,
@@ -82,11 +58,13 @@ export function DashboardsScreen({
     }));
   }, [currentUser, projectId]);
   const rows = useMemo(() => [...itsmPresets, ...realRows], [itsmPresets, realRows]);
+  const groups = useMemo(() => groupDashboards(rows), [rows]);
   const [viewingId, setViewingId] = useState<number | null>(
     dashboardId ? Number(dashboardId) : null,
   );
   const viewing = rows.find((d) => d.id === viewingId) ?? null;
   const [aiOpen, setAiOpen] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(false);
   const { toasts, push, dismiss } = useToasts();
 
   // Id of a freshly-created dashboard that has NOT yet been explicitly saved.
@@ -203,10 +181,13 @@ export function DashboardsScreen({
     };
   }, [projectId]);
 
-  const published = realRows.filter(isPublished).length;
-  const aiCount = realRows.filter((d) => d.ai_generated).length;
-  const totalViews = realRows.reduce((a, d) => a + (d.view_count ?? 0), 0);
-  const totalWidgets = realRows.reduce((a, d) => a + widgetCount(d.config), 0);
+  const viewingGroup = viewing
+    ? groups.find((group) => group.dashboards.some((dashboard) => dashboard.id === viewing.id))
+    : undefined;
+  const existingTemplateIds = useMemo(
+    () => new Set(groups.map((group) => group.templateId).filter((id): id is string => Boolean(id))),
+    [groups],
+  );
 
   return (
     <ProjectShell
@@ -220,13 +201,9 @@ export function DashboardsScreen({
               <IconSparkles size={14} />
               Generate with AI
             </Button>
-            <Button
-              variant="primary"
-              onClick={() => createMutation.mutate()}
-              disabled={createMutation.isPending}
-            >
+            <Button variant="primary" onClick={() => setTemplateOpen(true)}>
               <IconPlus size={14} />
-              {createMutation.isPending ? "Creating…" : "New dashboard"}
+              Add dashboard template
             </Button>
           </>
         ) : null
@@ -241,124 +218,19 @@ export function DashboardsScreen({
           onBack={handleCloseViewer}
           onPersisted={handlePersisted}
           onPinWidget={handlePinWidget}
+          dashboardGroupName={viewingGroup?.name}
+          dashboardGroup={viewingGroup?.dashboards}
+          onSelectDashboard={setViewingId}
         />
       ) : (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatTile
-            label="Total dashboards"
-            value={realRows.length}
-            hint={`${published} published`}
-          />
-          <StatTile
-            label="AI-generated"
-            value={aiCount}
-            hint={`${realRows.length - aiCount} manual`}
-          />
-          <StatTile label="Total views" value={totalViews} />
-          <StatTile
-            label="Widgets total"
-            value={totalWidgets}
-            hint="across all dashboards"
-          />
-        </div>
-
-        {isLoading ? (
-          <div className="py-16 text-center text-small text-ink-tertiary">
-            Loading dashboards…
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {rows.map((d) => {
-              const pub = isPublished(d);
-              return (
-                <Card
-                  key={d.id}
-                  onClick={() => setViewingId(d.id)}
-                  className="flex cursor-pointer flex-col overflow-hidden transition-colors hover:border-line-secondary"
-                >
-                  <div className="p-3">
-                    <Thumb dashboard={d} />
-                  </div>
-                  <div className="flex-1 px-4 pb-3">
-                    <div className="text-h3 text-ink-primary">{d.name}</div>
-                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                      <Badge tone={pub ? "success" : "outline"}>
-                        {pub ? "Published" : "Draft"}
-                      </Badge>
-                      <Badge tone={d.ai_generated ? "ai" : "neutral"}>
-                        {d.ai_generated ? "AI" : "Manual"}
-                      </Badge>
-                      <span className="text-small text-ink-tertiary">
-                        {d.view_count} views
-                      </span>
-                      <span className="text-small text-ink-tertiary">
-                        {widgetCount(d.config)} widgets
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between border-t border-line-tertiary px-4 py-2.5">
-                    <span className="text-small text-ink-tertiary">
-                      Updated {timeAgo(d.updated_at)}
-                    </span>
-                    <div className="flex items-center gap-3 text-[12px] font-medium text-brand-700">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setViewingId(d.id);
-                        }}
-                        className="hover:underline"
-                      >
-                        {pub ? "Share" : "Publish"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setViewingId(d.id);
-                        }}
-                        className="hover:underline"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        title="Delete dashboard"
-                        aria-label={`Delete dashboard ${d.name}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteDashboard(d);
-                        }}
-                        className="text-ink-tertiary hover:text-red-600"
-                      >
-                        <IconTrash size={15} />
-                      </button>
-                    </div>
-                  </div>
-                </Card>
-              );
-            })}
-
-            <button
-              type="button"
-              onClick={() => createMutation.mutate()}
-              disabled={createMutation.isPending}
-              className={cn(
-                "flex min-h-[220px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line-secondary bg-bg-primary text-center hover:border-brand-500 hover:bg-brand-50/40 disabled:opacity-60",
-              )}
-            >
-              <IconLayoutDashboard size={22} className="text-ink-tertiary" />
-              <span className="text-h3 text-ink-secondary">
-                {createMutation.isPending ? "Creating…" : "New dashboard"}
-              </span>
-              <span className="max-w-[200px] text-small text-ink-tertiary">
-                Build manually or let AI generate from your queries
-              </span>
-            </button>
-          </div>
-        )}
-      </div>
+        <DashboardOverview
+          groups={groups}
+          loading={isLoading}
+          onOpenDashboard={setViewingId}
+          onAddTemplate={() => setTemplateOpen(true)}
+          onNewDashboard={() => createMutation.mutate()}
+          onDeleteDashboard={handleDeleteDashboard}
+        />
       )}
       <AIDashboardSuggestionsModal
         open={aiOpen}
@@ -370,6 +242,24 @@ export function DashboardsScreen({
             queryKey: ["project", projectId, "dashboards"],
           });
           setViewingId(id);
+        }}
+        notify={push}
+      />
+      <DashboardTemplateDialog
+        open={templateOpen}
+        projectId={projectId}
+        savedQueries={queries ?? []}
+        existingTemplateIds={existingTemplateIds}
+        onClose={() => setTemplateOpen(false)}
+        onCreated={async (ids) => {
+          setTemplateOpen(false);
+          await queryClient.invalidateQueries({ queryKey: ["project", projectId, "dashboards"] });
+          if (ids[0]) setViewingId(ids[0]);
+        }}
+        onOpenExisting={(templateId) => {
+          const group = groups.find((item) => item.templateId === templateId);
+          setTemplateOpen(false);
+          if (group?.dashboards[0]) setViewingId(group.dashboards[0].id);
         }}
         notify={push}
       />
