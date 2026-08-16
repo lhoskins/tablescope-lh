@@ -328,13 +328,13 @@ async def approve_template_binding(project_id: int, binding_id: int, body: Bindi
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     existing = list(await session.scalars(select(DashboardTemplateQuery).where(DashboardTemplateQuery.binding_id == binding.id)))
     query_version = max((item.version for item in existing), default=0) + 1
-    for item in existing:
-        if item.status == "approved":
-            item.status = "superseded"
+    for existing_query in existing:
+        if existing_query.status == "approved":
+            existing_query.status = "superseded"
     created: list[DashboardTemplateQuery] = []
-    for item in compiled:
-        saved = await find_or_create_saved_query(session, project_id=project_id, title=f"{binding.template_name} · {item.query_key} · v{query_version}", sql=item.compiled_sql, user_id=context.user_id, allowed_tables=list(binding.source_mapping.values()))
-        query = DashboardTemplateQuery(tenant_id=context.tenant_id, project_id=project_id, binding_id=binding.id, saved_query_id=saved.id, query_key=item.query_key, status="approved", version=query_version, sql_template=item.sql_template, compiled_sql=item.compiled_sql, dashboard_keys=item.dashboard_keys, metric_keys=item.metric_keys, lineage=item.lineage, validation={"valid": True, "validatedAt": datetime.now(UTC).isoformat()})
+    for compiled_query in compiled:
+        saved = await find_or_create_saved_query(session, project_id=project_id, title=f"{binding.template_name} · {compiled_query.query_key} · v{query_version}", sql=compiled_query.compiled_sql, user_id=context.user_id, allowed_tables=list(binding.source_mapping.values()))
+        query = DashboardTemplateQuery(tenant_id=context.tenant_id, project_id=project_id, binding_id=binding.id, saved_query_id=saved.id, query_key=compiled_query.query_key, status="approved", version=query_version, sql_template=compiled_query.sql_template, compiled_sql=compiled_query.compiled_sql, dashboard_keys=compiled_query.dashboard_keys, metric_keys=compiled_query.metric_keys, lineage=compiled_query.lineage, validation={"valid": True, "validatedAt": datetime.now(UTC).isoformat()})
         session.add(query)
         created.append(query)
     for dashboard_id in body.dashboard_ids:

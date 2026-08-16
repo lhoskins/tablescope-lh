@@ -563,13 +563,14 @@ async def apply_dashboard_design(
     else:
         if req.dashboard_id is None:
             raise HTTPException(status_code=422, detail="dashboard_id is required")
-        dashboard = await session.get(Dashboard, req.dashboard_id)
+        loaded_dashboard = await session.get(Dashboard, req.dashboard_id)
         if (
-            dashboard is None
-            or dashboard.project_id != project.id
-            or dashboard.tenant_id != context.tenant_id
+            loaded_dashboard is None
+            or loaded_dashboard.project_id != project.id
+            or loaded_dashboard.tenant_id != context.tenant_id
         ):
             raise HTTPException(status_code=404, detail="Dashboard not found")
+        dashboard = loaded_dashboard
         existing = list((dashboard.config or {}).get("widgets") or [])
         history = list((dashboard.config or {}).get("aiDesignHistory") or [])
         history.append(_history_entry(dashboard, req.prompt, req.mode))
