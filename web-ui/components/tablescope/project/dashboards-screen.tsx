@@ -254,7 +254,6 @@ export function DashboardsScreen({
         open={templateOpen}
         projectId={projectId}
         savedQueries={queries ?? []}
-        datasources={sources ?? []}
         existingTemplateIds={existingTemplateIds}
         onClose={() => setTemplateOpen(false)}
         onCreated={async (ids) => {

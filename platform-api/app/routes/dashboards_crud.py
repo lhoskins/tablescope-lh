@@ -162,6 +162,11 @@ async def update_dashboard(
     if body.description is not None:
         dashboard.description = body.description
     if body.config is not None:
+        if body.config.get("presentation") != "operational_insight":
+            raise HTTPException(
+                status_code=422,
+                detail="Dashboards must use the operational_insight presentation.",
+            )
         dashboard.config = body.config
     if body.status is not None:
         dashboard.status = body.status

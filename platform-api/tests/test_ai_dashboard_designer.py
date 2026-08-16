@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.models.file_source_meta import FileSourceMeta
 from app.routes.ai_proxy_dashboard_designer import (
     _chart_recommendations,
+    _infer_domain,
     _missing_concepts,
     _support_status,
     _validated_chart_recommendations,
@@ -33,6 +34,7 @@ def test_missing_concepts_only_reports_requested_unsupported_fields() -> None:
     missing = _missing_concepts(
         "Show backlog, site performance, resolution SLA and assignment group",
         columns,
+        "itsm",
     )
 
     assert "backlog state" not in missing
@@ -90,3 +92,37 @@ def test_support_status_has_three_explicit_outcomes() -> None:
     assert _support_status(sources=[source], suggestion=valid, missing=[]) == "fully_supported"
     assert _support_status(sources=[source], suggestion=partial, missing=[]) == "partially_supported"
     assert _support_status(sources=[source], suggestion=valid, missing=["SLA performance"]) == "partially_supported"
+
+
+def test_infer_domain_prefers_real_column_matches_over_prompt_words() -> None:
+    finance_columns = [
+        {"name": "revenue", "type": "decimal"},
+        {"name": "expense", "type": "decimal"},
+        {"name": "date", "type": "date"},
+    ]
+    assert _infer_domain("Show monthly revenue and gross margin", finance_columns) == "finance"
+
+    manufacturing_columns = [
+        {"name": "oee", "type": "decimal"},
+        {"name": "downtime_hours", "type": "decimal"},
+        {"name": "units_produced", "type": "integer"},
+    ]
+    assert _infer_domain("How is my plant performing?", manufacturing_columns) == "manufacturing"
+
+    # Unmatched prompts/columns fall back to generic, not a forced ITSM label.
+    assert _infer_domain("Interesting data", [{"name": "foo", "type": "string"}]) == "generic"
+
+
+def test_missing_concepts_respects_inferred_domain() -> None:
+    finance_columns = [
+        {"name": "revenue", "type": "decimal"},
+        {"name": "date", "type": "date"},
+    ]
+    missing = _missing_concepts(
+        "Show revenue, expense, and gross margin",
+        finance_columns,
+        "finance",
+    )
+    assert "revenue" not in missing
+    assert "expense" in missing
+    assert "gross margin" in missing

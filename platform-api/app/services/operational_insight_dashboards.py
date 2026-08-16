@@ -102,6 +102,11 @@ def operational_insight_config(
         widgets.append(next_widget)
 
     metadata = dict(result.get("dashboardTemplate") or {})
+    # Legacy per-template batch bindings are no longer created; strip any stale
+    # binding identifiers so dashboards fall back to the Operational Insight data path.
+    metadata.pop("bindingId", None)
+    metadata.pop("templateBindingId", None)
+    result.pop("templateBindingId", None)
     parameters = dict(metadata.get("parameters") or {})
     parameters.setdefault("dimensionLabel", "Dimension")
     parameters.setdefault("dimensionField", "dimension")

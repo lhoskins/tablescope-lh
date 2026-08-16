@@ -65,29 +65,115 @@ class DashboardDesignApplyRequest(BaseModel):
     suggestion: dict[str, Any]
 
 
-_CONCEPT_FIELDS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
-    "resolution time": (
-        ("resolution", "resolve", "mttr", "mean restore", "time to close"),
-        ("resolvedat", "closedat", "resolutionhours", "durationhours", "mttr"),
-    ),
-    "SLA performance": (
-        ("sla", "breach", "service level"),
-        ("slamet", "slabreached", "breached", "breachtime", "slatarget"),
-    ),
-    "backlog state": (
-        ("backlog", "open incident", "unresolved"),
-        ("state", "status", "active", "closedat", "resolvedat"),
-    ),
-    "priority": (("priority", "severity", "critical"), ("priority", "severity")),
-    "category": (("category", "type", "classification"), ("category", "subcategory", "type")),
-    "assignment group": (
-        ("assignment group", "team", "resolver group"),
-        ("assignmentgroup", "team", "resolvergroup"),
-    ),
-    "site or region": (
-        ("site", "region", "location", "plant"),
-        ("site", "region", "location", "plant"),
-    ),
+_DomainConcepts = dict[str, dict[str, tuple[tuple[str, ...], tuple[str, ...]]]]
+
+_DOMAIN_CONCEPTS: _DomainConcepts = {
+    "itsm": {
+        "resolution time": (
+            ("resolution", "resolve", "mttr", "mean restore", "time to close"),
+            ("resolvedat", "closedat", "resolutionhours", "durationhours", "mttr"),
+        ),
+        "SLA performance": (
+            ("sla", "breach", "service level"),
+            ("slamet", "slabreached", "breached", "breachtime", "slatarget"),
+        ),
+        "backlog state": (
+            ("backlog", "open incident", "unresolved"),
+            ("state", "status", "active", "closedat", "resolvedat"),
+        ),
+        "priority": (("priority", "severity", "critical"), ("priority", "severity")),
+        "category": (("category", "type", "classification"), ("category", "subcategory", "type")),
+        "assignment group": (
+            ("assignment group", "team", "resolver group"),
+            ("assignmentgroup", "team", "resolvergroup"),
+        ),
+        "site or region": (
+            ("site", "region", "location", "plant"),
+            ("site", "region", "location", "plant"),
+        ),
+    },
+    "finance": {
+        "revenue": (
+            ("revenue", "sales", "income", "top line", "turnover"),
+            ("revenue", "sales", "salesamount", "income", "amount", "turnover"),
+        ),
+        "expense": (
+            ("expense", "cost", "spend", "expenditure", "opex"),
+            ("expense", "cost", "spend", "expenditure", "costamount", "opex"),
+        ),
+        "gross margin": (
+            ("gross margin", "margin", "profitability", "gross profit"),
+            ("grossmargin", "grossprofit", "margin", "profit", "profitability"),
+        ),
+        "site or region": (
+            ("site", "region", "location", "plant", "business unit"),
+            ("site", "region", "location", "plant", "businessunit", "costcenter"),
+        ),
+    },
+    "manufacturing": {
+        "production output": (
+            ("production", "output", "units produced", "throughput", "yield"),
+            ("unitsproduced", "output", "quantity", "units", "throughput", "yield"),
+        ),
+        "OEE": (
+            ("oee", "overall equipment effectiveness", "equipment effectiveness"),
+            ("oee", "effectiveness", "equipmenteffectiveness"),
+        ),
+        "downtime": (
+            ("downtime", "downtime hours", "unplanned downtime"),
+            ("downtime", "downtimehours", "unplanneddowntime"),
+        ),
+        "site or region": (
+            ("site", "region", "location", "plant"),
+            ("site", "region", "location", "plant"),
+        ),
+    },
+    "sales": {
+        "revenue": (
+            ("revenue", "sales", "bookings", "closed won"),
+            ("revenue", "salesamount", "amount", "booking", "closedwon"),
+        ),
+        "pipeline": (
+            ("pipeline", "pipeline amount", "opportunities", "open deals"),
+            ("pipelineamount", "opportunityamount", "pipeline", "opportunities"),
+        ),
+        "win rate": (
+            ("win rate", "close rate", "conversion rate"),
+            ("winrate", "status", "won", "closedwon", "conversionrate"),
+        ),
+        "site or region": (
+            ("site", "region", "location", "territory"),
+            ("site", "region", "location", "territory"),
+        ),
+    },
+    "hr": {
+        "headcount": (
+            ("headcount", "employees", "workforce", "staff"),
+            ("headcount", "employeeid", "staff", "employee", "workforce"),
+        ),
+        "turnover": (
+            ("turnover", "attrition", "churn", "retention"),
+            ("turnover", "attrition", "churn", "retention", "terminated"),
+        ),
+        "time to fill": (
+            ("time to fill", "days to fill", "time to hire", "hiring speed"),
+            ("timetofill", "timetofilldays", "daystofill", "hiringdays", "timetohire"),
+        ),
+        "site or region": (
+            ("site", "region", "location", "department"),
+            ("site", "region", "location", "department", "costcenter"),
+        ),
+    },
+    "generic": {},
+}
+
+_DOMAIN_NARRATIVES: dict[str, str] = {
+    "itsm": "ITSM incidents, service requests, SLA performance, and backlog management.",
+    "finance": "Finance revenue, expense, gross margin, and profitability analysis.",
+    "manufacturing": "Manufacturing production output, OEE, and downtime analysis.",
+    "sales": "Sales revenue, pipeline, and win-rate analysis.",
+    "hr": "HR workforce headcount, turnover, and time-to-fill analysis.",
+    "generic": "Operational metrics based on the available project data.",
 }
 
 
@@ -109,16 +195,54 @@ def _source_columns(source: FileSourceMeta) -> list[dict[str, str]]:
     return columns
 
 
-def _missing_concepts(prompt: str, columns: list[dict[str, str]]) -> list[str]:
+def _concept_supported(
+    field_terms: tuple[str, ...], available: set[str]
+) -> bool:
+    return any(
+        any(
+            _normal(candidate) in field or field in _normal(candidate)
+            for field in available
+        )
+        for candidate in field_terms
+    )
+
+
+def _infer_domain(prompt: str, columns: list[dict[str, str]]) -> str:
+    """Pick the best matching domain from column names and prompt terms.
+
+    Column matches are weighted more heavily than prompt keywords so the
+    domain reflects real data, not just a user's wording. Ties or low scores
+    fall back to the generic domain.
+    """
+    normalized_prompt = prompt.lower()
+    available = {_normal(column["name"]) for column in columns}
+    scores: dict[str, int] = {}
+    for domain, concepts in _DOMAIN_CONCEPTS.items():
+        if domain == "generic":
+            continue
+        score = 0
+        for _label, (request_terms, field_terms) in concepts.items():
+            if _concept_supported(field_terms, available):
+                score += 2
+            if any(term in normalized_prompt for term in request_terms):
+                score += 1
+        scores[domain] = score
+    if not scores:
+        return "generic"
+    best = max(scores, key=scores.get)
+    return best if scores[best] > 0 else "generic"
+
+
+def _missing_concepts(
+    prompt: str, columns: list[dict[str, str]], domain: str
+) -> list[str]:
     normalized_prompt = prompt.lower()
     available = {_normal(column["name"]) for column in columns}
     missing: list[str] = []
-    for label, (request_terms, field_terms) in _CONCEPT_FIELDS.items():
+    concepts = _DOMAIN_CONCEPTS.get(domain, {})
+    for label, (request_terms, field_terms) in concepts.items():
         requested = any(term in normalized_prompt for term in request_terms)
-        supported = any(
-            any(_normal(candidate) in field or field in _normal(candidate) for field in available)
-            for candidate in field_terms
-        )
+        supported = _concept_supported(field_terms, available)
         if requested and columns and not supported:
             missing.append(label)
     return missing
@@ -252,18 +376,20 @@ def _questions(req: DashboardDesignRequest) -> list[dict[str, Any]]:
     ]
 
 
-def _ai_prompt(req: DashboardDesignRequest) -> str:
+def _ai_prompt(req: DashboardDesignRequest, domain: str = "generic") -> str:
     scope = {
         "create": "Design one complete dashboard.",
         "edit_dashboard": "Redesign the existing dashboard according to the request.",
         "add_insight": "Design only one additional KPI card or chart. Do not redesign the dashboard.",
         "edit_insight": "Design one replacement for the selected dashboard insight.",
     }[req.mode]
+    narrative = _DOMAIN_NARRATIVES.get(domain, _DOMAIN_NARRATIVES["generic"])
     return " ".join(
         [
             scope,
             req.prompt.strip(),
-            "Use the Tablescope ServiceNow Operational Insight presentation.",
+            "Use the Tablescope Operational Insight presentation.",
+            f"Domain context: {narrative}",
             "Choose charts only when the available data shape supports them.",
             "Use compact KPI cards with correct units and prior-period direction when supported.",
             "Ground every calculation in governed project data; never invent fields or values.",
@@ -312,10 +438,11 @@ async def review_dashboard_design(
             "suggestion": None,
         }
 
+    domain = _infer_domain(req.prompt, columns)
     result = await ai_suggest_dashboards(
         AISuggestDashboardsRequest(
             project_id=req.project_id,
-            prompt=_ai_prompt(req),
+            prompt=_ai_prompt(req, domain=domain),
             audience=req.audience,
             desired_count=3,
         ),
@@ -330,7 +457,7 @@ async def review_dashboard_design(
         ),
         None,
     )
-    missing = _missing_concepts(req.prompt, columns)
+    missing = _missing_concepts(req.prompt, columns, domain)
     support = _support_status(sources=sources, suggestion=suggestion, missing=missing)
     if support == "not_supported" and not missing:
         missing = [
@@ -358,6 +485,7 @@ async def review_dashboard_design(
         "chartRecommendations": _validated_chart_recommendations(columns, suggestion),
         "sources": source_profiles,
         "suggestion": suggestion,
+        "domain": domain,
         "modelUsed": result.get("model_used", ""),
     }
 

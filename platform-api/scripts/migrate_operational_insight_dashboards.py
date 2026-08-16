@@ -40,7 +40,11 @@ def _is_complete(config: dict) -> bool:
 
 
 async def migrate(
-    slugs: list[str], *, tenant_ids: list[int] | None = None, apply: bool
+    slugs: list[str],
+    *,
+    tenant_ids: list[int] | None = None,
+    apply: bool,
+    all_tenants: bool = False,
 ) -> dict:
     tenant_ids = tenant_ids or []
     numeric_slugs = [int(value) for value in slugs if value.isdigit()]
@@ -55,19 +59,26 @@ async def migrate(
         "duplicateGroupsRemoved": 0,
     }
     async with SessionLocal() as session:
-        clauses = []
-        if requested_ids:
-            clauses.append(Tenant.id.in_(requested_ids))
-        if requested_slugs:
-            clauses.append(Tenant.slug.in_(requested_slugs))
-        if not clauses:
-            requested_slugs = ["simplicit", "scaitis"]
-            clauses.append(Tenant.slug.in_(requested_slugs))
-        tenants = list(
-            await session.scalars(
-                select(Tenant).where(or_(*clauses), Tenant.is_active.is_(True))
+        if all_tenants:
+            tenants = list(
+                await session.scalars(
+                    select(Tenant).where(Tenant.is_active.is_(True))
+                )
             )
-        )
+        else:
+            clauses = []
+            if requested_ids:
+                clauses.append(Tenant.id.in_(requested_ids))
+            if requested_slugs:
+                clauses.append(Tenant.slug.in_(requested_slugs))
+            if not clauses:
+                requested_slugs = ["simplicit", "scaitis"]
+                clauses.append(Tenant.slug.in_(requested_slugs))
+            tenants = list(
+                await session.scalars(
+                    select(Tenant).where(or_(*clauses), Tenant.is_active.is_(True))
+                )
+            )
         found_ids = {tenant.id for tenant in tenants}
         found_slugs = {tenant.slug for tenant in tenants}
         summary["missingTenantIds"] = sorted(set(requested_ids) - found_ids)
@@ -166,6 +177,12 @@ def main() -> None:
         default=[],
         help="Explicit numeric tenant ID; may be repeated",
     )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        dest="all_tenants",
+        help="Migrate every active tenant",
+    )
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     print(
@@ -175,6 +192,7 @@ def main() -> None:
                     args.tenants,
                     tenant_ids=args.tenant_ids,
                     apply=args.apply,
+                    all_tenants=args.all_tenants,
                 )
             ),
             indent=2,

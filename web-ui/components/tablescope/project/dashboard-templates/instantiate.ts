@@ -5,38 +5,34 @@ import type {
   DashboardTemplateMetadata,
   DashboardTemplateParameters,
   OperationalInsightWidgetConfig,
-  TemplateBindingDraft,
 } from "./types";
 
-interface SuggestionWidget {
-  title?: string;
-  businessQuestion?: string;
-  sql?: string;
-}
-
-interface DashboardSuggestion {
-  id: string;
-  title: string;
-  description?: string;
-  businessPurpose?: string;
-  audience?: string;
-  widgets?: SuggestionWidget[];
-  kpis?: string[];
-  dataSources?: string[];
-  knowledgeGraphContext?: {
-    opportunities?: string[];
-    gaps?: string[];
-    risks?: string[];
+interface ReviewResponse {
+  supportStatus: "fully_supported" | "partially_supported" | "not_supported";
+  supportSummary: string;
+  missingRequirements?: string[];
+  suggestion: {
+    id: string;
+    title?: string;
+    description?: string;
+    businessPurpose?: string;
+    widgets?: Array<{
+      title?: string;
+      businessQuestion?: string;
+      status?: string;
+      sql?: string;
+    }>;
+    knowledgeGraphContext?: {
+      opportunities?: string[];
+      gaps?: string[];
+      risks?: string[];
+    };
   };
-  savePayload?: Record<string, unknown>;
 }
 
-interface SuggestionResponse {
-  suggestions: DashboardSuggestion[];
-}
-
-interface SaveSuggestionResponse {
+interface ApplyResponse {
   dashboard_id: number;
+  dashboard_name: string;
 }
 
 export interface InstantiateTemplateRequest {
@@ -44,21 +40,21 @@ export interface InstantiateTemplateRequest {
   template: DashboardTemplateDefinition;
   groupName: string;
   parameters: DashboardTemplateParameters;
-  binding?: TemplateBindingDraft;
   onProgress?: (completed: number, total: number, dashboardName: string) => void;
 }
 
 function parameterPrompt(parameters: DashboardTemplateParameters): string {
-  const values = parameters.valueSource === "manual"
-    ? `Available ${parameters.dimensionLabel} values: ${(parameters.manualValues ?? []).join(", ")}.`
-    : `Use query "${parameters.queryName ?? parameters.queryId ?? "selected query"}" to supply ${parameters.dimensionLabel} values.`;
+  const values =
+    parameters.valueSource === "manual"
+      ? `Available ${parameters.dimensionLabel} values: ${(parameters.manualValues ?? []).join(", ")}.`
+      : `Use query "${parameters.queryName ?? parameters.queryId ?? "selected query"}" to supply ${parameters.dimensionLabel} values.`;
   return `${values} Default reporting period: ${parameters.defaultPeriod.replaceAll("_", " ")}.`;
 }
 
 function operationalWidgets(
   dashboardName: string,
   prompt: string,
-  suggestion: DashboardSuggestion,
+  suggestion: ReviewResponse["suggestion"],
 ): OperationalInsightWidgetConfig[] {
   const context = suggestion.knowledgeGraphContext;
   const opportunities = [
@@ -75,7 +71,10 @@ function operationalWidgets(
       editable: true,
       aiManaged: true,
       prompt: `Refresh the operational brief for ${dashboardName}. ${prompt}`,
-      summary: suggestion.businessPurpose || suggestion.description || `Operational view of ${dashboardName}.`,
+      summary:
+        suggestion.businessPurpose ||
+        suggestion.description ||
+        `Operational view of ${dashboardName}.`,
       items: context?.risks?.slice(0, 3) ?? [],
       updatedAt: now,
     },
@@ -86,7 +85,10 @@ function operationalWidgets(
       editable: true,
       aiManaged: true,
       prompt: `Refresh and prioritize improvement opportunities for ${dashboardName}. ${prompt}`,
-      items: opportunities.length ? opportunities : ["Analyze the latest governed data to identify the highest-impact opportunity."],
+      items:
+        opportunities.length
+          ? opportunities
+          : ["Analyze the latest governed data to identify the highest-impact opportunity."],
       updatedAt: now,
     },
   ];
@@ -96,7 +98,6 @@ async function generateDashboard(
   request: InstantiateTemplateRequest,
   dashboardIndex: number,
   dashboardGroupId: number,
-  bindingId: number,
 ): Promise<number> {
   const definition = request.template.dashboards[dashboardIndex];
   const prompt = [
@@ -106,29 +107,52 @@ async function generateDashboard(
     "Ground every metric and query in this project's available data. Do not invent columns or unsupported KPIs.",
     parameterPrompt(request.parameters),
   ].join(" ");
-  const suggestions = await apiClient.post<SuggestionResponse>(
-    "/api/ai/actions/suggest-dashboards",
+
+  const review = await apiClient.post<ReviewResponse>(
+    "/api/ai/actions/dashboard-designer/review",
     {
       project_id: Number(request.projectId),
       prompt,
+      mode: "create",
       audience: definition.audience,
-      desired_count: 3,
+      period: request.parameters.defaultPeriod,
+      dimension_label: request.parameters.dimensionLabel,
     },
   );
-  const suggestion = suggestions.suggestions?.[0];
-  if (!suggestion) throw new Error(`AI could not build ${definition.name} from the available project data.`);
-  const saved = await apiClient.post<SaveSuggestionResponse>(
-    "/api/ai/actions/save-dashboard-suggestion",
+
+  if (review.supportStatus === "not_supported") {
+    throw new Error(
+      review.missingRequirements?.[0] ??
+        review.supportSummary ??
+        `AI could not build ${definition.name} from the available project data.`,
+    );
+  }
+
+  const apply = await apiClient.post<ApplyResponse>(
+    "/api/ai/actions/dashboard-designer/apply",
     {
       project_id: Number(request.projectId),
-      suggestionId: suggestion.id,
-      suggestion: suggestion.savePayload ?? suggestion,
+      prompt,
+      mode: "create",
+      dashboard_group_id: dashboardGroupId,
+      support_status: review.supportStatus,
+      accept_partial: true,
+      suggestion: review.suggestion,
+      audience: definition.audience,
+      period: request.parameters.defaultPeriod,
+      dimension_label: request.parameters.dimensionLabel,
     },
   );
-  if (!saved.dashboard_id) throw new Error(`AI did not return a saved dashboard for ${definition.name}.`);
+
+  if (!apply.dashboard_id) {
+    throw new Error(`AI did not return a saved dashboard for ${definition.name}.`);
+  }
+
   const dashboard = await apiClient.get<Dashboard>(
-    `/api/projects/${request.projectId}/dashboards/${saved.dashboard_id}`,
+    `/api/projects/${request.projectId}/dashboards/${apply.dashboard_id}`,
   );
+
+  const existingMetadata = dashboard.config?.dashboardTemplate ?? {};
   const metadata: DashboardTemplateMetadata = {
     schemaVersion: 1,
     presentation: "operational_insight",
@@ -140,10 +164,11 @@ async function generateDashboard(
     dashboardKey: definition.key,
     dashboardIcon: definition.icon,
     parameters: request.parameters,
-    bindingId,
     dashboardGroupId,
+    ...(existingMetadata as Record<string, unknown>),
   };
-  await apiClient.put(`/api/projects/${request.projectId}/dashboards/${saved.dashboard_id}`, {
+
+  await apiClient.put(`/api/projects/${request.projectId}/dashboards/${apply.dashboard_id}`, {
     name: definition.name,
     description: definition.description,
     status: "published",
@@ -152,12 +177,12 @@ async function generateDashboard(
       ...dashboard.config,
       presentation: "operational_insight",
       dashboardGroupId,
-      templateBindingId: bindingId,
       dashboardTemplate: metadata,
-      operationalWidgets: operationalWidgets(definition.name, prompt, suggestion),
+      operationalWidgets: operationalWidgets(definition.name, prompt, review.suggestion),
     },
   });
-  return saved.dashboard_id;
+
+  return apply.dashboard_id;
 }
 
 export async function instantiateDashboardTemplate(
@@ -166,26 +191,41 @@ export async function instantiateDashboardTemplate(
   if (request.template.dashboards.some((dashboard) => dashboard.itsmPreset)) {
     throw new Error("This ServiceNow template is already available in the current project.");
   }
-  const mapping = request.binding;
-  if (!mapping?.validation.valid) throw new Error("Approve a valid datasource mapping before creating the template.");
+
   const created: number[] = [];
   let dashboardGroupId: number | undefined;
   try {
-    const group = await apiClient.post<{ id: number }>(`/api/projects/${request.projectId}/dashboard-groups`, { name: request.groupName, icon: request.template.icon, template_id: request.template.id, collapsed_default: true });
+    const group = await apiClient.post<{ id: number }>(
+      `/api/projects/${request.projectId}/dashboard-groups`,
+      {
+        name: request.groupName,
+        icon: request.template.icon,
+        template_id: request.template.id,
+        collapsed_default: true,
+      },
+    );
     dashboardGroupId = group.id;
-    const binding = await apiClient.post<{ id: number }>(`/api/projects/${request.projectId}/dashboard-template-bindings`, { template_id: request.template.id, template_name: request.template.name, group_key: `group:${group.id}`, dashboard_group_id: group.id, dimension_config: mapping.dimensionConfig, source_mapping: mapping.sourceMapping, field_mapping: mapping.fieldMapping, metric_manifest: mapping.metricManifest });
+
     for (let index = 0; index < request.template.dashboards.length; index += 1) {
-      const id = await generateDashboard(request, index, group.id, binding.id);
+      const id = await generateDashboard(request, index, group.id);
       created.push(id);
-      request.onProgress?.(index + 1, request.template.dashboards.length, request.template.dashboards[index].name);
+      request.onProgress?.(
+        index + 1,
+        request.template.dashboards.length,
+        request.template.dashboards[index].name,
+      );
     }
-    await apiClient.post(`/api/projects/${request.projectId}/dashboard-template-bindings/${binding.id}/approve`, { dashboard_ids: created, period: request.parameters.defaultPeriod });
+
     return created;
   } catch (error) {
     await Promise.allSettled(
       created.map((id) => apiClient.delete(`/api/projects/${request.projectId}/dashboards/${id}`)),
     );
-    if (dashboardGroupId) await apiClient.delete(`/api/projects/${request.projectId}/dashboard-groups/${dashboardGroupId}`).catch(() => undefined);
+    if (dashboardGroupId) {
+      await apiClient
+        .delete(`/api/projects/${request.projectId}/dashboard-groups/${dashboardGroupId}`)
+        .catch(() => undefined);
+    }
     throw error;
   }
 }
