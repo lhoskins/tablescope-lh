@@ -30,6 +30,7 @@ from . import (
     ai_proxy_ask_and_run,
     ai_proxy_dashboard,
     ai_proxy_dashboard_generate,
+    ai_proxy_dashboard_designer,
     ai_proxy_dashboard_save,
     ai_proxy_dashboard_suggest,
     ai_proxy_index,
@@ -86,6 +87,10 @@ from .ai_proxy_dashboard import (
 )
 from .ai_proxy_dashboard_generate import (
     ai_generate_and_save_dashboard,
+)
+from .ai_proxy_dashboard_designer import (
+    apply_dashboard_design,
+    review_dashboard_design,
 )
 from .ai_proxy_dashboard_save import (
     ai_save_dashboard_suggestion,
@@ -193,6 +198,7 @@ router.include_router(ai_proxy_permissions.router)
 router.include_router(ai_proxy_query_actions.router)
 router.include_router(ai_proxy_ask_and_run.router)
 router.include_router(ai_proxy_dashboard_generate.router)
+router.include_router(ai_proxy_dashboard_designer.router)
 router.include_router(ai_proxy_dashboard_suggest.router)
 router.include_router(ai_proxy_dashboard_save.router)
 
@@ -201,6 +207,7 @@ _FEATURE_MODULES = (
     ai_proxy_ask_and_run,
     ai_proxy_dashboard,
     ai_proxy_dashboard_generate,
+    ai_proxy_dashboard_designer,
     ai_proxy_dashboard_save,
     ai_proxy_dashboard_suggest,
     ai_proxy_index,
@@ -337,6 +344,7 @@ __all__ = [
     "ai_status",
     "ai_suggest_dashboards",
     "ask",
+    "apply_dashboard_design",
     "auto_create_scopes_from_queries",
     "check_permissions",
     "generate_relationships",
@@ -345,6 +353,7 @@ __all__ = [
     "index_document",
     "normalize_ai_generation_intent",
     "route_prompt",
+    "review_dashboard_design",
     "router",
     "suggest_dashboard",
 ]

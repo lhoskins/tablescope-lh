@@ -91,7 +91,7 @@ export function DashboardOverview({
 
       <div className="flex flex-wrap items-center justify-center gap-2 border-t border-line-tertiary pt-4">
         <Button variant="primary" onClick={onAddTemplate}><IconPlus size={14} />Add dashboard template</Button>
-        <Button variant="secondary" onClick={onNewDashboard}>Create custom dashboard</Button>
+        <Button variant="secondary" onClick={onNewDashboard}><IconPlus size={14} />Create dashboard with AI</Button>
         <Button variant="secondary" onClick={() => setCreating(true)}>Create dashboard group</Button>
       </div>
       {creating && <Card className="mx-auto flex max-w-xl gap-2 p-3"><input autoFocus value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="Group or header name" className="h-9 flex-1 rounded border px-3" /><Button variant="primary" onClick={() => { if (groupName.trim()) onCreateGroup(groupName.trim()); setGroupName(""); setCreating(false); }}>Create</Button></Card>}
@@ -119,7 +119,7 @@ function DashboardCard({
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           <Badge tone={published ? "success" : "outline"}>{published ? "Live" : "Draft"}</Badge>
           {dashboard.ai_generated && <Badge tone="ai">AI</Badge>}
-          {count !== undefined && <span className="text-[10px] text-ink-tertiary">{count} widgets</span>}
+          {count !== undefined && <span className="text-[10px] text-ink-tertiary">{count} insight{count === 1 ? "" : "s"}</span>}
         </div>
         <div className="mt-2 text-[10px] text-ink-tertiary">Updated {timeAgo(dashboard.updated_at)}</div>
       </div>

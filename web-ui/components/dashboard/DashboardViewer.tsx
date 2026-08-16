@@ -40,11 +40,17 @@ import { WidgetConfigPanel } from "./WidgetConfigPanel";
 import { FilterBar } from "./FilterBar";
 import { DateRangeControl } from "./DateRangeControl";
 import { DrilldownPanel, type DrilldownState } from "./DrilldownPanel";
-import { buildRuntimeWidgetFilters } from "@/lib/dashboard/runtimeFilters";import { SavedQuery } from "./DashboardViewer/saved-query";
+import { buildRuntimeWidgetFilters } from "@/lib/dashboard/runtimeFilters";
+import { SavedQuery } from "./DashboardViewer/saved-query";
 import { Props } from "./DashboardViewer/props";
 import { resolveDatePreset, type DatePresetId } from "@/lib/dashboard/dateRange";
 import type { DashboardTemplateMetadata } from "@/components/tablescope/project/dashboard-templates/types";
 import { DimensionLabelEditor } from "@/components/tablescope/project/dashboard-templates/dimension-label-editor";
+import {
+  AIDashboardDesigner,
+  type DashboardDesignerMode,
+} from "@/components/tablescope/project/ai-dashboard-designer";
+import { ToastViewport, useToasts } from "@/components/ui/toast";
 
 function templateMetadata(dashboard: Dashboard): DashboardTemplateMetadata | undefined {
   const value = dashboard.config?.dashboardTemplate;
@@ -72,6 +78,7 @@ interface TemplateHydration { metrics: Record<string, { value: unknown; previous
 
 export function DashboardViewer({ dashboard, projectId, savedQueries, datasources, onBack, onPersisted, onPinWidget }: Props) {
   const queryClient = useQueryClient();
+  const { toasts, push, dismiss } = useToasts();
   const widgets = useMemo(() => dashboard.config?.widgets ?? [], [dashboard.config?.widgets]);
   const globalFilters = useMemo(() => dashboard.config?.globalFilters ?? [], [dashboard.config?.globalFilters]);
   const operational = dashboard.config?.presentation === "operational_insight";
@@ -84,6 +91,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
 
   const [widgetData, setWidgetData] = useState<Record<string, Array<Record<string, unknown>>>>({});
   const [showConfigPanel, setShowConfigPanel] = useState(false);
+  const [designerMode, setDesignerMode] = useState<DashboardDesignerMode | null>(null);
   const [dashboardStatus, setDashboardStatus] = useState(dashboard.status);
 
   // Ephemeral interaction state (not persisted): date range + cross-filters.
@@ -388,7 +396,11 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
 
   const handleEditWidget = (w: WidgetConfig) => {
     setEditingWidget(w);
-    setShowConfigPanel(true);
+    if (operational) {
+      setDesignerMode("edit_insight");
+    } else {
+      setShowConfigPanel(true);
+    }
   };
 
   const handleFiltersChange = (newFilters: DashboardFilter[]) => {
@@ -565,7 +577,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
           </div>
           <div className="flex items-center gap-2">
             <span className={`text-[10px] ${operational ? "text-ink-tertiary" : "text-slate-500"}`}>
-              {widgets.length} widget{widgets.length !== 1 ? "s" : ""}
+              {widgets.length} {operational ? `insight${widgets.length !== 1 ? "s" : ""}` : `widget${widgets.length !== 1 ? "s" : ""}`}
             </span>
             <div className={`h-4 w-px ${operational ? "bg-line-secondary" : "bg-slate-600"}`} />
             <button
@@ -582,12 +594,25 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
               <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
               Refresh
             </button>
+            {operational && (
+              <button
+                onClick={() => { setEditingWidget(null); setDesignerMode("edit_dashboard"); }}
+                className="flex items-center gap-1 rounded-md border border-line-secondary px-2.5 py-1 text-[10px] font-medium text-ink-secondary transition-colors hover:bg-bg-secondary"
+              >
+                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                Edit dashboard
+              </button>
+            )}
             <button
-              onClick={() => { setEditingWidget(null); setShowConfigPanel(true); }}
+              onClick={() => {
+                setEditingWidget(null);
+                if (operational) setDesignerMode("add_insight");
+                else setShowConfigPanel(true);
+              }}
               className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-[10px] font-bold text-white transition-colors ${operational ? "bg-brand-600 hover:bg-brand-700" : "bg-blue-500 hover:bg-blue-600"}`}
             >
               <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-              Add Widget
+              {operational ? "Add insight" : "Add Widget"}
             </button>
           </div>
         </div>
@@ -630,7 +655,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
       </div>
 
       {/* ── Widget Config Panel (slide-down) ──────────────────────── */}
-      {showConfigPanel && (
+      {showConfigPanel && !operational && (
         <div className={operational ? "mt-3" : "mx-4 mt-4"}>
           <WidgetConfigPanel
             projectId={projectId}
@@ -648,8 +673,9 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
         {widgets.length === 0 && !showConfigPanel ? (
           <div className={operational ? "flex flex-col items-center justify-center rounded-xl border border-dashed border-line-secondary bg-bg-primary py-20" : "flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-white py-20"}>
             <svg className="mb-3 h-12 w-12 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
-            <p className="text-sm font-semibold text-slate-600">No widgets yet</p>
-            <p className="mt-1 text-xs text-slate-400">Click &quot;+ Add Widget&quot; to start building your dashboard</p>
+            <p className="text-sm font-semibold text-slate-600">{operational ? "Describe the operational decisions you want to support" : "No widgets yet"}</p>
+            <p className="mt-1 text-xs text-slate-400">{operational ? "AI will select, validate and wire the appropriate KPI cards and charts." : "Click + Add Widget to start building your dashboard"}</p>
+            {operational && <button type="button" onClick={() => setDesignerMode("edit_dashboard")} className="mt-3 rounded-md bg-brand-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-brand-700">Design with AI</button>}
           </div>
         ) : widgets.length > 0 ? (
           <div ref={containerRef} className="w-full">
@@ -717,12 +743,14 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
                           <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" /></svg>
                         </button>
                       )}
-                      <button onClick={() => handleEditWidget(w)} title="Edit" className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors">
+                      <button onClick={() => handleEditWidget(w)} title={operational ? "Modify with AI" : "Edit"} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors">
                         <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                       </button>
-                      <button onClick={() => handleDeleteWidget(w.id)} title="Delete" className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
-                        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                      </button>
+                      {!operational && (
+                        <button onClick={() => handleDeleteWidget(w.id)} title="Delete" className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
+                      )}
                     </div>
                   </div>
                   {/* Chart */}
@@ -744,6 +772,25 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
       </div>
 
       <DrilldownPanel state={drilldown} onClose={() => setDrilldown((d) => ({ ...d, open: false }))} />
+      <AIDashboardDesigner
+        open={designerMode !== null}
+        projectId={String(projectId)}
+        mode={designerMode ?? "add_insight"}
+        dashboardId={dashboard.id}
+        targetInsightId={designerMode === "edit_insight" ? editingWidget?.id : undefined}
+        dashboardGroupId={template?.dashboardGroupId}
+        dashboardGroupName={template?.groupName}
+        initialPrompt={designerMode === "edit_insight" && editingWidget ? `Change “${editingWidget.title}” to show ` : ""}
+        onClose={() => { setDesignerMode(null); setEditingWidget(null); }}
+        onApplied={() => {
+          setDesignerMode(null);
+          setEditingWidget(null);
+          onPersisted?.();
+          void queryClient.invalidateQueries({ queryKey: ["project", String(projectId), "dashboards"] });
+        }}
+        notify={push}
+      />
+      <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </div>
   );
 }
