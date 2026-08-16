@@ -79,17 +79,33 @@ export function OperationalInsightWidgets({
     if (!sourceId || sourceId === targetId) return;
     const ordered = [...widgets].sort((a, b) => (a.layout?.position ?? 0) - (b.layout?.position ?? 0));
     const sourceIndex = ordered.findIndex((item) => item.id === sourceId);
-    const targetIndex = ordered.findIndex((item) => item.id === targetId);
+    const targetIndex = targetId === "__top__" ? 0 : ordered.findIndex((item) => item.id === targetId);
     if (sourceIndex < 0 || targetIndex < 0) return;
     const [source] = ordered.splice(sourceIndex, 1);
     ordered.splice(targetIndex, 0, source);
-    await persist(ordered.map((item, position) => ({ ...item, layout: { position, width: item.layout?.width ?? "standard" } })));
+    const next = ordered.map((item, position) => ({
+      ...item,
+      layout: {
+        position,
+        width: item.id === sourceId && targetId === "__top__" ? "wide" : (item.layout?.width ?? "standard"),
+      },
+    }));
+    await persist(next);
   };
   const resize = (id: string) => persist(widgets.map((item) => item.id === id ? { ...item, layout: { position: item.layout?.position ?? 0, width: item.layout?.width === "wide" ? "standard" : "wide" } } : item));
 
   return (
     <div className="mb-3">
       <div className="mb-2 flex justify-end"><Button variant="secondary" size="sm" onClick={() => setArranging((value) => !value)}><IconArrowsMove size={13} />{arranging ? "Done arranging" : "Arrange operational sections"}</Button></div>
+      {arranging && (
+        <div
+          onDragOver={(event) => { event.preventDefault(); }}
+          onDrop={(event) => { if (arranging) { event.preventDefault(); void reorder("__top__"); } }}
+          className="mb-3 flex h-14 items-center justify-center rounded-md border-2 border-dashed border-brand-300 bg-brand-50/30 text-small font-medium text-brand-700"
+        >
+          Drop here to make first and full width
+        </div>
+      )}
       <div className="grid grid-cols-12 gap-3">
       {[...widgets].sort((a, b) => (a.layout?.position ?? 0) - (b.layout?.position ?? 0)).map((widget) => (
         <Card key={widget.id} draggable={arranging} onDragStart={() => { dragged.current = widget.id; }} onDragOver={(event) => arranging && event.preventDefault()} onDrop={(event) => { if (arranging) { event.preventDefault(); void reorder(widget.id); } }} className={`${widget.layout?.width === "wide" ? "col-span-12" : "col-span-12 lg:col-span-6"} p-4 ${arranging ? "cursor-grab border-dashed" : ""}`}>

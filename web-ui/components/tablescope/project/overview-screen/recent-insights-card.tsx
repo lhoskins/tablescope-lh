@@ -50,10 +50,12 @@ export function RecentInsightsCard({
   projectId,
   insights,
   generatedAt,
+  hasData = true,
 }: {
   projectId: string;
   insights: Array<ProjectInsightCard & { category: string }>;
   generatedAt?: string;
+  hasData?: boolean;
 }) {
   return (
     <Card className="flex flex-col">
@@ -67,9 +69,11 @@ export function RecentInsightsCard({
         </Link>
       </div>
       <div className="flex-1 p-2">
-        {insights.length === 0 ? (
+        {!hasData || insights.length === 0 ? (
           <div className="px-2 py-8 text-center text-small text-ink-tertiary">
-            No insights yet. Ask anything or generate insights to see findings here.
+            {!hasData
+              ? "No project data yet. Connect a data source or upload documents to generate insights."
+              : "No insights yet. Ask anything or generate insights to see findings here."}
           </div>
         ) : (
           <ul className="space-y-1">

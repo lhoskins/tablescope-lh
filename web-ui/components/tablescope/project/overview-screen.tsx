@@ -347,6 +347,11 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
             projectId={projectId}
             insights={recentInsights}
             generatedAt={projectInsight?.generatedAt}
+            hasData={
+              sourceRows.length > 0 ||
+              queryRows.length > 0 ||
+              (project?.documentCount ?? 0) > 0
+            }
           />
           <AiConversationsCard projectId={projectId} />
           <QuickActionsCard
