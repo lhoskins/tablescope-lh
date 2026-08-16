@@ -113,7 +113,7 @@ _DOMAIN_CONCEPTS: _DomainConcepts = {
     "manufacturing": {
         "production output": (
             ("production", "output", "units produced", "throughput", "yield"),
-            ("unitsproduced", "output", "quantity", "units", "throughput", "yield"),
+            ("unitsproduced", "output", "quantity", "units", "throughput", "yield", "orderedqty", "receivedqty"),
         ),
         "OEE": (
             ("oee", "overall equipment effectiveness", "equipment effectiveness"),
@@ -123,9 +123,21 @@ _DOMAIN_CONCEPTS: _DomainConcepts = {
             ("downtime", "downtime hours", "unplanned downtime"),
             ("downtime", "downtimehours", "unplanneddowntime"),
         ),
+        "defect rate": (
+            ("defect", "defect rate", "defective", "quality", "inspection"),
+            ("defect", "defectqty", "defective", "quality", "inspection", "severity", "inspectiondate"),
+        ),
+        "supplier performance": (
+            ("supplier", "vendor", "purchase order", "supplier performance"),
+            ("supplierid", "vendorid", "purchaseorderid", "supplier", "vendor", "poid", "buyer"),
+        ),
+        "freight and delivery": (
+            ("freight", "delivery", "shipment", "shipping", "carrier"),
+            ("freight", "freightcost", "shipment", "deliverydate", "shipdate", "carrier", "mode"),
+        ),
         "site or region": (
             ("site", "region", "location", "plant"),
-            ("site", "region", "location", "plant"),
+            ("site", "region", "location", "plant", "destinationsite"),
         ),
     },
     "sales": {
@@ -210,27 +222,35 @@ def _concept_supported(
 def _infer_domain(prompt: str, columns: list[dict[str, str]]) -> str:
     """Pick the best matching domain from column names and prompt terms.
 
-    Column matches are weighted more heavily than prompt keywords so the
-    domain reflects real data, not just a user's wording. Ties or low scores
+    Column matches decide the domain first; prompt keywords are used only
+    as a tiebreaker or when no columns are available. Ties or empty scores
     fall back to the generic domain.
     """
     normalized_prompt = prompt.lower()
     available = {_normal(column["name"]) for column in columns}
-    scores: dict[str, int] = {}
+    column_scores: dict[str, int] = {}
+    prompt_scores: dict[str, int] = {}
     for domain, concepts in _DOMAIN_CONCEPTS.items():
         if domain == "generic":
             continue
-        score = 0
+        column_scores[domain] = 0
+        prompt_scores[domain] = 0
         for _label, (request_terms, field_terms) in concepts.items():
             if _concept_supported(field_terms, available):
-                score += 2
+                column_scores[domain] += 2
             if any(term in normalized_prompt for term in request_terms):
-                score += 1
-        scores[domain] = score
-    if not scores:
+                prompt_scores[domain] += 1
+    if not column_scores:
         return "generic"
-    best = max(scores, key=scores.get)
-    return best if scores[best] > 0 else "generic"
+    best_column_score = max(column_scores.values())
+    if best_column_score == 0:
+        return "generic"
+    best_domains = [d for d, s in column_scores.items() if s == best_column_score]
+    if len(best_domains) == 1:
+        return best_domains[0]
+    best_prompt_score = max(prompt_scores[d] for d in best_domains)
+    best_by_prompt = [d for d in best_domains if prompt_scores[d] == best_prompt_score]
+    return best_by_prompt[0]
 
 
 def _missing_concepts(
