@@ -21,17 +21,13 @@ from app.auth.rbac import Role, require_role
 from app.database import get_db
 from app.models.audit_event import AuditEvent
 from app.models.business_insight_result import BusinessInsightResult
-from app.models.database_data_source import DatabaseDataSource
-from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project, ProjectMember
-from app.models.project_asset import ProjectAsset
 from app.models.project_insight_acknowledgement import (
     ProjectInsightAcknowledgement,
 )
 from app.models.project_intelligence_snapshot import (
     ProjectIntelligenceSnapshot,
 )
-from app.models.saved_query import SavedQuery
 from app.models.user import User
 from app.schemas.project_insight import (
     AcknowledgeInsightRequest,
@@ -67,61 +63,6 @@ async def _require_project_access(
     if member is None:
         raise HTTPException(status_code=403, detail="No access to this project")
     return project
-
-
-async def _project_has_data(
-    session: AsyncSession, project: Project
-) -> bool:
-    """Return True when the project has at least one concrete data asset.
-
-    Reference-library documents alone do not count; they are shared across the
-    tenant and should not generate project-specific insights for an empty project.
-    """
-    file_count = await session.scalar(
-        select(select(FileSourceMeta.id).where(
-            FileSourceMeta.project_id == project.id,
-            FileSourceMeta.archived.is_(False),
-        ).exists())
-    )
-    if file_count:
-        return True
-    db_count = await session.scalar(
-        select(select(DatabaseDataSource.id).where(
-            DatabaseDataSource.project_id == project.id,
-            DatabaseDataSource.archived.is_(False),
-        ).exists())
-    )
-    if db_count:
-        return True
-    query_count = await session.scalar(
-        select(select(SavedQuery.id).where(
-            SavedQuery.project_id == project.id,
-            SavedQuery.is_archived.is_(False),
-        ).exists())
-    )
-    if query_count:
-        return True
-    asset_count = await session.scalar(
-        select(select(ProjectAsset.id).where(
-            ProjectAsset.project_id == project.id,
-        ).exists())
-    )
-    return bool(asset_count)
-
-
-async def _empty_project_insight(project: Project) -> ProjectInsightResponse:
-    now = datetime.now(UTC).isoformat()
-    return ProjectInsightResponse(
-        project={
-            "id": project.id,
-            "name": project.name,
-            "status": project.type or "Active",
-        },
-        generatedAt=now,
-        lastUpdatedAt=now,
-        stale=False,
-        aiAvailable=True,
-    )
 
 
 async def _get_snapshot(
@@ -186,9 +127,6 @@ async def get_project_insight(
 
     project = await _require_project_access(project_id, session, context)
 
-    if not await _project_has_data(session, project):
-        return await _empty_project_insight(project)
-
     if not refresh:
         snap = await _get_snapshot(session, context, project_id)
         if snap is not None:
@@ -237,9 +175,6 @@ async def refresh_project_insight(
     until the rebuild completes.
     """
     project = await _require_project_access(project_id, session, context)
-
-    if not await _project_has_data(session, project):
-        return await _empty_project_insight(project)
 
     now_iso = datetime.now(UTC).isoformat()
 
