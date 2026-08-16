@@ -99,11 +99,11 @@ class TeiidQueryExecutor:
                 drill_target_column = _validate_identifier(scope.target_column, kind="target column")
 
         if drill_target_table is not None and drill_target_column is not None:
-            sql = f'SELECT * FROM "{drill_target_table}" WHERE "{drill_target_column}" = $1 LIMIT $2'
-            params: tuple[Any, ...] = (value, limit)
+            sql = f'SELECT * FROM "{drill_target_table}" WHERE "{drill_target_column}" = $1 LIMIT {limit}'
+            params: tuple[Any, ...] = (value,)
         else:
-            sql = f'SELECT * FROM "{table_name}" LIMIT $1'
-            params = (limit,)
+            sql = f'SELECT * FROM "{table_name}" LIMIT {limit}'
+            params = ()
 
         # A tenant bound to a dedicated data plane is routed to its own Teiid
         # container; otherwise we use the VDB row's host/port (shared global).
