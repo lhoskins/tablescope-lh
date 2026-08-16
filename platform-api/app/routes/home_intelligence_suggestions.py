@@ -280,7 +280,7 @@ async def _plan_analyses(
         sql = _auto_cast_aggregates(sql).rstrip().rstrip(";")
         # Do not surface suggestions whose SQL cannot be executed even after the
         # repair loop; otherwise the preview modal will show a Teiid error.
-        result, final_sql = await _execute_sql_with_repair(
+        result, final_sql, _ = await _execute_sql_with_repair(
             raw_sql=sql,
             tenant_id=context.tenant_id,
             user_id=context.user_id,

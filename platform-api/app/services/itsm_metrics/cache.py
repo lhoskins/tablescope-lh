@@ -42,6 +42,7 @@ def make_cache_key(
     as_of: datetime | None,
     duration_unit: str,
     period_key: str | None = None,
+    dimension: str = "site",
 ) -> str:
     as_of_key = as_of.isoformat() if as_of else "latest-complete-month"
     return ":".join(
@@ -50,6 +51,7 @@ def make_cache_key(
             str(project_id),
             dashboard_key,
             site_code or "all",
+            dimension,
             as_of_key,
             duration_unit,
             period_key or "latest_month",

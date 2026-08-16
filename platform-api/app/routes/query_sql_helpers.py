@@ -277,6 +277,18 @@ async def _prepare_sql(
     return sql
 
 
+_LIMIT_RE = re.compile(r"\blimit\s+\d+\s*$", re.IGNORECASE)
+
+
+def _apply_pagination(sql: str, limit: int | None, offset: int) -> str:
+    if limit is None:
+        return sql
+    trimmed = sql.strip().rstrip(";").rstrip()
+    if _LIMIT_RE.search(trimmed):
+        return trimmed
+    return f"{trimmed} LIMIT {limit} OFFSET {offset}"
+
+
 async def _execute_sql_with_repair(
     *,
     raw_sql: str,
@@ -290,12 +302,15 @@ async def _execute_sql_with_repair(
     column_types: dict[str, str],
     column_samples: dict[str, str],
     max_attempts: int = 3,
-) -> tuple[dict[str, Any] | None, str]:
+    limit: int | None = None,
+    offset: int = 0,
+) -> tuple[dict[str, Any] | None, str, str]:
     """Run ``raw_sql`` after normalization, calling ``fix-sql`` on failure.
 
-    Returns ``(result, final_sql)``. ``result`` is ``None`` only when every
-    repair attempt fails, in which case ``final_sql`` is the last attempted
-    SQL and the caller should surface the error.
+    Returns ``(result, final_sql, bounded_sql)``. ``result`` is ``None`` only
+    when every repair attempt fails, in which case ``final_sql`` is the last
+    attempted SQL and the caller should surface the error. ``bounded_sql``
+    includes any requested LIMIT/OFFSET.
     """
 
     def _is_source_or_schema_error(err: str) -> bool:
@@ -327,16 +342,17 @@ async def _execute_sql_with_repair(
         column_types=column_types,
         column_samples=column_samples,
     )
+    bounded_sql = _apply_pagination(final_sql, limit, offset)
     last_error = ""
     for attempt in range(max_attempts):
         try:
             result = await _run_sql(
                 database=database,
-                sql=final_sql,
+                sql=bounded_sql,
                 teiid_host=endpoint.pg_host,
                 teiid_port=endpoint.pg_port,
             )
-            return result, final_sql
+            return result, final_sql, bounded_sql
         except HTTPException as exc:
             last_error = str(exc.detail)
             if _is_source_or_schema_error(last_error) or attempt >= max_attempts - 1:
@@ -358,5 +374,6 @@ async def _execute_sql_with_repair(
                 column_types=column_types,
                 column_samples=column_samples,
             )
+            bounded_sql = _apply_pagination(final_sql, limit, offset)
 
-    return None, final_sql
+    return None, final_sql, bounded_sql

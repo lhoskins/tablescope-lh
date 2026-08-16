@@ -39,6 +39,25 @@ logger = logging.getLogger(__name__)
 
 CACHE_HINT = "/*+ cache(pref_mem ttl:300000) */"
 
+_DIMENSION_CODE_COLUMN: dict[str, str] = {
+    "site": "site_code",
+    "region": "region",
+}
+
+_DIMENSION_LABEL_COLUMN: dict[str, str] = {
+    "site": "site_name",
+    "region": "region_name",
+}
+
+
+def _dimension_column(dimension: str | None) -> str:
+    return _DIMENSION_CODE_COLUMN.get((dimension or "").lower(), "site_code")
+
+
+def _dimension_label_column(dimension: str | None) -> str:
+    return _DIMENSION_LABEL_COLUMN.get((dimension or "").lower(), "site_name")
+
+
 _METRIC_COPY: dict[str, tuple[str, str]] = {
     "incident_volume": (
         "Incidents opened during the latest complete calendar month.",
@@ -282,6 +301,7 @@ def _build_metric_sql(
     period: PeriodBounds,
     site_code: str | None = None,
     date_unit: str = "seconds",
+    site_column: str = "site_code",
 ) -> str:
     """Generate a value SQL query for a single metric and period."""
     if metric.status == "not_implemented":
@@ -295,7 +315,7 @@ def _build_metric_sql(
     for f in metric.filters:
         where_clauses.append(_format_filter(f))
     if site_code and site_code.lower() != "all":
-        where_clauses.append(_site_filter(site_code))
+        where_clauses.append(_site_filter(site_code, site_column))
 
     # Custom value expression wins.
     if metric.value_expression:
@@ -305,7 +325,7 @@ def _build_metric_sql(
             end=end_epoch,
             start_iso=repr(period.start),
             end_iso=repr(period.end),
-            site_filter=_site_filter(site_code),
+            site_filter=_site_filter(site_code, site_column),
             date_expr=date_expr,
         )
         # If the expression already starts with SELECT, return as-is.
@@ -493,9 +513,9 @@ async def _run_sql(
     return result["rows"]
 
 
-def _metric_sql_safe(metric: MetricDefinition, period: PeriodBounds, site_code: str | None, date_unit: str) -> str:
+def _metric_sql_safe(metric: MetricDefinition, period: PeriodBounds, site_code: str | None, date_unit: str, site_column: str = "site_code") -> str:
     try:
-        return _build_metric_sql(metric, period, site_code, date_unit)
+        return _build_metric_sql(metric, period, site_code, date_unit, site_column)
     except Exception as exc:
         logger.warning("SQL build failed for %s: %s", metric.key, exc)
         return "SELECT NULL AS metric_value"
@@ -513,6 +533,7 @@ async def compute_metric(
     date_unit: str = "seconds",
     duration_unit: str = "hours",
     teiid_endpoint: tuple[str, str, int] | None = None,
+    site_column: str = "site_code",
 ) -> MetricValue:
     """Run a metric for current and previous month and assemble a KPI card value."""
     if teiid_endpoint is None:
@@ -520,8 +541,8 @@ async def compute_metric(
     else:
         database, host, port = teiid_endpoint
 
-    current_sql = _metric_sql_safe(metric, current_period, site_code, date_unit)
-    previous_sql = _metric_sql_safe(metric, previous_period, site_code, date_unit)
+    current_sql = _metric_sql_safe(metric, current_period, site_code, date_unit, site_column)
+    previous_sql = _metric_sql_safe(metric, previous_period, site_code, date_unit, site_column)
 
     current_rows, previous_rows = await asyncio.gather(
         _run_sql(database, host, port, current_sql),
@@ -570,6 +591,7 @@ def _build_chart_sql(
     group_by: str,
     site_code: str | None,
     date_unit: str,
+    site_column: str = "site_code",
 ) -> str:
     table = _quote_identifier(metric.table)
     start_epoch, end_epoch = _period_epoch(period)
@@ -579,7 +601,7 @@ def _build_chart_sql(
     for f in metric.filters:
         where_clauses.append(_format_filter(f))
     if site_code and site_code.lower() != "all":
-        where_clauses.append(_site_filter(site_code))
+        where_clauses.append(_site_filter(site_code, site_column))
     if metric.date_field:
         where_clauses.append(f"{date_expr} >= {start_epoch} AND {date_expr} <= {end_epoch}")
     where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
@@ -638,11 +660,13 @@ async def _build_insight_charts(
     period_key: str | None,
     site_code: str | None,
     warnings: list[str],
+    site_column: str = "site_code",
 ) -> tuple[list[ChartResult], list[InsightSummary]]:
     """Build the richer, live insight charts without changing the KPI pipeline."""
     database, host, port = endpoint
     start, end = _period_epoch(period)
-    site_filter = _site_filter(site_code)
+    site_filter = _site_filter(site_code, site_column)
+    site_group_col = _quote_identifier(site_column)
     charts: list[ChartResult] = []
 
     async def _safe(label: str, sql: str) -> list[dict[str, Any]]:
@@ -680,7 +704,7 @@ WHERE unix_timestamp(CAST(opened_at AS timestamp)) <= {end}
   AND (resolved_at IS NULL OR unix_timestamp(CAST(resolved_at AS timestamp)) > {end})
   AND {site_filter}
 GROUP BY 1"""
-        sla_site_sql = f"""SELECT CAST(site_code AS string) AS x, COUNT(DISTINCT sys_id) AS y
+        sla_site_sql = f"""SELECT CAST({site_group_col} AS string) AS x, COUNT(DISTINCT sys_id) AS y
 FROM "02_task_slas_CSV"
 WHERE task_type = 'Incident' AND "metric" = 'Resolution'
   AND CAST(has_breached AS boolean) = true
@@ -957,12 +981,15 @@ async def compute_dashboard(
     date_unit: str = "seconds",
     duration_unit: str = "hours",
     period_key: str | None = None,
+    dimension: str = "site",
 ) -> DashboardResult:
     """Compute all KPIs and charts for an ITSM dashboard preset.
 
     Metric queries are executed concurrently to keep dashboard load times under
     control; each metric still runs current and previous periods independently.
     """
+    site_column = _dimension_column(dimension)
+    site_label_column = _dimension_label_column(dimension)
     metrics = get_dashboard_metrics(dashboard_key)
     current_period, previous_period = _reporting_bounds(period_key, as_of)
     teiid_endpoint = await _resolve_teiid(project_id, session, tenant_id, user_id)
@@ -990,6 +1017,7 @@ async def compute_dashboard(
                 date_unit=date_unit,
                 duration_unit=duration_unit,
                 teiid_endpoint=teiid_endpoint,
+                site_column=site_column,
             )
 
     metric_tasks = [_compute_metric(metric) for metric in metrics]
@@ -1030,16 +1058,17 @@ async def compute_dashboard(
             period_key=period_key,
             site_code=site_code,
             warnings=warnings,
+            site_column=site_column,
         )
         site_table = "01_incidents_CSV" if dashboard_key == "incident_insights" else "07_requests_CSV"
         try:
             site_rows = await _run_sql(
                 *teiid_endpoint,
                 f"""{CACHE_HINT}
-SELECT CAST(site_code AS string) AS code, MAX(CAST(site_name AS string)) AS name
+SELECT CAST({_quote_identifier(site_column)} AS string) AS code, MAX(CAST({_quote_identifier(site_label_column)} AS string)) AS name
 FROM {_quote_identifier(site_table)}
-WHERE site_code IS NOT NULL
-GROUP BY site_code
+WHERE {_quote_identifier(site_column)} IS NOT NULL
+GROUP BY {_quote_identifier(site_column)}
 ORDER BY 2""",
             )
             site_options = [
@@ -1057,7 +1086,7 @@ ORDER BY 2""",
                 or chart_metric.group_by in {"begin", "end_col"}
             )
             chart_period = _rolling_month_bounds(current_period) if is_date_chart else current_period
-            sql = _build_chart_sql(chart_metric, chart_period, chart_metric.group_by, site_code, date_unit)
+            sql = _build_chart_sql(chart_metric, chart_period, chart_metric.group_by, site_code, date_unit, site_column)
             rows = await _run_sql(*teiid_endpoint, sql)
             x = [str(r.get("x", "")) for r in rows]
             y = [_extract_single_value([r]) for r in rows]
@@ -1094,6 +1123,7 @@ ORDER BY 2""",
         as_of=utc_now_iso(),
         filters={
             "site": site_code or "all",
+            "dimension": dimension,
             "date_unit": date_unit,
             "durationUnit": duration_unit,
             "period": period_key or "latest_month",
@@ -1120,6 +1150,7 @@ async def warm_itsm_dashboards_for_project(
     site_code: str | None = None,
     date_unit: str = "seconds",
     duration_unit: str = "hours",
+    dimension: str = "site",
 ) -> None:
     """Pre-compute all ITSM dashboard presets for a project to populate Teiid caches.
 
@@ -1146,6 +1177,7 @@ async def warm_itsm_dashboards_for_project(
                         date_unit=date_unit,
                         duration_unit=duration_unit,
                         period_key=period_key,
+                        dimension=dimension,
                     )
                 from .cache import make_cache_key, set_cached_dashboard
 
@@ -1158,6 +1190,7 @@ async def warm_itsm_dashboards_for_project(
                         as_of=None,
                         duration_unit=duration_unit,
                         period_key=period_key,
+                        dimension=dimension,
                     ),
                     result,
                 )

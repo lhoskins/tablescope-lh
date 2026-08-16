@@ -18,7 +18,6 @@ import type {
   ItsmMetricValue,
 } from "./types";
 import styles from "./ItsmDashboardScreen.module.css";
-import { DimensionLabelEditor } from "@/components/tablescope/project/dashboard-templates/dimension-label-editor";
 
 const INSIGHT_LABELS: Record<string, string> = {
   incident_insights: "Incident Management Insights",
@@ -88,7 +87,7 @@ export function ItsmInsightsDashboardContent({
   const [selectedPreset, setSelectedPreset] = useState(preset);
   const [period, setPeriod] = useState<PeriodKey>("1_year");
   const [site, setSite] = useState("all");
-  const [dimensionLabel, setDimensionLabel] = useState("Site");
+  const [dimension, setDimension] = useState<"site" | "region">("site");
   const [editingLayout, setEditingLayout] = useState(false);
   const [layout, setLayout] = useState<ItsmDashboardLayout>({ order: [], sizes: {} });
   const [backgroundRefreshing, setBackgroundRefreshing] = useState(false);
@@ -102,13 +101,12 @@ export function ItsmInsightsDashboardContent({
     setSelectedPreset(preset);
     setSite("all");
   }, [preset]);
-  useEffect(() => { if (typeof window !== "undefined") setDimensionLabel(localStorage.getItem(`itsm-dimension-label:${projectId}`) || "Site"); }, [projectId]);
 
-  const queryKey = ["project", projectId, "itsm-insights", selectedPreset, period, site] as const;
+  const queryKey = ["project", projectId, "itsm-insights", selectedPreset, period, site, dimension] as const;
   const cacheToken = queryKey.join(":");
   const browserCacheKey = `itsm-dashboard:${cacheToken}`;
   const siteQuery = site === "all" ? "" : `&site=${encodeURIComponent(site)}`;
-  const dashboardUrl = `/api/projects/${projectId}/itsm-dashboards/${selectedPreset}?durationUnit=hours&period=${period}${siteQuery}`;
+  const dashboardUrl = `/api/projects/${projectId}/itsm-dashboards/${selectedPreset}?durationUnit=hours&period=${period}${siteQuery}&dimension=${dimension}`;
 
   const {
     data: dashboard,
@@ -301,9 +299,19 @@ export function ItsmInsightsDashboardContent({
           >
             {PERIODS.map(([value, label]) => <option key={value} value={value}>Period: {label}</option>)}
           </select>
-          <label className="flex h-8 items-center gap-1 rounded-md border border-line-secondary bg-bg-primary pl-2 text-xs">
-            <DimensionLabelEditor label={dimensionLabel} onSave={(next) => { setDimensionLabel(next); localStorage.setItem(`itsm-dimension-label:${projectId}`, next); }} />
-            <select id="itsm-insight-site" value={site} onChange={(event) => setSite(event.target.value)} aria-label={dimensionLabel} className="h-full border-0 bg-transparent pr-2"><option value="all">All {dimensionLabel.toLowerCase()}</option>{dashboard?.dataQuality.availableSites?.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}</select>
+          <label className="sr-only" htmlFor="itsm-insight-dimension">Dimension</label>
+          <select
+            id="itsm-insight-dimension"
+            value={dimension}
+            onChange={(event) => { const next = event.target.value as "site" | "region"; setDimension(next); setSite("all"); }}
+            className="h-8 rounded-md border border-line-secondary bg-bg-primary px-2 text-xs text-ink-primary focus:border-brand-500 focus:outline-none"
+          >
+            <option value="site">Site</option>
+            <option value="region">Region</option>
+          </select>
+          <label className="flex h-8 items-center gap-1 rounded-md border border-line-secondary bg-bg-primary px-2 text-xs">
+            <span className="text-ink-secondary">{dimension === "region" ? "Region:" : "Site:"}</span>
+            <select value={site} onChange={(event) => setSite(event.target.value)} aria-label={dimension} className="h-full border-0 bg-transparent pr-2"><option value="all">All {dimension === "region" ? "regions" : "sites"}</option>{dashboard?.dataQuality.availableSites?.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}</select>
           </label>
           <label className="sr-only" htmlFor="itsm-insight-dashboard">Dashboard</label>
           <select
@@ -312,6 +320,7 @@ export function ItsmInsightsDashboardContent({
             onChange={(event) => {
               setSelectedPreset(event.target.value);
               setSite("all");
+              setDimension("site");
             }}
             className="h-8 rounded-md border border-line-secondary bg-bg-primary px-2 text-xs text-ink-primary focus:border-brand-500 focus:outline-none"
           >

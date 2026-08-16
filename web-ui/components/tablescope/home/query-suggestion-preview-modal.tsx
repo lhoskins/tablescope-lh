@@ -14,7 +14,7 @@ import {
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { useToasts } from "@/components/ui/toast";
-import { ResultChart, ResultTable } from "@/components/ai/ai-result-view";
+import { ResultChart, ResultTable, ChartOptions } from "@/components/ai/ai-result-view";
 import { runDatasourceSql } from "@/lib/api/data-source-builder";
 import { saveQuerySuggestion } from "@/lib/api/home-intelligence";
 import { useProjectSummaries } from "@/lib/ui/use-shell-data";
@@ -34,6 +34,7 @@ type BackendViz = {
 type RunResult = {
   columns: string[];
   rows: Record<string, unknown>[];
+  total?: number;
   sql?: string;
   suggestedVisualization?: BackendViz;
 };
@@ -95,11 +96,14 @@ export function QuerySuggestionPreviewModal({
   const [showSql, setShowSql] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveToDashboardOpen, setSaveToDashboardOpen] = useState(false);
+  const [selectedViz, setSelectedViz] = useState<SuggestedVisualization | null>(null);
+  const [page, setPage] = useState(0);
+  const [pageSize] = useState(100);
   const { push: pushToast } = useToasts();
   const { data: projects } = useProjectSummaries();
 
-  const run = useMutation<RunResult, Error>({
-    mutationFn: () => runDatasourceSql({ sql, project_id: projectId }),
+  const run = useMutation<RunResult, Error, { offset: number; limit: number }>({
+    mutationFn: (vars) => runDatasourceSql({ sql, project_id: projectId, ...vars }),
   });
 
   const save = useMutation({
@@ -120,18 +124,21 @@ export function QuerySuggestionPreviewModal({
     if (!open) return;
     setShowSql(false);
     setSaved(false);
-    run.mutate();
+    setSelectedViz(null);
+    setPage(0);
+    run.mutate({ offset: 0, limit: pageSize });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, sql]);
 
   if (!open) return null;
 
   const result = run.data;
-  const viz: SuggestedVisualization = result?.suggestedVisualization
+  const inferredViz: SuggestedVisualization = result?.suggestedVisualization
     ? (result.suggestedVisualization as SuggestedVisualization)
     : result
       ? inferViz(result.columns, result.rows)
       : { type: "table" as const };
+  const viz = selectedViz ?? inferredViz;
 
   const project = projects?.find((p) => Number(p.id) === projectId);
   const previewCard: InsightCard | null = result
@@ -209,12 +216,31 @@ export function QuerySuggestionPreviewModal({
           ) : (
             result && (
               <>
+                <div className="mb-2 flex justify-end">
+                  <ChartOptions
+                    columns={result.columns}
+                    rows={result.rows}
+                    value={viz}
+                    onChange={setSelectedViz}
+                  />
+                </div>
                 <ResultChart
                   columns={result.columns}
                   rows={result.rows}
                   viz={viz}
                 />
-                <ResultTable columns={result.columns} rows={result.rows} />
+                <ResultTable
+                  columns={result.columns}
+                  rows={result.rows}
+                  total={result.total}
+                  page={page}
+                  pageSize={pageSize}
+                  onPageChange={(nextPage) => {
+                    setPage(nextPage);
+                    run.mutate({ offset: nextPage * pageSize, limit: pageSize });
+                  }}
+                  loading={run.isPending}
+                />
               </>
             )
           )}

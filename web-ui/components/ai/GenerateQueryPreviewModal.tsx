@@ -15,12 +15,14 @@ import {
   aiActionsApi,
   type AiCardContext,
   type GenerateQueryPreviewResult,
+  type SuggestedVisualization,
 } from "@/lib/api/ai-actions";
 import {
   PROGRESS_STEPS,
   ProgressSteps,
   ResultChart,
   ResultTable,
+  ChartOptions,
 } from "@/components/ai/ai-result-view";
 import { ResponsePresenter } from "@/components/ai/ResponsePresenter";
 
@@ -54,6 +56,7 @@ export function GenerateQueryPreviewModal({
   const [stepIndex, setStepIndex] = useState(0);
   const [showSql, setShowSql] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [selectedViz, setSelectedViz] = useState<SuggestedVisualization | null>(null);
 
   const run = useMutation<GenerateQueryPreviewResult, Error, string | undefined>(
     {
@@ -90,6 +93,7 @@ export function GenerateQueryPreviewModal({
     if (!open) return;
     setShowSql(false);
     setSaved(false);
+    setSelectedViz(null);
     setStepIndex(0);
     run.mutate(undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -213,11 +217,21 @@ export function GenerateQueryPreviewModal({
               ) : (
                 <>
                   {success && (
-                    <ResultChart
-                      columns={result.columns}
-                      rows={result.rows}
-                      viz={result.suggestedVisualization}
-                    />
+                    <>
+                      <div className="mb-2 flex justify-end">
+                        <ChartOptions
+                          columns={result.columns}
+                          rows={result.rows}
+                          value={selectedViz ?? result.suggestedVisualization}
+                          onChange={setSelectedViz}
+                        />
+                      </div>
+                      <ResultChart
+                        columns={result.columns}
+                        rows={result.rows}
+                        viz={selectedViz ?? result.suggestedVisualization}
+                      />
+                    </>
                   )}
                   {success && (
                     <ResultTable columns={result.columns} rows={result.rows} />

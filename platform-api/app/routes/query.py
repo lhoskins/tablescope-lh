@@ -96,6 +96,7 @@ class DatasourceQueryRequest(BaseModel):
     # suggested query); required only for the plain ``SELECT * FROM table`` path.
     tableName: str | None = Field(default=None)
     limit: int = Field(default=1000, ge=1, le=10_000)
+    offset: int = Field(default=0, ge=0)
     project_id: int | None = Field(default=None)
     sql: str | None = Field(default=None)
 
@@ -220,7 +221,7 @@ async def query_datasource(
             raise HTTPException(
                 status_code=400, detail="project_id is required when executing SQL"
             )
-        result, final_sql = await _execute_sql_with_repair(
+        result, final_sql, _ = await _execute_sql_with_repair(
             raw_sql=payload.sql,
             tenant_id=context.tenant_id,
             user_id=context.user_id,
@@ -231,19 +232,47 @@ async def query_datasource(
             allowed_tables=allowed_tables,
             column_types=column_types,
             column_samples=column_samples,
+            limit=payload.limit,
+            offset=payload.offset,
         )
     else:
-        sql = f'SELECT * FROM "{payload.tableName}" LIMIT {payload.limit}'
+        final_sql = f'SELECT * FROM "{payload.tableName}" LIMIT {payload.limit} OFFSET {payload.offset}'
         result = await _run_sql(
             database=database,
-            sql=sql,
+            sql=final_sql,
             teiid_host=endpoint.pg_host,
             teiid_port=endpoint.pg_port,
         )
-        final_sql = sql
 
     if result is None:
         raise HTTPException(status_code=502, detail=f"Query failed: {final_sql}")
+
+    total = 0
+    if payload.sql:
+        count_sql = f"SELECT COUNT(*) AS total FROM ({final_sql}) t"
+        try:
+            count_result = await _run_sql(
+                database=database,
+                sql=count_sql,
+                teiid_host=endpoint.pg_host,
+                teiid_port=endpoint.pg_port,
+            )
+            total = int(count_result["rows"][0].get("total", 0)) if count_result.get("rows") else 0
+        except Exception as exc:
+            logger.warning("Count query failed: %s", exc)
+    elif payload.tableName:
+        count_sql = f'SELECT COUNT(*) AS total FROM "{payload.tableName}"'
+        try:
+            count_result = await _run_sql(
+                database=database,
+                sql=count_sql,
+                teiid_host=endpoint.pg_host,
+                teiid_port=endpoint.pg_port,
+            )
+            total = int(count_result["rows"][0].get("total", 0)) if count_result.get("rows") else 0
+        except Exception as exc:
+            logger.warning("Count query failed: %s", exc)
+    result["total"] = total
 
     # Attach a data-driven visualization suggestion so preview surfaces render
     # the right chart family instead of a hardcoded bar.

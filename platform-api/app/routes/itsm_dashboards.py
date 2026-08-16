@@ -213,6 +213,7 @@ async def get_itsm_dashboard(
     as_of: datetime | None = Query(default=None, alias="asOf"),
     duration_unit: Literal["hours", "minutes"] = Query(default="hours", alias="durationUnit"),
     period_key: PeriodKey = Query(default="latest_month", alias="period"),
+    dimension: str = Query(default="site"),
     refresh: bool = Query(default=False),
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
@@ -231,6 +232,7 @@ async def get_itsm_dashboard(
             as_of=as_of,
             duration_unit=duration_unit,
             period_key=period_key,
+            dimension=dimension,
         )
 
         async def _compute() -> DashboardResult:
@@ -244,6 +246,7 @@ async def get_itsm_dashboard(
                 site_code=site,
                 duration_unit=duration_unit,
                 period_key=period_key,
+                dimension=dimension,
             )
 
         result, cache_status, cache_age = await get_or_compute_dashboard(

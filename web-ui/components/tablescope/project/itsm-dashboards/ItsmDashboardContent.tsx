@@ -18,7 +18,7 @@ import { ItsmMetricCard } from "./ItsmMetricCard";
 import { ItsmChart } from "./ItsmChart";
 import { ItsmInsightsDashboardContent } from "./ItsmInsightsDashboardContent";
 import styles from "./ItsmDashboardScreen.module.css";
-import { DimensionLabelEditor } from "@/components/tablescope/project/dashboard-templates/dimension-label-editor";
+
 
 export const PRESET_LABELS: Record<string, string> = {
   incident: "Incident Management",
@@ -72,7 +72,7 @@ function ItsmKpiDashboardContent({ projectId, preset, onBack }: ItsmDashboardCon
   const [durationUnit, setDurationUnit] = useState<"hours" | "minutes">("hours");
   const [period, setPeriod] = useState<PeriodKey>("1_year");
   const [site, setSite] = useState("all");
-  const [dimensionLabel, setDimensionLabel] = useState("Site");
+  const [dimension, setDimension] = useState<"site" | "region">("site");
   const [editingLayout, setEditingLayout] = useState(false);
   const [layout, setLayout] = useState<ItsmDashboardLayout>({ order: [], sizes: {} });
   const [backgroundRefreshing, setBackgroundRefreshing] = useState(false);
@@ -84,8 +84,6 @@ function ItsmKpiDashboardContent({ projectId, preset, onBack }: ItsmDashboardCon
     setSelectedPreset(preset);
     setSite("all");
   }, [preset]);
-
-  useEffect(() => { if (typeof window !== "undefined") setDimensionLabel(localStorage.getItem(`itsm-dimension-label:${projectId}`) || "Site"); }, [projectId]);
 
   const [drilldown, setDrilldown] = useState<{
     open: boolean;
@@ -102,11 +100,12 @@ function ItsmKpiDashboardContent({ projectId, preset, onBack }: ItsmDashboardCon
     durationUnit,
     period,
     site,
+    dimension,
   ] as const;
   const cacheToken = dashboardQueryKey.join(":");
   const browserCacheKey = `itsm-dashboard:${cacheToken}`;
   const siteQuery = site === "all" ? "" : `&site=${encodeURIComponent(site)}`;
-  const dashboardUrl = `/api/projects/${projectId}/itsm-dashboards/${selectedPreset}?durationUnit=${durationUnit}&period=${period}${siteQuery}`;
+  const dashboardUrl = `/api/projects/${projectId}/itsm-dashboards/${selectedPreset}?durationUnit=${durationUnit}&period=${period}${siteQuery}&dimension=${dimension}`;
 
   const {
     data: presets,
@@ -343,7 +342,16 @@ function ItsmKpiDashboardContent({ projectId, preset, onBack }: ItsmDashboardCon
 
         <div className="flex flex-wrap items-center justify-end gap-2">
           <select value={period} onChange={(event) => setPeriod(event.target.value as PeriodKey)} aria-label="Period" className="h-8 rounded-md border px-2 text-xs">{PERIODS.map(([value, label]) => <option key={value} value={value}>Period: {label}</option>)}</select>
-          <label className="flex h-8 items-center gap-1 rounded-md border pl-2 text-xs"><DimensionLabelEditor label={dimensionLabel} onSave={(next) => { setDimensionLabel(next); localStorage.setItem(`itsm-dimension-label:${projectId}`, next); }} /><select value={site} onChange={(event) => setSite(event.target.value)} aria-label={dimensionLabel} className="h-full border-0 bg-transparent pr-2"><option value="all">All {dimensionLabel.toLowerCase()}</option>{dashboard?.dataQuality.availableSites?.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}</select></label>
+          <select
+            aria-label="Dimension"
+            value={dimension}
+            onChange={(event) => { const next = event.target.value as "site" | "region"; setDimension(next); setSite("all"); }}
+            className="h-8 rounded-md border border-line-secondary bg-bg-primary px-2 text-xs text-ink-primary focus:border-brand-500 focus:outline-none"
+          >
+            <option value="site">Site</option>
+            <option value="region">Region</option>
+          </select>
+          <label className="flex h-8 items-center gap-1 rounded-md border border-line-secondary bg-bg-primary px-2 text-xs"><span className="text-ink-secondary">{dimension === "region" ? "Region:" : "Site:"}</span><select value={site} onChange={(event) => setSite(event.target.value)} aria-label={dimension} className="h-full border-0 bg-transparent pr-2"><option value="all">All {dimension === "region" ? "regions" : "sites"}</option>{dashboard?.dataQuality.availableSites?.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}</select></label>
           <select
             aria-label="Duration unit"
             value={durationUnit}
