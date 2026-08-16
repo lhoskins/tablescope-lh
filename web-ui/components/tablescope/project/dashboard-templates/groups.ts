@@ -69,11 +69,15 @@ export function groupDashboards(rows: Dashboard[], persisted: DashboardGroupReco
     || (record.slug.startsWith("custom-dashboards-") && record.name.trim().toLowerCase() === "custom dashboards"),
   );
   const canonicalCustom = customRecords.find((record) => record.slug === "custom-dashboards") ?? customRecords[0];
+  function normalizeGroupName(name: string | undefined): string | undefined {
+    if (!name) return name;
+    return name.trim().toLowerCase() === "custom dashboards" ? "Operational Dashboards" : name;
+  }
   for (const original of persisted) {
     const record = canonicalCustom && customRecords.includes(original) ? canonicalCustom : original;
     const id = `group:${record.id}`;
     if (!groups.has(id)) {
-      groups.set(id, { id, persistentId: record.id, name: record.name, icon: record.icon, templateId: record.templateId, dashboards: [], collapsedDefault: record.collapsedDefault });
+      groups.set(id, { id, persistentId: record.id, name: normalizeGroupName(record.name) ?? record.name, icon: record.icon, templateId: record.templateId, dashboards: [], collapsedDefault: record.collapsedDefault });
     }
     persistedBySlug.set(original.slug, record);
     original.dashboardIds.forEach((dashboardId) => persistedByDashboard.set(dashboardId, record));
@@ -86,21 +90,24 @@ export function groupDashboards(rows: Dashboard[], persisted: DashboardGroupReco
     const configuredId = typeof dashboard.config?.dashboardGroupId === "number" ? dashboard.config.dashboardGroupId : undefined;
     const id = record ? `group:${record.id}` : configuredId ? `group:${configuredId}` : metadata?.groupId ?? "custom-dashboards";
     const displayName = record?.name ?? metadata?.groupName;
-    const resolvedName =
-      displayName && displayName.trim().toLowerCase() !== "custom dashboards"
-        ? displayName
-        : "Operational Dashboards";
-    const current = groups.get(id) ?? {
-      id,
-      persistentId: record?.id ?? configuredId,
-      name: resolvedName,
-      icon: record?.icon ?? metadata?.groupIcon ?? metadata?.dashboardIcon ?? "activity",
-      templateId: record?.templateId ?? metadata?.templateId,
-      dashboards: [],
-      collapsedDefault: true,
-    };
-    current.dashboards.push(dashboard);
-    groups.set(id, current);
+    const resolvedName = normalizeGroupName(displayName) ?? "Operational Dashboards";
+    const current = groups.get(id);
+    if (current) {
+      if (current.name.trim().toLowerCase() === "custom dashboards") {
+        current.name = "Operational Dashboards";
+      }
+      current.dashboards.push(dashboard);
+    } else {
+      groups.set(id, {
+        id,
+        persistentId: record?.id ?? configuredId,
+        name: resolvedName,
+        icon: record?.icon ?? metadata?.groupIcon ?? metadata?.dashboardIcon ?? "activity",
+        templateId: record?.templateId ?? metadata?.templateId,
+        dashboards: [dashboard],
+        collapsedDefault: true,
+      });
+    }
   }
   return [...groups.values()].sort((left, right) => {
     if (left.id === "servicenow-itsm-operations") return -1;
