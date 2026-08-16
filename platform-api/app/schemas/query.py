@@ -21,3 +21,4 @@ class QueryResponse(BaseModel):
     drilldownUsed: bool
     targetTable: str | None = None
     targetColumn: str | None = None
+    total: int | None = None

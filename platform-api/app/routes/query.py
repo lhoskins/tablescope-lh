@@ -143,6 +143,7 @@ async def fetch_table_data(
         drilldownUsed=result.drilldown_used,
         targetTable=result.target_table,
         targetColumn=result.target_column,
+        total=result.total,
     )
 
 
