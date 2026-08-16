@@ -20,14 +20,19 @@ from app.models.dashboard_template import DashboardGroup, DashboardTemplateBindi
 from app.routes.dashboards_crud import _require_project_access
 from app.routes.dashboards_widget_query import _resolve_vdb, _run_widget_sql
 from app.routes.projects_datasources import list_project_datasources
-from app.services.dashboard_templates import compile_batch_queries, render_sql_template, template_metric_manifest, validate_binding
+from app.services.dashboard_templates import (
+    compile_batch_queries,
+    render_sql_template,
+    template_metric_manifest,
+    validate_binding,
+)
 from app.services.dashboard_templates.compiler import period_bounds
 from app.services.dashboard_widget import find_or_create_saved_query
-from app.services.tenant_teiid_resolver import TenantTeiidResolver
 from app.services.operational_insight_dashboards import (
     CUSTOM_GROUP_SLUG,
     get_or_create_custom_group,
 )
+from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["dashboard-templates"])
 

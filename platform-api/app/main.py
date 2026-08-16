@@ -36,9 +36,9 @@ from app.routes import (
     conversational_analytics_conversations as conversational_analytics_conversations_routes,
 )
 from app.routes import conversational_analytics_turns as conversational_analytics_turns_routes
+from app.routes import dashboard_templates as dashboard_templates_routes
 from app.routes import dashboards_crud as dashboards_crud_routes
 from app.routes import dashboards_widget_query as dashboards_widget_query_routes
-from app.routes import dashboard_templates as dashboard_templates_routes
 from app.routes import data_source_assignments as data_source_assignments_routes
 from app.routes import data_source_catalog as data_source_catalog_routes
 from app.routes import database_sources_connection as database_sources_connection_routes
