@@ -18,6 +18,7 @@ import { ItsmMetricCard } from "./ItsmMetricCard";
 import { ItsmChart } from "./ItsmChart";
 import { ItsmInsightsDashboardContent } from "./ItsmInsightsDashboardContent";
 import styles from "./ItsmDashboardScreen.module.css";
+import { DimensionLabelEditor } from "@/components/tablescope/project/dashboard-templates/dimension-label-editor";
 
 export const PRESET_LABELS: Record<string, string> = {
   incident: "Incident Management",
@@ -30,6 +31,11 @@ export const PRESET_LABELS: Record<string, string> = {
 };
 
 const INSIGHT_PRESETS = new Set(["incident_insights", "service_request_insights"]);
+const PERIODS = [["30_days", "30 days"], ["60_days", "60 days"], ["90_days", "90 days"], ["6_months", "6 months"], ["1_year", "1 Year"], ["2_years", "2 Years"]] as const;
+type PeriodKey = (typeof PERIODS)[number][0];
+type DashboardGridItem =
+  | { type: "metric"; key: string; metric: ItsmMetricValue }
+  | { type: "chart"; key: string; chart: ItsmDashboardResult["charts"][number] };
 
 interface ItsmDashboardContentProps {
   projectId: string;
@@ -64,16 +70,22 @@ function ItsmKpiDashboardContent({ projectId, preset, onBack }: ItsmDashboardCon
   const queryClient = useQueryClient();
   const [selectedPreset, setSelectedPreset] = useState(preset);
   const [durationUnit, setDurationUnit] = useState<"hours" | "minutes">("hours");
+  const [period, setPeriod] = useState<PeriodKey>("1_year");
+  const [site, setSite] = useState("all");
+  const [dimensionLabel, setDimensionLabel] = useState("Site");
   const [editingLayout, setEditingLayout] = useState(false);
   const [layout, setLayout] = useState<ItsmDashboardLayout>({ order: [], sizes: {} });
   const [backgroundRefreshing, setBackgroundRefreshing] = useState(false);
   const [manualRefreshing, setManualRefreshing] = useState(false);
-  const draggedMetric = useRef<string | null>(null);
+  const draggedItem = useRef<string | null>(null);
   const refreshedKeys = useRef(new Set<string>());
 
   useEffect(() => {
     setSelectedPreset(preset);
+    setSite("all");
   }, [preset]);
+
+  useEffect(() => { if (typeof window !== "undefined") setDimensionLabel(localStorage.getItem(`itsm-dimension-label:${projectId}`) || "Site"); }, [projectId]);
 
   const [drilldown, setDrilldown] = useState<{
     open: boolean;
@@ -88,10 +100,13 @@ function ItsmKpiDashboardContent({ projectId, preset, onBack }: ItsmDashboardCon
     "itsm-dashboards",
     selectedPreset,
     durationUnit,
+    period,
+    site,
   ] as const;
   const cacheToken = dashboardQueryKey.join(":");
   const browserCacheKey = `itsm-dashboard:${cacheToken}`;
-  const dashboardUrl = `/api/projects/${projectId}/itsm-dashboards/${selectedPreset}?durationUnit=${durationUnit}`;
+  const siteQuery = site === "all" ? "" : `&site=${encodeURIComponent(site)}`;
+  const dashboardUrl = `/api/projects/${projectId}/itsm-dashboards/${selectedPreset}?durationUnit=${durationUnit}&period=${period}${siteQuery}`;
 
   const {
     data: presets,
@@ -163,14 +178,31 @@ function ItsmKpiDashboardContent({ projectId, preset, onBack }: ItsmDashboardCon
       saved = undefined;
     }
     const metricKeys = dashboard.metrics.map((metric) => metric.metricKey);
+    const chartKeys = dashboard.charts.map((chart) => chart.chartKey);
+    const validItemKeys = [
+      ...metricKeys.map((key) => `metric:${key}`),
+      ...chartKeys.map((key) => `chart:${key}`),
+    ];
+    const legacyOrder = [
+      ...(saved?.order ?? []).map((key) => `metric:${key}`),
+      ...(saved?.chartOrder ?? []).map((key) => `chart:${key}`),
+    ];
+    const storedOrder = saved?.itemOrder ?? legacyOrder;
     setLayout({
       order: [...(saved?.order.filter((key) => metricKeys.includes(key)) ?? []), ...metricKeys.filter((key) => !saved?.order.includes(key))],
       sizes: Object.fromEntries(metricKeys.map((key) => [key, saved?.sizes[key] ?? DEFAULT_CARD_SIZE])),
+      chartOrder: [...(saved?.chartOrder?.filter((key) => chartKeys.includes(key)) ?? []), ...chartKeys.filter((key) => !saved?.chartOrder?.includes(key))],
+      chartHeights: Object.fromEntries(chartKeys.map((key) => [key, saved?.chartHeights?.[key] ?? "standard"])),
+      chartWidths: Object.fromEntries(chartKeys.map((key) => [key, saved?.chartWidths?.[key] ?? "half"])),
+      itemOrder: [
+        ...storedOrder.filter((key) => validItemKeys.includes(key)),
+        ...validItemKeys.filter((key) => !storedOrder.includes(key)),
+      ],
     });
-  }, [dashboard?.dashboard, dashboard?.metrics.length, layoutStorageKey]);
+  }, [dashboard, layoutStorageKey]);
 
   useEffect(() => {
-    if (!layout.order.length || typeof window === "undefined") return;
+    if (!layout.itemOrder?.length || typeof window === "undefined") return;
     try {
       localStorage.setItem(layoutStorageKey, JSON.stringify(layout));
     } catch {
@@ -178,17 +210,28 @@ function ItsmKpiDashboardContent({ projectId, preset, onBack }: ItsmDashboardCon
     }
   }, [layout, layoutStorageKey]);
 
-  const orderedMetrics = useMemo(() => {
+  const orderedItems = useMemo<DashboardGridItem[]>(() => {
     if (!dashboard) return [];
-    const metrics = new Map(dashboard.metrics.map((metric) => [metric.metricKey, metric]));
-    return [...layout.order.map((key) => metrics.get(key)).filter((metric): metric is ItsmMetricValue => Boolean(metric)), ...dashboard.metrics.filter((metric) => !layout.order.includes(metric.metricKey))];
-  }, [dashboard, layout.order]);
+    const metrics = new Map(dashboard.metrics.map((metric) => [`metric:${metric.metricKey}`, metric]));
+    const charts = new Map(dashboard.charts.map((chart) => [`chart:${chart.chartKey}`, chart]));
+    const result: DashboardGridItem[] = [];
+    for (const key of layout.itemOrder ?? []) {
+      if (key.startsWith("metric:")) {
+        const metric = metrics.get(key);
+        if (metric) result.push({ type: "metric", key, metric });
+      } else {
+        const chart = charts.get(key);
+        if (chart) result.push({ type: "chart", key, chart });
+      }
+    }
+    return result;
+  }, [dashboard, layout.itemOrder]);
 
   const { data: drilldownData, isLoading: drilldownLoading } = useQuery<ItsmMetricDrilldown>({
-    queryKey: ["project", projectId, "itsm-drilldown", selectedPreset, drilldown.metric?.metricKey, durationUnit],
+    queryKey: ["project", projectId, "itsm-drilldown", selectedPreset, drilldown.metric?.metricKey, durationUnit, period, site],
     queryFn: () =>
       apiClient.get<ItsmMetricDrilldown>(
-        `/api/projects/${projectId}/itsm-dashboards/${selectedPreset}/metrics/${drilldown.metric?.metricKey}/drilldown?durationUnit=${durationUnit}`,
+        `/api/projects/${projectId}/itsm-dashboards/${selectedPreset}/metrics/${drilldown.metric?.metricKey}/drilldown?durationUnit=${durationUnit}&period=${period}${siteQuery}`,
       ),
     enabled: Boolean(drilldown.open && drilldown.metric),
     staleTime: 5 * 60 * 1000,
@@ -204,15 +247,26 @@ function ItsmKpiDashboardContent({ projectId, preset, onBack }: ItsmDashboardCon
 
   const closeDrilldown = () => setDrilldown((current) => ({ ...current, open: false }));
 
-  const handleDrop = (targetKey: string) => {
-    const sourceKey = draggedMetric.current;
+  const handleItemDrop = (targetKey: string) => {
+    const sourceKey = draggedItem.current;
     if (!sourceKey || sourceKey === targetKey) return;
     setLayout((current) => {
-      const order = current.order.filter((key) => key !== sourceKey);
-      order.splice(order.indexOf(targetKey), 0, sourceKey);
-      return { ...current, order };
+      const order = [...(current.itemOrder ?? [])];
+      const source = order.indexOf(sourceKey), target = order.indexOf(targetKey);
+      if (source < 0 || target < 0) return current;
+      order.splice(source, 1);
+      order.splice(target, 0, sourceKey);
+      const movingChartAcrossTypes = sourceKey.startsWith("chart:") && targetKey.startsWith("metric:");
+      const chartKey = sourceKey.replace(/^chart:/, "");
+      return {
+        ...current,
+        itemOrder: order,
+        chartWidths: movingChartAcrossTypes
+          ? { ...(current.chartWidths ?? {}), [chartKey]: "full" }
+          : current.chartWidths,
+      };
     });
-    draggedMetric.current = null;
+    draggedItem.current = null;
   };
 
   const cycleCardSize = (metricKey: string) => {
@@ -222,6 +276,8 @@ function ItsmKpiDashboardContent({ projectId, preset, onBack }: ItsmDashboardCon
       return { ...current, sizes: { ...current.sizes, [metricKey]: nextSize } };
     });
   };
+  const cycleChartHeight = (key: string) => setLayout((current) => { const cycle = ["compact", "standard", "tall"] as const; const currentHeight = current.chartHeights?.[key] ?? "standard"; return { ...current, chartHeights: { ...(current.chartHeights ?? {}), [key]: cycle[(cycle.indexOf(currentHeight) + 1) % cycle.length] } }; });
+  const cycleChartWidth = (key: string) => setLayout((current) => ({ ...current, chartWidths: { ...(current.chartWidths ?? {}), [key]: current.chartWidths?.[key] === "full" ? "half" : "full" } }));
 
   const resetLayout = () => {
     if (!dashboard) return;
@@ -229,6 +285,13 @@ function ItsmKpiDashboardContent({ projectId, preset, onBack }: ItsmDashboardCon
     setLayout({
       order: metricKeys,
       sizes: Object.fromEntries(metricKeys.map((key) => [key, DEFAULT_CARD_SIZE])),
+      chartOrder: dashboard.charts.map((chart) => chart.chartKey),
+      chartHeights: Object.fromEntries(dashboard.charts.map((chart) => [chart.chartKey, "standard"])),
+      chartWidths: Object.fromEntries(dashboard.charts.map((chart) => [chart.chartKey, "half"])),
+      itemOrder: [
+        ...metricKeys.map((key) => `metric:${key}`),
+        ...dashboard.charts.map((chart) => `chart:${chart.chartKey}`),
+      ],
     });
   };
 
@@ -279,6 +342,8 @@ function ItsmKpiDashboardContent({ projectId, preset, onBack }: ItsmDashboardCon
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2">
+          <select value={period} onChange={(event) => setPeriod(event.target.value as PeriodKey)} aria-label="Period" className="h-8 rounded-md border px-2 text-xs">{PERIODS.map(([value, label]) => <option key={value} value={value}>Period: {label}</option>)}</select>
+          <label className="flex h-8 items-center gap-1 rounded-md border pl-2 text-xs"><DimensionLabelEditor label={dimensionLabel} onSave={(next) => { setDimensionLabel(next); localStorage.setItem(`itsm-dimension-label:${projectId}`, next); }} /><select value={site} onChange={(event) => setSite(event.target.value)} aria-label={dimensionLabel} className="h-full border-0 bg-transparent pr-2"><option value="all">All {dimensionLabel.toLowerCase()}</option>{dashboard?.dataQuality.availableSites?.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}</select></label>
           <select
             aria-label="Duration unit"
             value={durationUnit}
@@ -320,7 +385,7 @@ function ItsmKpiDashboardContent({ projectId, preset, onBack }: ItsmDashboardCon
 
       {editingLayout && (
         <div className="rounded-md border border-dashed border-brand-200 bg-brand-50/40 px-3 py-2 text-xs text-ink-secondary">
-          Drag cards to reorder. Use the size control on a card to cycle between compact, standard, and wide.
+          Drag any KPI or chart into any grid position. Charts moved above KPIs expand to a full row; use the chart controls to change width and height.
         </div>
       )}
 
@@ -335,31 +400,30 @@ function ItsmKpiDashboardContent({ projectId, preset, onBack }: ItsmDashboardCon
       )}
 
       {dashboard && (
-        <>
           <div className={styles.kpiGrid}>
-            {orderedMetrics.map((metric) => {
+            {orderedItems.map((item) => {
+              if (item.type === "metric") {
+                const metric = item.metric;
               const size = layout.sizes[metric.metricKey] ?? DEFAULT_CARD_SIZE;
               return (
-                <div key={metric.metricKey} className={cardClass(size)}>
+                <div key={item.key} className={cardClass(size)}>
                   <ItsmMetricCard
                     metric={metric}
                     size={size}
                     editing={editingLayout}
                     onClick={handleMetricClick}
                     onResize={cycleCardSize}
-                    onDragStart={(metricKey) => {
-                      draggedMetric.current = metricKey;
-                    }}
-                    onDrop={handleDrop}
+                    onDragStart={(metricKey) => { draggedItem.current = `metric:${metricKey}`; }}
+                    onDrop={(metricKey) => handleItemDrop(`metric:${metricKey}`)}
                   />
                 </div>
               );
-            })}
-          </div>
-
-          <div className={styles.chartGrid}>
-            {dashboard.charts.map((chart) => (
-              <Card key={chart.chartKey} className="overflow-hidden p-3">
+              }
+              const chart = item.chart;
+              const height = layout.chartHeights?.[chart.chartKey] ?? "standard";
+              const width = layout.chartWidths?.[chart.chartKey] ?? "half";
+              return <div key={item.key} className={width === "full" ? styles.chartFull : styles.chartHalf}>
+                <Card draggable={editingLayout} onDragStart={() => { draggedItem.current = `chart:${chart.chartKey}`; }} onDragOver={(event) => editingLayout && event.preventDefault()} onDrop={(event) => { if (editingLayout) { event.preventDefault(); handleItemDrop(`chart:${chart.chartKey}`); } }} className={cn("h-full overflow-hidden p-3", editingLayout && "cursor-grab border-dashed")}>
                 <div className="mb-1 flex items-start justify-between gap-3">
                   <div>
                     <h2 className="text-sm font-semibold text-ink-primary">{chart.title}</h2>
@@ -367,15 +431,16 @@ function ItsmKpiDashboardContent({ projectId, preset, onBack }: ItsmDashboardCon
                       Select a chart mark to open its filtered details
                     </p>
                   </div>
-                  <span className="shrink-0 rounded-full bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-600">
+                  <span className="flex shrink-0 items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-600">
                     {chart.yAxisLabel ?? chart.unit ?? "Records"}
+                    {editingLayout && <><button type="button" onClick={() => cycleChartWidth(chart.chartKey)} className="rounded bg-white px-1">{width === "full" ? "Full" : "½"}</button><button type="button" onClick={() => cycleChartHeight(chart.chartKey)} className="rounded bg-white px-1">{height}</button></>}
                   </span>
                 </div>
-                <ItsmChart chart={chart} onElementClick={handleChartClick(chart.title)} />
-              </Card>
-            ))}
+                <ItsmChart chart={chart} className={height === "compact" ? "h-44" : height === "tall" ? "h-80" : "h-56"} onElementClick={handleChartClick(chart.title)} />
+                </Card>
+              </div>;
+            })}
           </div>
-        </>
       )}
 
       <div

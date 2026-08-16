@@ -18,6 +18,7 @@ import type {
   ItsmMetricValue,
 } from "./types";
 import styles from "./ItsmDashboardScreen.module.css";
+import { DimensionLabelEditor } from "@/components/tablescope/project/dashboard-templates/dimension-label-editor";
 
 const INSIGHT_LABELS: Record<string, string> = {
   incident_insights: "Incident Management Insights",
@@ -87,18 +88,21 @@ export function ItsmInsightsDashboardContent({
   const [selectedPreset, setSelectedPreset] = useState(preset);
   const [period, setPeriod] = useState<PeriodKey>("1_year");
   const [site, setSite] = useState("all");
+  const [dimensionLabel, setDimensionLabel] = useState("Site");
   const [editingLayout, setEditingLayout] = useState(false);
   const [layout, setLayout] = useState<ItsmDashboardLayout>({ order: [], sizes: {} });
   const [backgroundRefreshing, setBackgroundRefreshing] = useState(false);
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [drawer, setDrawer] = useState<DrawerState>({ open: false, title: "" });
   const draggedMetric = useRef<string | null>(null);
+  const draggedChart = useRef<string | null>(null);
   const refreshedKeys = useRef(new Set<string>());
 
   useEffect(() => {
     setSelectedPreset(preset);
     setSite("all");
   }, [preset]);
+  useEffect(() => { if (typeof window !== "undefined") setDimensionLabel(localStorage.getItem(`itsm-dimension-label:${projectId}`) || "Site"); }, [projectId]);
 
   const queryKey = ["project", projectId, "itsm-insights", selectedPreset, period, site] as const;
   const cacheToken = queryKey.join(":");
@@ -161,12 +165,15 @@ export function ItsmInsightsDashboardContent({
       saved = undefined;
     }
     const metricKeys = dashboard.metrics.map((metric) => metric.metricKey);
+    const chartKeys = dashboard.charts.map((chart) => chart.chartKey);
     setLayout({
       order: [
         ...(saved?.order.filter((key) => metricKeys.includes(key)) ?? []),
         ...metricKeys.filter((key) => !saved?.order.includes(key)),
       ],
       sizes: Object.fromEntries(metricKeys.map((key) => [key, saved?.sizes[key] ?? DEFAULT_CARD_SIZE])),
+      chartOrder: [...(saved?.chartOrder?.filter((key) => chartKeys.includes(key)) ?? []), ...chartKeys.filter((key) => !saved?.chartOrder?.includes(key))],
+      chartHeights: Object.fromEntries(chartKeys.map((key) => [key, saved?.chartHeights?.[key] ?? "standard"])),
     });
   }, [dashboard?.dashboard, dashboard?.metrics.length, layoutStorageKey]);
 
@@ -187,6 +194,7 @@ export function ItsmInsightsDashboardContent({
       ...dashboard.metrics.filter((metric) => !layout.order.includes(metric.metricKey)),
     ];
   }, [dashboard, layout.order]);
+  const orderedCharts = useMemo(() => { if (!dashboard) return []; const byKey = new Map(dashboard.charts.map((chart) => [chart.chartKey, chart])); return [...(layout.chartOrder ?? []).map((key) => byKey.get(key)).filter(Boolean), ...dashboard.charts.filter((chart) => !layout.chartOrder?.includes(chart.chartKey))] as ItsmChartType[]; }, [dashboard, layout.chartOrder]);
 
   const { data: drilldownData, isLoading: drilldownLoading } = useQuery<ItsmMetricDrilldown>({
     queryKey: ["project", projectId, "itsm-insight-drilldown", selectedPreset, drawer.metric?.metricKey, period, site],
@@ -213,8 +221,11 @@ export function ItsmInsightsDashboardContent({
     const sourceKey = draggedMetric.current;
     if (!sourceKey || sourceKey === targetKey) return;
     setLayout((current) => {
-      const order = current.order.filter((key) => key !== sourceKey);
-      order.splice(order.indexOf(targetKey), 0, sourceKey);
+      const order = [...current.order];
+      const source = order.indexOf(sourceKey), target = order.indexOf(targetKey);
+      if (source < 0 || target < 0) return current;
+      order.splice(source, 1);
+      order.splice(target, 0, sourceKey);
       return { ...current, order };
     });
     draggedMetric.current = null;
@@ -227,6 +238,8 @@ export function ItsmInsightsDashboardContent({
       return { ...current, sizes: { ...current.sizes, [metricKey]: nextSize } };
     });
   };
+  const handleChartDrop = (targetKey: string) => { const sourceKey = draggedChart.current; if (!sourceKey || sourceKey === targetKey) return; setLayout((current) => { const order = [...(current.chartOrder ?? [])]; const source = order.indexOf(sourceKey), target = order.indexOf(targetKey); if (source < 0 || target < 0) return current; order.splice(source, 1); order.splice(target, 0, sourceKey); return { ...current, chartOrder: order }; }); };
+  const cycleChartHeight = (key: string) => setLayout((current) => { const cycle = ["compact", "standard", "tall"] as const; const height = current.chartHeights?.[key] ?? "standard"; return { ...current, chartHeights: { ...(current.chartHeights ?? {}), [key]: cycle[(cycle.indexOf(height) + 1) % cycle.length] } }; });
 
   const resetLayout = () => {
     if (!dashboard) return;
@@ -234,6 +247,8 @@ export function ItsmInsightsDashboardContent({
     setLayout({
       order: metricKeys,
       sizes: Object.fromEntries(metricKeys.map((key) => [key, DEFAULT_CARD_SIZE])),
+      chartOrder: dashboard.charts.map((chart) => chart.chartKey),
+      chartHeights: Object.fromEntries(dashboard.charts.map((chart) => [chart.chartKey, "standard"])),
     });
   };
 
@@ -249,7 +264,7 @@ export function ItsmInsightsDashboardContent({
 
   const cardClass = (size: ItsmCardSize) =>
     size === "wide" ? styles.cardWide : size === "standard" ? styles.cardStandard : styles.cardCompact;
-  const charts = dashboard?.charts ?? [];
+  const charts = orderedCharts;
 
   return (
     <div className={cn("space-y-3", styles.dashboardContainer)}>
@@ -286,16 +301,10 @@ export function ItsmInsightsDashboardContent({
           >
             {PERIODS.map(([value, label]) => <option key={value} value={value}>Period: {label}</option>)}
           </select>
-          <label className="sr-only" htmlFor="itsm-insight-site">Site</label>
-          <select
-            id="itsm-insight-site"
-            value={site}
-            onChange={(event) => setSite(event.target.value)}
-            className="h-8 rounded-md border border-line-secondary bg-bg-primary px-2 text-xs text-ink-primary focus:border-brand-500 focus:outline-none"
-          >
-            <option value="all">All sites</option>
-            {dashboard?.dataQuality.availableSites?.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}
-          </select>
+          <label className="flex h-8 items-center gap-1 rounded-md border border-line-secondary bg-bg-primary pl-2 text-xs">
+            <DimensionLabelEditor label={dimensionLabel} onSave={(next) => { setDimensionLabel(next); localStorage.setItem(`itsm-dimension-label:${projectId}`, next); }} />
+            <select id="itsm-insight-site" value={site} onChange={(event) => setSite(event.target.value)} aria-label={dimensionLabel} className="h-full border-0 bg-transparent pr-2"><option value="all">All {dimensionLabel.toLowerCase()}</option>{dashboard?.dataQuality.availableSites?.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}</select>
+          </label>
           <label className="sr-only" htmlFor="itsm-insight-dashboard">Dashboard</label>
           <select
             id="itsm-insight-dashboard"
@@ -376,15 +385,15 @@ export function ItsmInsightsDashboardContent({
 
           <div className={styles.insightMainGrid}>
             {charts[0] && (
-              <Card className="overflow-hidden p-3">
-                <ChartHeader chart={charts[0]} />
-                <ItsmChart chart={charts[0]} className="h-72" onElementClick={openChart(charts[0])} />
+              <Card draggable={editingLayout} onDragStart={() => { draggedChart.current = charts[0].chartKey; }} onDragOver={(event) => editingLayout && event.preventDefault()} onDrop={(event) => { if (editingLayout) { event.preventDefault(); handleChartDrop(charts[0].chartKey); } }} className={cn("overflow-hidden p-3", editingLayout && "cursor-grab border-dashed")}>
+                <ChartHeader chart={charts[0]} editing={editingLayout} height={layout.chartHeights?.[charts[0].chartKey]} onResize={() => cycleChartHeight(charts[0].chartKey)} />
+                <ItsmChart chart={charts[0]} className={layout.chartHeights?.[charts[0].chartKey] === "compact" ? "h-56" : layout.chartHeights?.[charts[0].chartKey] === "tall" ? "h-96" : "h-72"} onElementClick={openChart(charts[0])} />
               </Card>
             )}
             <div className={styles.insightSideStack}>
               {charts.slice(1, 3).map((chart) => (
-                <Card key={chart.chartKey} className="overflow-hidden p-3">
-                  <ChartHeader chart={chart} />
+                <Card key={chart.chartKey} draggable={editingLayout} onDragStart={() => { draggedChart.current = chart.chartKey; }} onDragOver={(event) => editingLayout && event.preventDefault()} onDrop={(event) => { if (editingLayout) { event.preventDefault(); handleChartDrop(chart.chartKey); } }} className={cn("overflow-hidden p-3", editingLayout && "cursor-grab border-dashed")}>
+                  <ChartHeader chart={chart} editing={editingLayout} height={layout.chartHeights?.[chart.chartKey]} onResize={() => cycleChartHeight(chart.chartKey)} />
                   <ItsmChart chart={chart} className="h-52" onElementClick={openChart(chart)} />
                 </Card>
               ))}
@@ -393,8 +402,8 @@ export function ItsmInsightsDashboardContent({
 
           <div className={styles.insightBottomGrid}>
             {charts.slice(3, 5).map((chart) => (
-              <Card key={chart.chartKey} className="overflow-hidden p-3">
-                <ChartHeader chart={chart} />
+              <Card key={chart.chartKey} draggable={editingLayout} onDragStart={() => { draggedChart.current = chart.chartKey; }} onDragOver={(event) => editingLayout && event.preventDefault()} onDrop={(event) => { if (editingLayout) { event.preventDefault(); handleChartDrop(chart.chartKey); } }} className={cn("overflow-hidden p-3", editingLayout && "cursor-grab border-dashed")}>
+                <ChartHeader chart={chart} editing={editingLayout} height={layout.chartHeights?.[chart.chartKey]} onResize={() => cycleChartHeight(chart.chartKey)} />
                 <ItsmChart chart={chart} className="h-56" onElementClick={openChart(chart)} />
               </Card>
             ))}
@@ -436,14 +445,14 @@ export function ItsmInsightsDashboardContent({
   );
 }
 
-function ChartHeader({ chart }: { chart: ItsmChartType }) {
+function ChartHeader({ chart, editing = false, height = "standard", onResize }: { chart: ItsmChartType; editing?: boolean; height?: "compact" | "standard" | "tall"; onResize?: () => void }) {
   return (
     <div className="mb-1 flex items-start justify-between gap-3">
       <div>
         <h2 className="text-sm font-semibold text-ink-primary">{chart.title}</h2>
         <p className="text-[11px] text-ink-tertiary">{chart.description ?? "Select a chart mark to open its supporting detail"}</p>
       </div>
-      <span className="shrink-0 rounded-full bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-600">{chart.yAxisLabel ?? chart.unit ?? "Records"}</span>
+      <span className="shrink-0 rounded-full bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-600">{chart.yAxisLabel ?? chart.unit ?? "Records"}{editing && <button type="button" onClick={onResize} className="ml-1 rounded bg-white px-1">{height}</button>}</span>
     </div>
   );
 }

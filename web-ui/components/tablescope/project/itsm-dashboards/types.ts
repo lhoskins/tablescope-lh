@@ -105,4 +105,9 @@ export type ItsmCardSize = "compact" | "standard" | "wide";
 export interface ItsmDashboardLayout {
   order: string[];
   sizes: Record<string, ItsmCardSize>;
+  /** Unified order lets charts and KPI cards occupy the same reorderable grid. */
+  itemOrder?: string[];
+  chartOrder?: string[];
+  chartHeights?: Record<string, "compact" | "standard" | "tall">;
+  chartWidths?: Record<string, "half" | "full">;
 }

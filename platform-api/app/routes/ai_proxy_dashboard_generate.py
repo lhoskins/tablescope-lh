@@ -16,6 +16,10 @@ from app.database import get_db
 from app.models.dashboard import Dashboard
 from app.models.file_source_meta import FileSourceMeta
 from app.models.saved_query import SavedQuery
+from app.services.operational_insight_dashboards import (
+    get_or_create_custom_group,
+    operational_insight_config,
+)
 
 from .ai_proxy_schemas import (
     AIGenerateAndSaveDashboardRequest,
@@ -437,7 +441,12 @@ async def ai_generate_and_save_dashboard(
         quality_score,
     )
 
-    # Step 4: Create the Dashboard
+    # Step 4: Create the Dashboard in the canonical Operational Insight
+    # framework. AI-generated dashboards must never fall back to the legacy
+    # dashboard chrome or create another Custom dashboards group.
+    group = await get_or_create_custom_group(
+        session, tenant_id=context.tenant_id, project_id=project.id
+    )
     dashboard = Dashboard(
         project_id=project.id,
         owner_id=context.user_id,
@@ -450,23 +459,26 @@ async def ai_generate_and_save_dashboard(
             or ""
         ),
         status="draft",
-        config={
-            "widgets": widgets_config,
-            "filters": [],
-            "layout": "grid",
-            "ai_generated": True,
-            "generation_pipeline_version": "insight_first_v1",
-            "business_domain": suggestion.get("business_domain", ""),
-            "intended_audience": suggestion.get("intended_audience", ""),
-            "executive_summary": suggestion.get("executive_summary", ""),
-            "dashboard_quality_score": quality_score,
-            "approved_widget_count": approved_count,
-            "dropped_widget_count": dropped_count,
-            "flagged_widget_count": len(flagged_widgets),
-            "repair_count": repair_count,
-            "rejected_insights": rejected_insights,
-            "validation_summary": validation_summary,
-        },
+        config=operational_insight_config(
+            {
+                "widgets": widgets_config,
+                "globalFilters": [],
+                "ai_generated": True,
+                "generation_pipeline_version": "insight_first_v1",
+                "business_domain": suggestion.get("business_domain", ""),
+                "intended_audience": suggestion.get("intended_audience", ""),
+                "executive_summary": suggestion.get("executive_summary", ""),
+                "dashboard_quality_score": quality_score,
+                "approved_widget_count": approved_count,
+                "dropped_widget_count": dropped_count,
+                "flagged_widget_count": len(flagged_widgets),
+                "repair_count": repair_count,
+                "rejected_insights": rejected_insights,
+                "validation_summary": validation_summary,
+            },
+            group=group,
+            dashboard_name=dashboard_title,
+        ),
     )
     session.add(dashboard)
     await session.commit()

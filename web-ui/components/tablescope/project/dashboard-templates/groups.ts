@@ -8,6 +8,7 @@ import type {
   DashboardTemplateIcon,
   DashboardTemplateMetadata,
   DashboardTemplateParameters,
+  DashboardGroupRecord,
 } from "./types";
 import { templateMetadataOf } from "./types";
 
@@ -35,6 +36,7 @@ export function virtualItsmDashboardConfig(preset: string): Record<string, unkno
   if (!template || !definition) return { itsm_dashboard: preset };
   const parameters: DashboardTemplateParameters = {
     dimensionLabel: template.defaultDimensionLabel,
+    dimensionField: "site",
     valueSource: "query",
     queryName: "ServiceNow active sites",
     defaultPeriod: template.defaultPeriod,
@@ -58,17 +60,39 @@ export function virtualItsmDashboardConfig(preset: string): Record<string, unkno
   };
 }
 
-export function groupDashboards(rows: Dashboard[]): DashboardGroup[] {
+export function groupDashboards(rows: Dashboard[], persisted: DashboardGroupRecord[] = []): DashboardGroup[] {
   const groups = new Map<string, DashboardGroup>();
+  const persistedByDashboard = new Map<number, DashboardGroupRecord>();
+  const persistedBySlug = new Map<string, DashboardGroupRecord>();
+  const customRecords = persisted.filter((record) =>
+    record.slug === "custom-dashboards"
+    || (record.slug.startsWith("custom-dashboards-") && record.name.trim().toLowerCase() === "custom dashboards"),
+  );
+  const canonicalCustom = customRecords.find((record) => record.slug === "custom-dashboards") ?? customRecords[0];
+  for (const original of persisted) {
+    const record = canonicalCustom && customRecords.includes(original) ? canonicalCustom : original;
+    const id = `group:${record.id}`;
+    if (!groups.has(id)) {
+      groups.set(id, { id, persistentId: record.id, name: record.name, icon: record.icon, templateId: record.templateId, dashboards: [], collapsedDefault: record.collapsedDefault });
+    }
+    persistedBySlug.set(original.slug, record);
+    original.dashboardIds.forEach((dashboardId) => persistedByDashboard.set(dashboardId, record));
+  }
   for (const dashboard of rows) {
     const metadata = templateMetadataOf(dashboard);
-    const id = metadata?.groupId ?? "custom-dashboards";
+    const record = persistedByDashboard.get(dashboard.id)
+      ?? (metadata?.groupId ? persistedBySlug.get(metadata.groupId) : undefined)
+      ?? (metadata?.groupId === "custom-dashboards" ? canonicalCustom : undefined);
+    const configuredId = typeof dashboard.config?.dashboardGroupId === "number" ? dashboard.config.dashboardGroupId : undefined;
+    const id = record ? `group:${record.id}` : configuredId ? `group:${configuredId}` : metadata?.groupId ?? "custom-dashboards";
     const current = groups.get(id) ?? {
       id,
-      name: metadata?.groupName ?? "Custom dashboards",
-      icon: metadata?.groupIcon ?? metadata?.dashboardIcon ?? "activity",
-      templateId: metadata?.templateId,
+      persistentId: record?.id ?? configuredId,
+      name: record?.name ?? metadata?.groupName ?? "Custom dashboards",
+      icon: record?.icon ?? metadata?.groupIcon ?? metadata?.dashboardIcon ?? "activity",
+      templateId: record?.templateId ?? metadata?.templateId,
       dashboards: [],
+      collapsedDefault: true,
     };
     current.dashboards.push(dashboard);
     groups.set(id, current);

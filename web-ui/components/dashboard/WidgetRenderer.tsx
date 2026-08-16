@@ -91,7 +91,7 @@ function coerceNumeric(data: Props["data"]): Props["data"] {
 
 /* ── KPI Card (mockup-quality) ──────────────────────────── */
 
-function KpiWidget({ widget, data }: { widget: WidgetConfig; data: Props["data"] }) {
+function KpiWidget({ widget, data, operational = false }: { widget: WidgetConfig; data: Props["data"]; operational?: boolean }) {
   const yKey = getYKey(widget, data);
   const rawValue = data.length > 0 ? data[0][yKey] : null;
   const numVal = typeof rawValue === "number" ? rawValue : parseFloat(String(rawValue ?? "0"));
@@ -103,6 +103,11 @@ function KpiWidget({ widget, data }: { widget: WidgetConfig; data: Props["data"]
       ? numVal.toLocaleString()
       : fmtNumber(numVal);
 
+  const deltaValue = data.length > 0 ? Number(data[0].deltaPercent) : Number.NaN;
+  const hasDelta = Number.isFinite(deltaValue);
+  const direction = widget.visualizationOptions?.favorableDirection ?? "higher";
+  const favorable = hasDelta && (direction === "higher" ? deltaValue > 0 : direction === "lower" ? deltaValue < 0 : false);
+  const unfavorable = hasDelta && direction !== "neutral" && deltaValue !== 0 && !favorable;
   const aggColor =
     widget.aggregation === "sum"
       ? "bg-blue-100 text-blue-600"
@@ -113,15 +118,19 @@ function KpiWidget({ widget, data }: { widget: WidgetConfig; data: Props["data"]
           : "bg-slate-100 text-slate-600";
 
   return (
-    <div className="flex h-full flex-col items-start justify-center px-5 py-4">
-      <div className="mb-1 flex items-center gap-2">
+    <div className={operational ? "flex h-full flex-col items-start justify-center px-1 py-1" : "flex h-full flex-col items-start justify-center px-5 py-4"}>
+      {!operational && <div className="mb-1 flex items-center gap-2">
         <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{widget.title}</span>
         <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase ${aggColor}`}>{widget.aggregation}</span>
-      </div>
-      <div className="text-3xl font-extrabold tracking-tight text-slate-800">{formatted}</div>
+      </div>}
+      <div className={operational ? "text-2xl font-semibold tracking-tight text-ink-primary" : "text-3xl font-extrabold tracking-tight text-slate-800"}>{formatted}</div>
       <div className="mt-1 flex items-center gap-1 text-[11px]">
-        <span className="font-semibold text-emerald-500">&uarr; 8.2%</span>
-        <span className="text-slate-400">vs prior period</span>
+        {hasDelta ? <>
+          <span className={`font-semibold ${favorable ? "text-emerald-600" : unfavorable ? "text-rose-600" : "text-ink-tertiary"}`}>
+            {deltaValue > 0 ? "↑" : deltaValue < 0 ? "↓" : "→"} {Math.abs(deltaValue).toFixed(1)}%
+          </span>
+          <span className="text-ink-tertiary">vs prior period</span>
+        </> : <span className="text-ink-tertiary">No prior-period comparison</span>}
       </div>
     </div>
   );
@@ -163,9 +172,10 @@ type Props = {
   widget: WidgetConfig;
   data: Array<Record<string, unknown>>;
   onElementClick?: (event: ChartClickEvent) => void;
+  operational?: boolean;
 };
 
-export function WidgetRenderer({ widget, data, onElementClick }: Props) {
+export function WidgetRenderer({ widget, data, onElementClick, operational = false }: Props) {
   const xKey = getXKey(widget, data);
   const yKey = getYKey(widget, data);
   const y2Key = getY2Key(widget, data);
@@ -192,7 +202,7 @@ export function WidgetRenderer({ widget, data, onElementClick }: Props) {
     );
   }
 
-  if (widget.type === "kpi") return <KpiWidget widget={widget} data={coercedData} />;
+  if (widget.type === "kpi") return <KpiWidget widget={widget} data={coercedData} operational={operational} />;
   if (widget.type === "table") return <TableWidget data={data} />;
 
   return (
