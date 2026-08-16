@@ -237,6 +237,7 @@ export function ItsmInsightsDashboardContent({
     });
   };
   const handleChartDrop = (targetKey: string) => { const sourceKey = draggedChart.current; if (!sourceKey || sourceKey === targetKey) return; setLayout((current) => { const order = [...(current.chartOrder ?? [])]; const source = order.indexOf(sourceKey), target = order.indexOf(targetKey); if (source < 0 || target < 0) return current; order.splice(source, 1); order.splice(target, 0, sourceKey); return { ...current, chartOrder: order }; }); };
+  const handleChartDropTop = () => { const sourceKey = draggedChart.current; if (!sourceKey) return; setLayout((current) => { const order = [...(current.chartOrder ?? [])]; const source = order.indexOf(sourceKey); if (source < 0) return current; order.splice(source, 1); order.unshift(sourceKey); return { ...current, chartOrder: order }; }); };
   const cycleChartHeight = (key: string) => setLayout((current) => { const cycle = ["compact", "standard", "tall"] as const; const height = current.chartHeights?.[key] ?? "standard"; return { ...current, chartHeights: { ...(current.chartHeights ?? {}), [key]: cycle[(cycle.indexOf(height) + 1) % cycle.length] } }; });
 
   const resetLayout = () => {
@@ -392,6 +393,15 @@ export function ItsmInsightsDashboardContent({
             })}
           </div>
 
+          {editingLayout && (
+            <div
+              onDragOver={(event) => { event.preventDefault(); }}
+              onDrop={(event) => { if (editingLayout) { event.preventDefault(); void handleChartDropTop(); } }}
+              className="flex h-14 items-center justify-center rounded-md border-2 border-dashed border-brand-300 bg-brand-50/30 text-sm font-medium text-brand-700"
+            >
+              Drop here to make first and full width
+            </div>
+          )}
           <div className={styles.insightMainGrid}>
             {charts[0] && (
               <Card draggable={editingLayout} onDragStart={() => { draggedChart.current = charts[0].chartKey; }} onDragOver={(event) => editingLayout && event.preventDefault()} onDrop={(event) => { if (editingLayout) { event.preventDefault(); handleChartDrop(charts[0].chartKey); } }} className={cn("overflow-hidden p-3", editingLayout && "cursor-grab border-dashed")}>
