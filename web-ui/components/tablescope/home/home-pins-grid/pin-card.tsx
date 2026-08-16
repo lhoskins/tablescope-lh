@@ -84,7 +84,7 @@ export function PinCard({
           <IconGripVertical size={14} className="shrink-0 text-ink-tertiary" />
           {actions}
         </div>
-        <div ref={contentRef} className="min-h-0 flex-shrink-0">
+        <div ref={contentRef} className="min-h-0 flex-1">
           <PinContent
             pin={pin}
             feedback={feedback}

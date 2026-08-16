@@ -129,7 +129,6 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
     if (!template) return;
     const nextTemplate = { ...template, parameters: { ...template.parameters, dimensionLabel: nextLabel } };
     await apiClient.put(`/api/projects/${projectId}/dashboards/${dashboard.id}`, { config: { ...dashboard.config, dashboardTemplate: nextTemplate } });
-    if (template.bindingId) await apiClient.put(`/api/projects/${projectId}/dashboard-template-bindings/${template.bindingId}`, { dimension_config: { label: nextLabel, field: template.parameters.dimensionField ?? "site", valueSource: template.parameters.valueSource } });
     setDimensionLabel(nextLabel); onPersisted?.();
   }, [dashboard.config, dashboard.id, onPersisted, projectId, template]);
 

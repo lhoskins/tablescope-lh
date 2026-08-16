@@ -124,11 +124,23 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
     [chatConversationId, notePersistedTurns, projectId],
   );
 
+  // ── Derived counts (used to decide whether Project Insight is meaningful)
+  const queryRows = useMemo(() => queries ?? [], [queries]);
+  const sourceRows = useMemo(
+    () => (sources ?? []).filter((s) => !s.archived),
+    [sources],
+  );
+  const hasProjectData = Boolean(
+    sourceRows.length > 0 ||
+      queryRows.length > 0 ||
+      (project?.documentCount ?? 0) > 0,
+  );
+
   // ── Recent insights from the latest Project Insight snapshot.
   const { data: projectInsight } = useQuery<ProjectInsight>({
     queryKey: ["project", projectId, "insight", "recent"],
     queryFn: () => projectInsightApi.get(projectId),
-    enabled: Boolean(projectId),
+    enabled: Boolean(projectId) && hasProjectData,
     staleTime: 5 * 60 * 1000,
   });
 
@@ -151,11 +163,6 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
   }, [projectInsight]);
 
   // ── Derived counts
-  const queryRows = useMemo(() => queries ?? [], [queries]);
-  const sourceRows = useMemo(
-    () => (sources ?? []).filter((s) => !s.archived),
-    [sources],
-  );
   const dashboardRows = useMemo(() => dashboards ?? [], [dashboards]);
   const connectedSources = sourceRows.filter((s) => !isSaas(s)).length;
   const publishedDashboards = dashboardRows.filter(
@@ -347,11 +354,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
             projectId={projectId}
             insights={recentInsights}
             generatedAt={projectInsight?.generatedAt}
-            hasData={
-              sourceRows.length > 0 ||
-              queryRows.length > 0 ||
-              (project?.documentCount ?? 0) > 0
-            }
+            hasData={hasProjectData}
           />
           <AiConversationsCard projectId={projectId} />
           <QuickActionsCard

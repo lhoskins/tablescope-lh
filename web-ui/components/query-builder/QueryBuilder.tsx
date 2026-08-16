@@ -16,7 +16,7 @@ type Datasource = {
 
 type Filter = { column: string; operand: string; value: string };
 type OrderByItem = { column: string; dir: string };
-type QueryResult = { columns: string[]; rows: Record<string, unknown>[] };
+type QueryResult = { columns: string[]; rows: Record<string, unknown>[]; total?: number };
 
 type SavePayload = {
   name: string;
@@ -1051,7 +1051,7 @@ export function QueryBuilder({ projectId, datasources, onCancel, onSave, isSavin
         {/* ── Execution Results ──────────────────────────────────── */}
         {queryError && <p className="text-sm text-red-600">{queryError}</p>}
         {queryResult && queryResult.rows.length > 0 && (
-          <DataGrid columns={queryResult.columns} rows={queryResult.rows} />
+          <DataGrid columns={queryResult.columns} rows={queryResult.rows} total={queryResult.total} />
         )}
         {queryResult && queryResult.rows.length === 0 && (
           <p className="text-sm text-slate-400">Query returned no results.</p>

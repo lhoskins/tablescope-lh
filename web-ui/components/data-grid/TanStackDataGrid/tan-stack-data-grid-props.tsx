@@ -46,6 +46,7 @@ export type TanStackDataGridProps = {
   rows: Record<string, unknown>[];
   loading?: boolean;
   height?: number;
+  total?: number;
   queryId?: number;
   queryName?: string;
   availableQueries?: QueryRef[];

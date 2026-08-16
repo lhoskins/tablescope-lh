@@ -33,7 +33,7 @@ describe("dashboard template groups", () => {
 
   it("keeps unassigned dashboards in a custom collection", () => {
     const groups = groupDashboards([dashboard(8, "Supplier Dashboard", { widgets: [] })]);
-    expect(groups[0].name).toBe("Custom dashboards");
+    expect(groups[0].name).toBe("Operational Dashboards");
     expect(groups[0].dashboards[0].id).toBe(8);
   });
 

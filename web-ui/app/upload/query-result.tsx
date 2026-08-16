@@ -14,4 +14,5 @@ import { apiClient } from "@/lib/api-client";
 export type QueryResult = {
   columns: string[];
   rows: Record<string, unknown>[];
+  total?: number;
 };

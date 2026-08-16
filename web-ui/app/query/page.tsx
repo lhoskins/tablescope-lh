@@ -8,6 +8,7 @@ import { apiClient } from "@/lib/api-client";
 type QueryResponse = {
   columns: string[];
   rows: Record<string, unknown>[];
+  total?: number;
   drilldownUsed: boolean;
   targetTable: string | null;
   targetColumn: string | null;
@@ -93,7 +94,7 @@ export default function QueryPage() {
               Drill-down applied → {mutation.data.targetTable}.{mutation.data.targetColumn}
             </p>
           )}
-          <DataGrid columns={mutation.data.columns} rows={mutation.data.rows} />
+          <DataGrid columns={mutation.data.columns} rows={mutation.data.rows} total={mutation.data.total} />
         </div>
       )}
     </section>

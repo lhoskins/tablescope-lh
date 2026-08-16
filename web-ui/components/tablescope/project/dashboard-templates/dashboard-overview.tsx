@@ -53,7 +53,7 @@ export function DashboardOverview({
                   <Badge tone={group.templateId ? "ai" : "neutral"}>{group.dashboards.length} dashboard{group.dashboards.length === 1 ? "" : "s"}</Badge>
                 </div>
                 <p className="mt-0.5 text-[11px] text-ink-tertiary">
-                  {group.templateId ? "Operational Insight template collection" : "Dashboards not yet assigned to a template collection"}
+                  {group.templateId ? "Operational Insight template collection" : "Operational Insight dashboard collection"}
                 </p>
               </div>
             </button>

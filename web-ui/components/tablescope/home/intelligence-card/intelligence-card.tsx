@@ -225,7 +225,7 @@ export function IntelligenceCard({
         {renderBold(card.summary)}
       </p>
 
-      <div className={cn("mt-3", frozen && "relative")}>
+      <div className={cn("mt-3 flex flex-col", frozen && "relative flex-1")}>
         {displayCard.chart && (
           <>
             {displayCard.chart.title && displayCard.chart.type !== "kpi_grid" && (

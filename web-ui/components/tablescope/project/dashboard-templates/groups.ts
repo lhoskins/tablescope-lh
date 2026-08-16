@@ -85,10 +85,15 @@ export function groupDashboards(rows: Dashboard[], persisted: DashboardGroupReco
       ?? (metadata?.groupId === "custom-dashboards" ? canonicalCustom : undefined);
     const configuredId = typeof dashboard.config?.dashboardGroupId === "number" ? dashboard.config.dashboardGroupId : undefined;
     const id = record ? `group:${record.id}` : configuredId ? `group:${configuredId}` : metadata?.groupId ?? "custom-dashboards";
+    const displayName = record?.name ?? metadata?.groupName;
+    const resolvedName =
+      displayName && displayName.trim().toLowerCase() !== "custom dashboards"
+        ? displayName
+        : "Operational Dashboards";
     const current = groups.get(id) ?? {
       id,
       persistentId: record?.id ?? configuredId,
-      name: record?.name ?? metadata?.groupName ?? "Custom dashboards",
+      name: resolvedName,
       icon: record?.icon ?? metadata?.groupIcon ?? metadata?.dashboardIcon ?? "activity",
       templateId: record?.templateId ?? metadata?.templateId,
       dashboards: [],

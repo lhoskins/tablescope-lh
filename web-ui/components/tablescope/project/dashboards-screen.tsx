@@ -226,7 +226,7 @@ export function DashboardsScreen({
           loading={isLoading}
           onOpenDashboard={setViewingId}
           onAddTemplate={() => setTemplateOpen(true)}
-          onNewDashboard={() => setDesigner({ open: true, dashboardGroupName: "Custom dashboards" })}
+          onNewDashboard={() => setDesigner({ open: true, dashboardGroupName: "Operational Dashboards" })}
           onDeleteDashboard={handleDeleteDashboard}
           onCreateGroup={(name) => createGroupMutation.mutate(name)}
           onRenameGroup={(group, name) => renameGroupMutation.mutate({ group, name })}
