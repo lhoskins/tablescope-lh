@@ -225,9 +225,9 @@ export function IntelligenceCard({
         {renderBold(card.summary)}
       </p>
 
-      <div className={cn("mt-3 flex flex-col", frozen && "relative flex-1")}>
+      <div className={cn("mt-3 flex flex-col", frozen && "relative flex-1 overflow-hidden")}>
         {displayCard.chart && (
-          <>
+          <div className={cn("min-h-0", frozen && "flex-1 overflow-hidden")}>
             {displayCard.chart.title && displayCard.chart.type !== "kpi_grid" && (
               <div className="mb-1 text-small text-ink-tertiary">
                 {displayCard.chart.title}
@@ -242,7 +242,7 @@ export function IntelligenceCard({
                 onViewChange={setTimeSeriesView}
               />
             )}
-          </>
+          </div>
         )}
 
       {card.callout && (
@@ -268,37 +268,39 @@ export function IntelligenceCard({
       {!hideActions && <InsightAnalysisStrip card={card} />}
 
       {!hideActions && (
-        <InsightCardActionToolbar
-          card={displayCard}
-          actionsDisclosure={actionsDisclosure}
-          overlay={frozen}
-          canCreateAction={canCreateAction}
-          onCreateAction={canCreateAction ? onCreateAction : undefined}
-          onExplain={() => setExplainOpen(true)}
-          onChartOptions={() => setChartDialogOpen(true)}
-          onAddToDashboard={
-            onSaveToDashboard ? () => onSaveToDashboard(displayCard) : undefined
-          }
-          onDownloadPng={handleDownloadPng}
-          isPngExporting={pngExporting}
-          onExportSql={displayCard.sql?.trim() ? handleExportSql : undefined}
-          isSqlExporting={sqlExporting}
-          onExportCsv={canExportCsv ? handleExportCsv : undefined}
-          isCsvExporting={csvExporting}
-          feedback={feedback}
-          onFeedbackClick={
-            onFeedbackSave ? handleFeedbackClick : undefined
-          }
-          feedbackStatus={
-            feedback ? (
-              <InsightFeedbackStatusBadge
-                feedback={feedback}
-                onClick={() => setStatusDialogOpen(true)}
-              />
-            ) : undefined
-          }
-          selectedChart={selectedChart}
-        />
+        <div className={cn(frozen && "mt-auto")}>
+          <InsightCardActionToolbar
+            card={displayCard}
+            actionsDisclosure={actionsDisclosure}
+            overlay={false}
+            canCreateAction={canCreateAction}
+            onCreateAction={canCreateAction ? onCreateAction : undefined}
+            onExplain={() => setExplainOpen(true)}
+            onChartOptions={() => setChartDialogOpen(true)}
+            onAddToDashboard={
+              onSaveToDashboard ? () => onSaveToDashboard(displayCard) : undefined
+            }
+            onDownloadPng={handleDownloadPng}
+            isPngExporting={pngExporting}
+            onExportSql={displayCard.sql?.trim() ? handleExportSql : undefined}
+            isSqlExporting={sqlExporting}
+            onExportCsv={canExportCsv ? handleExportCsv : undefined}
+            isCsvExporting={csvExporting}
+            feedback={feedback}
+            onFeedbackClick={
+              onFeedbackSave ? handleFeedbackClick : undefined
+            }
+            feedbackStatus={
+              feedback ? (
+                <InsightFeedbackStatusBadge
+                  feedback={feedback}
+                  onClick={() => setStatusDialogOpen(true)}
+                />
+              ) : undefined
+            }
+            selectedChart={selectedChart}
+          />
+        </div>
       )}
       </div>
 
