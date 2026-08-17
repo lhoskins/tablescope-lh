@@ -1,7 +1,7 @@
 "use client";
 
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -11,16 +11,12 @@ import { MembersDialog } from "@/components/tablescope/project/members-dialog";
 import { ShareToggle } from "@/components/tablescope/project/share-toggle";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
 import { ContextPanel, ContextSection, IsolationCard } from "@/components/tablescope/context-panel";
-import { StatTile } from "@/components/ui/stat-tile";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
 import { TurnBubble } from "@/components/tablescope/conversation/conversation-turn";
-import {
-  AiConversationsCard,
-  recentConversationsKey,
-} from "@/components/tablescope/project/ai-conversations-card";
+import { recentConversationsKey } from "@/components/tablescope/project/ai-conversations-card";
 import { QuickActionsCard } from "@/components/tablescope/project/quick-actions-card";
 import {
   createConversation,
@@ -42,12 +38,13 @@ import {
   useProjectActivity,
   useProjectGraph,
   type DataSource,
-} from "@/lib/ui/use-project-data";import { isSaas } from "./overview-screen/is-saas";
+} from "@/lib/ui/use-project-data";
 import { PROJECT_INSIGHTS_TITLE } from "./overview-screen/project-insights-title";
 import { PROJECT_INSIGHTS_SURFACE } from "./overview-screen/project-insights-surface";
 import { pollConversation } from "./overview-screen/poll-conversation";
 import { ProjectHeader } from "./overview-screen/project-header";
-import { RecentInsightsCard } from "./overview-screen/recent-insights-card";
+import { RecentActivityFeed } from "./overview-screen/recent-activity-feed";
+import { StatBar } from "./overview-screen/stat-bar";
 
 
 
@@ -70,6 +67,18 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
   const [chatConversationId, setChatConversationId] = useState<number | null>(null);
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
+
+  // The composer is pinned; new turns render at the bottom of the scrollable
+  // area right above it, so keep that area scrolled to the newest turn —
+  // the same behavior a chat interface gives for free.
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (chatTurns.length === 0 && !chatBusy) return;
+    scrollAreaRef.current?.scrollTo({
+      top: scrollAreaRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [chatTurns, chatBusy]);
 
   // A saved successful answer belongs in the permanent conversations panel
   // straight away; the on-page transcript stays as-is.
@@ -157,10 +166,6 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
     [sources],
   );
   const dashboardRows = useMemo(() => dashboards ?? [], [dashboards]);
-  const connectedSources = sourceRows.filter((s) => !isSaas(s)).length;
-  const publishedDashboards = dashboardRows.filter(
-    (d) => d.status.toLowerCase() === "published",
-  ).length;
   const memberCount = (members ?? []).filter((m) => m.is_active).length;
   const aiActions = (activity?.events ?? []).filter((e) => e.category === "ai");
   const tableNodes = useMemo(
@@ -172,7 +177,6 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
       ),
     [graph],
   );
-  const edges = graph?.edges ?? [];
 
   const canEditProject = user.rawRole !== "viewer";
 
@@ -182,6 +186,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
       projectId={projectId}
       activeNav="overview"
       breadcrumbLabel="Overview"
+      scrollable={false}
       contextPanel={
         <ContextPanel
           title="AI Context"
@@ -264,86 +269,27 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
         </ContextPanel>
       }
     >
-      <div className="space-y-5">
-        <ProjectHeader
-          project={project}
-          memberCount={memberCount}
-          aiStatus={project?.aiStatus ?? "idle"}
-          onMembers={() => setShowMembers(true)}
-          onToast={push}
-        />
+      <div className="flex min-h-0 flex-1 flex-col">
+        {/* Scrollable content — the composer below never moves with it. */}
+        <div ref={scrollAreaRef} className="min-h-0 flex-1 space-y-5 overflow-y-auto pb-4">
+          <ProjectHeader
+            project={project}
+            memberCount={memberCount}
+            aiStatus={project?.aiStatus ?? "idle"}
+            onMembers={() => setShowMembers(true)}
+            onToast={push}
+          />
 
-        <HomeAiSuggestions
-          projectId={Number(projectId)}
-          showAskBox={true}
-          onAsk={handleAsk}
-        />
+          <StatBar
+            projectId={projectId}
+            dataSources={sourceRows.length}
+            tables={project?.queryCount ?? queryRows.length}
+            documents={project?.documentCount ?? 0}
+            dashboards={project?.dashboardCount ?? dashboardRows.length}
+            aiActions={activity?.stats?.ai_actions ?? aiActions.length}
+          />
 
-        {(chatTurns.length > 0 || chatBusy || chatError) && (
-          <div className="space-y-4 rounded-xl border border-line-tertiary bg-bg-primary p-4">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="text-h3 text-ink-primary">Ask Anything</h3>
-              {chatConversationId && (
-                <Button variant="ghost" size="sm" onClick={openInAssistant}>
-                  Open in AI Assistant
-                </Button>
-              )}
-            </div>
-            {chatTurns.map((t, i) => (
-              <TurnBubble
-                key={t.id}
-                turn={t}
-                isLast={i === chatTurns.length - 1}
-                onFollowUp={handleAsk}
-              />
-            ))}
-            {chatBusy && (
-              <div className="flex items-center gap-2 text-small text-ink-tertiary">
-                <IconLoader2 size={16} className="animate-spin" />
-                TableScope is thinking…
-              </div>
-            )}
-            {chatError && <p className="text-small text-danger">{chatError}</p>}
-          </div>
-        )}
-
-        <section aria-label="Project KPIs">
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-            <StatTile
-              label="Data Sources"
-              value={sourceRows.length}
-              hint={`${connectedSources} connected`}
-            />
-            <StatTile
-              label="Tables"
-              value={project?.queryCount ?? queryRows.length}
-              hint={
-                queryRows.filter((q) => q.ai_generated).length > 0
-                  ? `${queryRows.filter((q) => q.ai_generated).length} AI-generated`
-                  : undefined
-              }
-            />
-            <StatTile
-              label="Documents"
-              value={project?.documentCount ?? 0}
-              hint={`${edges.length} relationship${edges.length === 1 ? "" : "s"}`}
-            />
-            <StatTile
-              label="Dashboards"
-              value={project?.dashboardCount ?? dashboardRows.length}
-              hint={`${publishedDashboards} published`}
-            />
-            <StatTile
-              label="AI Actions"
-              value={activity?.stats?.ai_actions ?? aiActions.length}
-              hint="All audited"
-              hintTone="success"
-            />
-          </div>
-        </section>
-
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-[33fr_43fr_24fr]">
-          <RecentInsightsCard
+          <RecentActivityFeed
             projectId={projectId}
             insights={recentInsights}
             generatedAt={projectInsight?.generatedAt}
@@ -353,11 +299,47 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
               (project?.documentCount ?? 0) > 0
             }
           />
-          <AiConversationsCard projectId={projectId} />
-          <QuickActionsCard
-            className="md:col-span-2 xl:col-span-1"
-            projectId={projectId}
-            canEdit={canEditProject}
+
+          <QuickActionsCard projectId={projectId} canEdit={canEditProject} />
+
+          {(chatTurns.length > 0 || chatBusy || chatError) && (
+            <div className="space-y-4 rounded-xl border border-line-tertiary bg-bg-primary p-4">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-h3 text-ink-primary">Ask Anything</h3>
+                {chatConversationId && (
+                  <Button variant="ghost" size="sm" onClick={openInAssistant}>
+                    Open in AI Assistant
+                  </Button>
+                )}
+              </div>
+              {chatTurns.map((t, i) => (
+                <TurnBubble
+                  key={t.id}
+                  turn={t}
+                  isLast={i === chatTurns.length - 1}
+                  onFollowUp={handleAsk}
+                />
+              ))}
+              {chatBusy && (
+                <div className="flex items-center gap-2 text-small text-ink-tertiary">
+                  <IconLoader2 size={16} className="animate-spin" />
+                  TableScope is thinking…
+                </div>
+              )}
+              {chatError && <p className="text-small text-danger">{chatError}</p>}
+            </div>
+          )}
+        </div>
+
+        {/* Pinned composer — stays in view like a chat input, never scrolls
+            away with the content above it. chatTurns/chatBusy/chatError are
+            plain React state (never persisted), so a refresh clears any
+            result the same way it always has. */}
+        <div className="max-h-[50vh] shrink-0 overflow-y-auto border-t border-line-tertiary pt-4">
+          <HomeAiSuggestions
+            projectId={Number(projectId)}
+            showAskBox={true}
+            onAsk={handleAsk}
           />
         </div>
       </div>

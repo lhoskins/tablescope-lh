@@ -16,6 +16,7 @@ export function ProjectShell({
   breadcrumbLabel,
   actions,
   contextPanel,
+  scrollable,
   children,
 }: {
   projectId: string;
@@ -23,6 +24,9 @@ export function ProjectShell({
   breadcrumbLabel: string;
   actions?: ReactNode;
   contextPanel?: ReactNode;
+  /** When false, the main content area does not scroll — the page manages
+   *  its own internal scroll region (e.g. a pinned bottom composer). */
+  scrollable?: boolean;
   children: ReactNode;
 }) {
   const router = useRouter();
@@ -64,6 +68,7 @@ export function ProjectShell({
       topBarRight={actions}
       subHeader={<ProjectResourceTabs projectId={projectId} />}
       contextPanel={contextPanel}
+      scrollable={scrollable}
     >
       {children}
     </AppShell>
