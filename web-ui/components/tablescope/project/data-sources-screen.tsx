@@ -238,25 +238,30 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
     },
   ];
 
+  const inDetail = Boolean(detail);
+
   return (
     <ProjectShell
       projectId={projectId}
       activeNav="project-data-sources"
       breadcrumbLabel="Data Sources"
-      actions={
-        <>
-          <Button variant="secondary">
-            <IconRefresh size={14} />
-            Sync all
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => router.push(`/projects/${projectId}/data-source-builder`)}
-          >
-            <IconDatabasePlus size={14} />
-            Data Source Builder
-          </Button>
-        </>
+      showProjectHeader={!inDetail}
+      headerActions={
+        !inDetail ? (
+          <>
+            <Button variant="secondary">
+              <IconRefresh size={14} />
+              Sync all
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => router.push(`/projects/${projectId}/data-source-builder`)}
+            >
+              <IconDatabasePlus size={14} />
+              Data Source Builder
+            </Button>
+          </>
+        ) : undefined
       }
     >
       {detail ? (

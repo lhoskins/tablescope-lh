@@ -198,6 +198,7 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
   const selected =
     rows.find((q) => q.id === selectedId) ?? filtered[0] ?? rows[0] ?? null;
   const detailQuery = rows.find((q) => q.id === detailId) ?? null;
+  const listMode = !creating && !editing && !detailQuery;
 
   const aiCount = rows.filter((q) => q.ai_generated).length;
   const sharedCount = rows.filter((q) => q.is_shared).length;
@@ -239,11 +240,14 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
       projectId={projectId}
       activeNav="project-queries"
       breadcrumbLabel="Tables"
-      actions={
-        <Button variant="primary" size="md" onClick={() => setShowAddTable(true)}>
-          <IconPlus size={15} />
-          New Table
-        </Button>
+      showProjectHeader={listMode}
+      headerActions={
+        listMode ? (
+          <Button variant="primary" size="md" onClick={() => setShowAddTable(true)}>
+            <IconPlus size={15} />
+            New Table
+          </Button>
+        ) : undefined
       }
     >
       {showAddTable && (
@@ -284,6 +288,8 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
         />
       ) : (
       <div className="space-y-4">
+        {filter !== "archive" && <StatBar items={statItems} />}
+
         {filter !== "archive" && (
         <div className="rounded-lg border border-brand-100 bg-brand-50/40 p-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -331,8 +337,6 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
           )}
         </div>
         )}
-
-        {filter !== "archive" && <StatBar items={statItems} />}
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[220px] flex-1">

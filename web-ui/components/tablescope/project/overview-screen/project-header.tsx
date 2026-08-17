@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   IconCheck,
@@ -23,12 +23,14 @@ export function ProjectHeader({
   aiStatus,
   onMembers,
   onToast,
+  actions,
 }: {
   project: ProjectSummary | null;
   memberCount: number;
   aiStatus: AiStatus;
   onMembers: () => void;
   onToast: (message: string, tone?: "success" | "error" | "info") => void;
+  actions?: ReactNode;
 }) {
   const statusLabel = aiStatusLabel(aiStatus);
   const statusTone = aiStatusTone(aiStatus);
@@ -150,6 +152,7 @@ export function ProjectHeader({
           </p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
+        {actions}
         <ShareToggle
           projectId={String(project?.id ?? "")}
           shared={project?.visibility === "shared"}
