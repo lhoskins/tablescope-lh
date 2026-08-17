@@ -1,14 +1,28 @@
 "use client";
 
+import { IconChartBar } from "@tabler/icons-react";
 import { Card } from "@/components/ui/card";
 import { WidgetRenderer } from "./WidgetRenderer";
 import type { WidgetConfig, ChartClickEvent } from "./types";
-// Shared operational-insight visual grammar (brief/KPI/chart grid layout) —
-// built for the ITSM insight dashboards but purely structural CSS, no ITSM
-// logic. Reused here so an AI-Designer-created dashboard of any domain
-// renders with the same "ServiceNow style" the ITSM dashboards do, instead
-// of the free-form widget grid every other dashboard uses.
+// Shared operational-insight visual grammar — built for the ITSM insight
+// dashboards but structurally domain-agnostic (CSS grid layout, the chart
+// renderer's option-building, the metric-card shape), so it's reused here
+// as-is rather than re-approximated. This is deliberate: the generic
+// WidgetRenderer/EChartsWidget engine every other dashboard uses has its
+// own different chart defaults (vertical bars, a heavier line-area fill) —
+// close in spirit but not the actual ServiceNow look. Only ItsmChart
+// produces skinny horizontal bars with end labels and the specific subtle
+// (10%-opacity, first-series-only) area fill the real screens use, so an
+// AI-Designer dashboard of any domain renders through it too.
 import styles from "@/components/tablescope/project/itsm-dashboards/ItsmDashboardScreen.module.css";
+import { ItsmChart as OperationalChart } from "@/components/tablescope/project/itsm-dashboards/ItsmChart";
+import type {
+  ItsmChart as OperationalChartData,
+  ItsmChartSeries,
+} from "@/components/tablescope/project/itsm-dashboards/types";
+
+export { OperationalChart };
+export type { OperationalChartData };
 
 interface OperationalNarrativeWidget {
   id?: string;
@@ -39,6 +53,71 @@ function findNarrative(
   return operationalWidgets.find((w) => w.type === type);
 }
 
+function toNumber(value: unknown): number | null {
+  const num = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+/** Adapts a dashboard widget + its fetched rows into the shape ItsmChart
+ *  renders, so any AI-Designer chart gets the exact ServiceNow chart
+ *  styling rather than an approximation of it. Pivots into one series per
+ *  distinct value of groupByColumn when the widget uses one (e.g. "Opened"
+ *  vs "Resolved" on the same axis), otherwise a single named series. */
+export function toOperationalChartData(
+  widget: WidgetConfig,
+  rows: Array<Record<string, unknown>>,
+): OperationalChartData {
+  const xKey = widget.xColumn || widget.xKey || "";
+  const yKey = widget.yColumn || widget.yKey || "";
+  const groupKey = widget.groupByColumn;
+
+  let categories: string[];
+  let series: ItsmChartSeries[];
+
+  if (groupKey && rows.length > 0 && Object.keys(rows[0]).includes(groupKey)) {
+    const xValues: string[] = [];
+    const byGroup = new Map<string, Map<string, number | null>>();
+    for (const row of rows) {
+      const x = String(row[xKey] ?? "");
+      const group = String(row[groupKey] ?? "Other");
+      if (!xValues.includes(x)) xValues.push(x);
+      if (!byGroup.has(group)) byGroup.set(group, new Map());
+      byGroup.get(group)!.set(x, toNumber(row[yKey]));
+    }
+    categories = xValues;
+    series = Array.from(byGroup.entries()).map(([name, valuesByX]) => ({
+      name,
+      x: xValues,
+      y: xValues.map((x) => valuesByX.get(x) ?? null),
+    }));
+  } else {
+    const x = rows.map((row) => String(row[xKey] ?? ""));
+    const y = rows.map((row) => toNumber(row[yKey]));
+    categories = x;
+    series = [{ name: widget.title || yKey || "Value", x, y }];
+  }
+
+  const chartType =
+    widget.type === "bar"
+      ? "skinny_bar"
+      : widget.type === "pie"
+        ? "pie"
+        : widget.type === "heatmap"
+          ? "heatmap"
+          : "line";
+
+  return {
+    chartKey: widget.id,
+    title: widget.title,
+    chartType,
+    xAxisLabel: null,
+    yAxisLabel: widget.yColumn || null,
+    series,
+    categories,
+    unit: null,
+  };
+}
+
 /**
  * Curated operational-insight layout: brief, KPI grid, a main chart + side
  * stack, then a bottom row pairing charts with Best Improvement
@@ -54,12 +133,17 @@ export function OperationalInsightGrid({
   operationalWidgets,
   onEditWidget,
   onElementClick,
+  onChartOptions,
 }: {
   widgets: WidgetConfig[];
   widgetData: Record<string, Array<Record<string, unknown>>>;
   operationalWidgets: OperationalNarrativeWidget[];
   onEditWidget: (widget: WidgetConfig) => void;
   onElementClick: (widget: WidgetConfig, event: ChartClickEvent) => void;
+  /** Opens the lightweight "pick a compatible chart type" picker, reusing
+   *  the same ranking Business Insight cards use, as an alternative to a
+   *  full AI re-design via `onEditWidget`. */
+  onChartOptions?: (widget: WidgetConfig) => void;
 }) {
   const brief = findNarrative(operationalWidgets, "operational_brief");
   const improvements = findNarrative(operationalWidgets, "improvement_opportunities");
@@ -77,21 +161,38 @@ export function OperationalInsightGrid({
         <h3 className="truncate text-small font-semibold text-ink-primary">
           {widget.title || "Untitled"}
         </h3>
-        <button
-          type="button"
-          onClick={() => onEditWidget(widget)}
-          title="Modify with AI"
-          className="shrink-0 rounded p-1 text-ink-tertiary transition-colors hover:bg-bg-secondary hover:text-ink-secondary"
-        >
-          {EDIT_ICON}
-        </button>
+        <div className="flex shrink-0 items-center gap-0.5">
+          {onChartOptions && (
+            <button
+              type="button"
+              onClick={() => onChartOptions(widget)}
+              title="Chart options"
+              className="rounded p-1 text-ink-tertiary transition-colors hover:bg-bg-secondary hover:text-ink-secondary"
+            >
+              <IconChartBar size={14} />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => onEditWidget(widget)}
+            title="Modify with AI"
+            className="rounded p-1 text-ink-tertiary transition-colors hover:bg-bg-secondary hover:text-ink-secondary"
+          >
+            {EDIT_ICON}
+          </button>
+        </div>
       </div>
       <div className={heightClass}>
-        <WidgetRenderer
-          widget={widget}
-          data={widgetData[widget.id] ?? []}
-          operational
-          onElementClick={(event) => onElementClick(widget, event)}
+        <OperationalChart
+          chart={toOperationalChartData(widget, widgetData[widget.id] ?? [])}
+          className="h-full"
+          onElementClick={(name, value) =>
+            onElementClick(widget, {
+              sourceField: widget.xColumn || widget.xKey || "",
+              value: value ?? name,
+              label: name,
+            })
+          }
         />
       </div>
     </Card>

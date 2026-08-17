@@ -37,6 +37,7 @@ import type {
 import type { QueryScope, QueryScopeFilterResponse } from "@/types/query-scope";
 import { WidgetRenderer } from "./WidgetRenderer";
 import { OperationalInsightGrid } from "./OperationalInsightGrid";
+import { WidgetChartOptionsDialog } from "./WidgetChartOptionsDialog";
 import { FilterBar } from "./FilterBar";
 import { DateRangeControl } from "./DateRangeControl";
 import { DrilldownPanel, type DrilldownState } from "./DrilldownPanel";
@@ -389,6 +390,25 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
     setDesignerMode("edit_insight");
   };
 
+  const [chartOptionsWidget, setChartOptionsWidget] = useState<WidgetConfig | null>(null);
+
+  const handleApplyChartOptions = useCallback(
+    (chartType: string, chartSubtype: string | undefined) => {
+      if (!chartOptionsWidget) return;
+      const updatedWidgets = widgets.map((w) =>
+        w.id === chartOptionsWidget.id
+          ? {
+              ...w,
+              type: chartType as WidgetConfig["type"],
+              chartSubtype: chartSubtype as WidgetConfig["chartSubtype"],
+            }
+          : w,
+      );
+      updateMutation.mutate({ config: { ...dashboard.config, widgets: updatedWidgets, globalFilters } });
+    },
+    [chartOptionsWidget, dashboard.config, globalFilters, updateMutation, widgets],
+  );
+
   const handleFiltersChange = (newFilters: DashboardFilter[]) => {
     updateMutation.mutate({ config: { ...dashboard.config, widgets, globalFilters: newFilters } });
   };
@@ -650,6 +670,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
             operationalWidgets={operationalWidgets}
             onEditWidget={handleEditWidget}
             onElementClick={handleElementClick}
+            onChartOptions={setChartOptionsWidget}
           />
         ) : widgets.length > 0 ? (
           <div ref={containerRef} className="w-full">
@@ -759,6 +780,16 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
         }}
         notify={push}
       />
+      {chartOptionsWidget && (
+        <WidgetChartOptionsDialog
+          widget={chartOptionsWidget}
+          rows={widgetData[chartOptionsWidget.id] ?? []}
+          projectId={projectId}
+          open={chartOptionsWidget !== null}
+          onClose={() => setChartOptionsWidget(null)}
+          onApply={handleApplyChartOptions}
+        />
+      )}
       <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </div>
   );
