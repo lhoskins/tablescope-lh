@@ -79,15 +79,8 @@ export function ProjectHeader({
 
   return (
     <header className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-line-tertiary bg-bg-primary p-4">
-      <div className="flex items-start gap-3">
-        <span
-          className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-lg font-semibold text-white"
-          style={{ backgroundColor: project?.accent ?? "var(--brand-500)" }}
-        >
-          {(project?.name ?? "P").slice(0, 1).toUpperCase()}
-        </span>
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
             {editing ? (
               <div className="flex items-center gap-2">
                 <input
@@ -155,7 +148,6 @@ export function ProjectHeader({
               ` · ${memberCount} member${memberCount === 1 ? "" : "s"}`}
             {project?.updatedLabel && ` · Updated ${project.updatedLabel}`}
           </p>
-        </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <ShareToggle

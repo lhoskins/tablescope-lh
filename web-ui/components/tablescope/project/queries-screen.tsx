@@ -11,14 +11,12 @@ import {
   IconArchive,
   IconArrowBackUp,
   IconTrash,
+  IconTable,
+  IconShare,
+  IconClock,
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
-import {
-  ContextPanel,
-  ContextSection,
-} from "@/components/tablescope/context-panel";
 import { AddDatasourceModal } from "@/components/datasource/AddDatasourceModal";
-import { StatTile } from "@/components/ui/stat-tile";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -35,11 +33,12 @@ import {
   QueryResultView,
   QueryBuilderEdit,
   QueryBuilderCreate,
-} from "@/components/tablescope/project/detail-views";import { Filter } from "./queries-screen/filter";
+} from "@/components/tablescope/project/detail-views";
+import { StatBar, type StatItem } from "./overview-screen/stat-bar";
+import { Filter } from "./queries-screen/filter";
 import { FILTERS } from "./queries-screen/filters";
 import { avgRuntime } from "./queries-screen/avg-runtime";
 import { ArchiveCard } from "./queries-screen/archive-card";
-import { QueryPreviewPanel } from "./queries-screen/query-preview-panel";
 
 
 
@@ -204,6 +203,37 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
   const sharedCount = rows.filter((q) => q.is_shared).length;
   const aiPct = rows.length ? Math.round((aiCount / rows.length) * 100) : 0;
 
+  const statItems: StatItem[] = [
+    {
+      key: "total",
+      icon: IconTable,
+      iconClass: "bg-brand-50 text-brand-700",
+      value: rows.length,
+      label: "Total tables",
+    },
+    {
+      key: "ai",
+      icon: IconSparkles,
+      iconClass: "bg-ai-bg text-ai",
+      value: aiCount,
+      label: "AI-generated",
+    },
+    {
+      key: "shared",
+      icon: IconShare,
+      iconClass: "bg-success-bg text-success",
+      value: sharedCount,
+      label: "Shared",
+    },
+    {
+      key: "runtime",
+      icon: IconClock,
+      iconClass: "bg-warning-bg text-warning",
+      value: avgRuntime(rows),
+      label: "Avg run time",
+    },
+  ];
+
   return (
     <ProjectShell
       projectId={projectId}
@@ -215,7 +245,6 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
           New Table
         </Button>
       }
-      contextPanel={<QueryPreviewPanel query={detailQuery ?? selected} />}
     >
       {showAddTable && (
         <AddDatasourceModal
@@ -303,22 +332,7 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
         </div>
         )}
 
-        {filter !== "archive" && (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatTile label="Total tables" value={rows.length} />
-          <StatTile
-            label="AI-generated"
-            value={aiCount}
-            hint={`${aiPct}% of total`}
-          />
-          <StatTile
-            label="Shared"
-            value={sharedCount}
-            hint={`${rows.length - sharedCount} private`}
-          />
-          <StatTile label="Avg run time" value={avgRuntime(rows)} />
-        </div>
-        )}
+        {filter !== "archive" && <StatBar items={statItems} />}
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[220px] flex-1">
