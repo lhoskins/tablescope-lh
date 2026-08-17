@@ -1,11 +1,10 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
-
-const push = vi.fn();
+import type { ReactNode } from "react";
+import { describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push, replace: vi.fn() }),
-  usePathname: () => "/projects/7",
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => "/projects/7/data-sources",
 }));
 
 vi.mock("@/lib/auth", () => ({
@@ -24,16 +23,16 @@ vi.mock("@/lib/ui/use-project-data", () => ({
 
 vi.mock("./app-shell", () => ({
   AppShell: ({
-    topBarLeft,
+    topBarRight,
     subHeader,
     children,
   }: {
-    topBarLeft: React.ReactNode;
-    subHeader?: React.ReactNode;
-    children: React.ReactNode;
+    topBarRight?: ReactNode;
+    subHeader?: ReactNode;
+    children: ReactNode;
   }) => (
     <div>
-      <div>{topBarLeft}</div>
+      <div>{topBarRight}</div>
       <div data-testid="sub-header">{subHeader}</div>
       {children}
     </div>
@@ -43,22 +42,9 @@ vi.mock("./app-shell", () => ({
 import { ProjectShell } from "./project-shell";
 
 describe("ProjectShell", () => {
-  beforeEach(() => push.mockClear());
-
-  it("renders a back-to-projects button that routes to /projects", () => {
+  it("renders project resource tabs in the sub-header for non-overview pages", () => {
     render(
-      <ProjectShell projectId="7" activeNav="overview" breadcrumbLabel="Overview">
-        <div>body</div>
-      </ProjectShell>,
-    );
-    const back = screen.getByRole("button", { name: "Back to projects" });
-    fireEvent.click(back);
-    expect(push).toHaveBeenCalledWith("/projects");
-  });
-
-  it("renders project resource tabs in the sub-header", () => {
-    render(
-      <ProjectShell projectId="7" activeNav="overview" breadcrumbLabel="Overview">
+      <ProjectShell projectId="7" activeNav="project-data-sources" breadcrumbLabel="Data Sources">
         <div>body</div>
       </ProjectShell>,
     );
@@ -68,5 +54,15 @@ describe("ProjectShell", () => {
     expect(subHeader).toHaveTextContent("Tables");
     expect(subHeader).toHaveTextContent("Documents");
     expect(subHeader).toHaveTextContent("Dashboards");
+  });
+
+  it("omits the sub-header tabs on the overview page", () => {
+    render(
+      <ProjectShell projectId="7" activeNav="overview" breadcrumbLabel="Overview">
+        <div>body</div>
+      </ProjectShell>,
+    );
+    const subHeader = screen.getByTestId("sub-header");
+    expect(subHeader).toBeEmptyDOMElement();
   });
 });

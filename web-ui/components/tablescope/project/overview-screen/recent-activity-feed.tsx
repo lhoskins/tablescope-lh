@@ -25,7 +25,7 @@ import { insightCategory } from "./insight-category";
 /** Combined view of Project Insight cards + recent AI Assistant turns, newest
  *  first, so the page shows one activity feed instead of two separate lists
  *  competing for attention. */
-const FEED_LIMIT = 6;
+const FEED_LIMIT = 10;
 
 type InsightKind = "risk" | "trend" | "opportunity" | "analysis";
 

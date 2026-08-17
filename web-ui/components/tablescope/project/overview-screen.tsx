@@ -2,22 +2,18 @@
 
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { IconUsers, IconLoader2 } from "@tabler/icons-react";
+import { IconLoader2 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { MembersDialog } from "@/components/tablescope/project/members-dialog";
-import { ShareToggle } from "@/components/tablescope/project/share-toggle";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
-import { ContextPanel, ContextSection, IsolationCard } from "@/components/tablescope/context-panel";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
+import { AskAnythingComposer } from "@/components/ai/ask-anything-composer";
 import { TurnBubble } from "@/components/tablescope/conversation/conversation-turn";
+import { ProjectResourceTabs } from "@/components/tablescope/project/project-resource-tabs";
 import { recentConversationsKey } from "@/components/tablescope/project/ai-conversations-card";
-import { QuickActionsCard } from "@/components/tablescope/project/quick-actions-card";
 import {
   createConversation,
   getConversation,
@@ -27,8 +23,7 @@ import {
 } from "@/lib/api/conversational-analytics";
 import { projectInsightApi, type ProjectInsight, type ProjectInsightCard } from "@/lib/api/project-insight";
 import { buildAiAssistantHref } from "@/lib/navigation/ai-assistant";
-import { timeAgo, aiStatusLabel, aiStatusTone } from "@/lib/ui/format";
-import type { AiStatus, ProjectSummary } from "@/lib/ui/types";
+import { timeAgo } from "@/lib/ui/format";
 import {
   useProjectShell,
   useProjectQueries,
@@ -37,7 +32,6 @@ import {
   useProjectMembers,
   useProjectActivity,
   useProjectGraph,
-  type DataSource,
 } from "@/lib/ui/use-project-data";
 import { PROJECT_INSIGHTS_TITLE } from "./overview-screen/project-insights-title";
 import { PROJECT_INSIGHTS_SURFACE } from "./overview-screen/project-insights-surface";
@@ -67,6 +61,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
   const [chatConversationId, setChatConversationId] = useState<number | null>(null);
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
+  const [askValue, setAskValue] = useState("");
 
   // The composer is pinned; new turns render at the bottom of the scrollable
   // area right above it, so keep that area scrolled to the newest turn —
@@ -133,6 +128,14 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
     [chatConversationId, notePersistedTurns, projectId],
   );
 
+  const submitAsk = useCallback(
+    (message: string) => {
+      setAskValue("");
+      void handleAsk(message);
+    },
+    [handleAsk],
+  );
+
   // ── Recent insights from the latest Project Insight snapshot.
   const { data: projectInsight } = useQuery<ProjectInsight>({
     queryKey: ["project", projectId, "insight", "recent"],
@@ -178,108 +181,28 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
     [graph],
   );
 
-  const canEditProject = user.rawRole !== "viewer";
-
-
   return (
     <ProjectShell
       projectId={projectId}
       activeNav="overview"
       breadcrumbLabel="Overview"
       scrollable={false}
-      contextPanel={
-        <ContextPanel
-          title="AI Context"
-          askPlaceholder="Ask about this project…"
-          onAsk={handleAsk}
-          collapsible
-        >
-          <IsolationCard
-            tenant={tenant.name}
-            project={project?.name ?? "Project"}
-            user={user.name || user.email || "You"}
-          />
-
-          {aiActions[0] ? (
-            <div className="rounded-lg border-l-2 border-brand-500 bg-brand-50/60 p-3">
-              <p className="text-[13px] leading-relaxed text-ink-primary">
-                {aiActions[0].title}
-              </p>
-              <p className="mt-1.5 text-small text-brand-700">
-                AI insight · {timeAgo(aiActions[0].ts)} · all logged
-              </p>
-            </div>
-          ) : null}
-
-          <ContextSection title="Context health">
-            <div className="flex items-center gap-2 text-[13px] text-ink-secondary">
-              <span className="inline-block h-2 w-2 rounded-full bg-success" />
-              Project isolation active
-            </div>
-            <p className="mt-1 text-small text-ink-tertiary">
-              {sourceRows.length} source{sourceRows.length === 1 ? "" : "s"} connected ·{" "}
-              {tableNodes.length} table{tableNodes.length === 1 ? "" : "s"} in scope
-            </p>
-          </ContextSection>
-
-          <ContextSection title="In-scope assets">
-            <ul className="space-y-1 text-[13px] text-ink-secondary">
-              <li className="flex justify-between">
-                <span>Data Sources</span>
-                <span className="tabular-nums text-ink-primary">{sourceRows.length}</span>
-              </li>
-              <li className="flex justify-between">
-                <span>Tables</span>
-                <span className="tabular-nums text-ink-primary">{queryRows.length}</span>
-              </li>
-              <li className="flex justify-between">
-                <span>Documents</span>
-                <span className="tabular-nums text-ink-primary">
-                  {project?.documentCount ?? 0}
-                </span>
-              </li>
-              <li className="flex justify-between">
-                <span>Dashboards</span>
-                <span className="tabular-nums text-ink-primary">
-                  {project?.dashboardCount ?? dashboardRows.length}
-                </span>
-              </li>
-            </ul>
-          </ContextSection>
-
-          <ContextSection title="Recent AI Actions">
-            {aiActions.length === 0 ? (
-              <p className="text-small text-ink-tertiary">No AI actions yet.</p>
-            ) : (
-              <ul className="space-y-1.5">
-                {aiActions.slice(0, 4).map((e) => (
-                  <li
-                    key={e.id}
-                    className="flex items-center justify-between gap-2 text-[13px]"
-                  >
-                    <span className="min-w-0 truncate text-ink-secondary">{e.title}</span>
-                    <span className="shrink-0 text-small text-ink-tertiary">
-                      {timeAgo(e.ts)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </ContextSection>
-        </ContextPanel>
-      }
     >
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col gap-4">
+        <ProjectHeader
+          project={project}
+          memberCount={memberCount}
+          aiStatus={project?.aiStatus ?? "idle"}
+          onMembers={() => setShowMembers(true)}
+          onToast={push}
+        />
+
+        <div className="-mx-5">
+          <ProjectResourceTabs projectId={projectId} />
+        </div>
+
         {/* Scrollable content — the composer below never moves with it. */}
         <div ref={scrollAreaRef} className="min-h-0 flex-1 space-y-5 overflow-y-auto pb-4">
-          <ProjectHeader
-            project={project}
-            memberCount={memberCount}
-            aiStatus={project?.aiStatus ?? "idle"}
-            onMembers={() => setShowMembers(true)}
-            onToast={push}
-          />
-
           <StatBar
             projectId={projectId}
             dataSources={sourceRows.length}
@@ -299,8 +222,6 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
               (project?.documentCount ?? 0) > 0
             }
           />
-
-          <QuickActionsCard projectId={projectId} canEdit={canEditProject} />
 
           {(chatTurns.length > 0 || chatBusy || chatError) && (
             <div className="space-y-4 rounded-xl border border-line-tertiary bg-bg-primary p-4">
@@ -335,11 +256,15 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
             away with the content above it. chatTurns/chatBusy/chatError are
             plain React state (never persisted), so a refresh clears any
             result the same way it always has. */}
-        <div className="max-h-[50vh] shrink-0 overflow-y-auto border-t border-line-tertiary pt-4">
-          <HomeAiSuggestions
+        <div className="shrink-0 border-t border-line-tertiary pt-4">
+          <AskAnythingComposer
+            value={askValue}
+            onChange={setAskValue}
+            onSubmit={submitAsk}
+            placeholder="Ask anything across your connected data, documents, and dashboards"
+            ariaLabel="Ask anything across your connected data, documents, and dashboards"
+            busy={chatBusy}
             projectId={Number(projectId)}
-            showAskBox={true}
-            onAsk={handleAsk}
           />
         </div>
       </div>

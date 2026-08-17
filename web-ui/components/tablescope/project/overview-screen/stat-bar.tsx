@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { Icon } from "@tabler/icons-react";
 import {
   IconDatabase,
   IconTable,
@@ -9,17 +10,17 @@ import {
   IconSparkles,
 } from "@tabler/icons-react";
 
-interface StatItem {
+export interface StatItem {
   key: string;
-  icon: typeof IconDatabase;
+  icon: Icon;
   iconClass: string;
-  value: number;
+  value: string | number;
   label: string;
   /** Omitted for stats with no dedicated project page (e.g. AI actions). */
   href?: string;
 }
 
-/** One-row project stat strip. Five items only, evenly distributed and
+/** One-row project stat strip. Items are evenly distributed and
  *  wrapping their own label/value pair — never a horizontal scroller, even
  *  on narrow desktop widths (the icon + stacked text is compact enough to
  *  reflow via flex-wrap instead). Each stat with a corresponding project
@@ -31,22 +32,24 @@ export function StatBar({
   documents,
   dashboards,
   aiActions,
+  items,
 }: {
-  projectId: string;
-  dataSources: number;
-  tables: number;
-  documents: number;
-  dashboards: number;
-  aiActions: number;
+  projectId?: string;
+  dataSources?: number;
+  tables?: number;
+  documents?: number;
+  dashboards?: number;
+  aiActions?: number;
+  items?: StatItem[];
 }) {
-  const base = `/projects/${projectId}`;
+  const base = projectId ? `/projects/${projectId}` : "";
 
-  const items: StatItem[] = [
+  const defaultItems: StatItem[] = [
     {
       key: "sources",
       icon: IconDatabase,
       iconClass: "bg-brand-50 text-brand-700",
-      value: dataSources,
+      value: dataSources ?? 0,
       label: "Data sources",
       href: `${base}/data-sources`,
     },
@@ -54,7 +57,7 @@ export function StatBar({
       key: "tables",
       icon: IconTable,
       iconClass: "bg-ai-bg text-ai",
-      value: tables,
+      value: tables ?? 0,
       label: "Tables",
       href: `${base}/queries`,
     },
@@ -62,7 +65,7 @@ export function StatBar({
       key: "documents",
       icon: IconFileText,
       iconClass: "bg-success-bg text-success",
-      value: documents,
+      value: documents ?? 0,
       label: "Documents",
       href: `${base}/documents`,
     },
@@ -70,7 +73,7 @@ export function StatBar({
       key: "dashboards",
       icon: IconLayoutDashboard,
       iconClass: "bg-ai-bg text-ai",
-      value: dashboards,
+      value: dashboards ?? 0,
       label: "Dashboards",
       href: `${base}/dashboards`,
     },
@@ -78,17 +81,19 @@ export function StatBar({
       key: "ai-actions",
       icon: IconSparkles,
       iconClass: "bg-warning-bg text-warning",
-      value: aiActions,
+      value: aiActions ?? 0,
       label: "AI actions",
     },
   ];
+
+  const resolvedItems = items ?? defaultItems;
 
   return (
     <section
       aria-label="Project stats"
       className="flex flex-wrap items-center gap-y-3 rounded-lg border border-line-tertiary bg-bg-primary px-5 py-3.5"
     >
-      {items.map((item) => {
+      {resolvedItems.map((item) => {
         const Icon = item.icon;
         const content = (
           <>
