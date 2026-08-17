@@ -80,6 +80,7 @@ export function DocumentsScreen({
       projectId={projectId}
       activeNav="project-documents"
       breadcrumbLabel="Documents"
+      showProjectHeader
     >
       <div className="space-y-4">
         <StatBar items={statItems} />
