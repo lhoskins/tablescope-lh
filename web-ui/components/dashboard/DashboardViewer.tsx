@@ -36,6 +36,7 @@ import type {
 } from "./types";
 import type { QueryScope, QueryScopeFilterResponse } from "@/types/query-scope";
 import { WidgetRenderer } from "./WidgetRenderer";
+import { OperationalInsightGrid } from "./OperationalInsightGrid";
 import { FilterBar } from "./FilterBar";
 import { DateRangeControl } from "./DateRangeControl";
 import { DrilldownPanel, type DrilldownState } from "./DrilldownPanel";
@@ -81,7 +82,16 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   const widgets = useMemo(() => dashboard.config?.widgets ?? [], [dashboard.config?.widgets]);
   const globalFilters = useMemo(() => dashboard.config?.globalFilters ?? [], [dashboard.config?.globalFilters]);
   const operational = dashboard.config?.presentation === "operational_insight";
+  const operationalWidgets = dashboard.config?.operationalWidgets ?? [];
+  // AI-Designer-created dashboards always carry a decorative "manual"
+  // dimension template with zero bound values (nothing for the picker to
+  // filter by) — hide it rather than show a dropdown that only ever reads
+  // "All {label}". A real template-bound dimension (values present, or
+  // driven by a query) still shows the picker as before.
   const template = templateMetadata(dashboard);
+  const hasBoundDimension =
+    template?.parameters?.valueSource === "query" ||
+    (template?.parameters?.manualValues?.length ?? 0) > 0;
   const initialPeriod = normalizedPeriod(template?.parameters.defaultPeriod);
   const initialResolvedPeriod = initialPeriod ? resolveDatePreset(initialPeriod) : null;
   const { width: containerWidth, containerRef, mounted } = useContainerWidth({
@@ -591,7 +601,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
       {/* ── Filter Bar ───────────────────────────────────────────── */}
       <div className={operational ? "mt-2 border-y border-line-tertiary bg-bg-primary px-2 py-2" : "border-b border-slate-200 bg-white px-5 py-2"}>
         <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
-          {template?.parameters && (
+          {template?.parameters && hasBoundDimension && (
             <label className="flex items-center gap-1.5 text-[11px] font-medium text-ink-secondary">
               <DimensionLabelEditor label={dimensionLabel} onSave={saveDimensionLabel} />
               <select
@@ -633,6 +643,14 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
             <p className="mt-1 text-xs text-slate-400">{operational ? "AI will select, validate and wire the appropriate KPI cards and charts." : "Click + Add Widget to start building your dashboard"}</p>
             {operational && <button type="button" onClick={() => setDesignerMode("edit_dashboard")} className="mt-3 rounded-md bg-brand-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-brand-700">Design with AI</button>}
           </div>
+        ) : operational && operationalWidgets.length > 0 ? (
+          <OperationalInsightGrid
+            widgets={widgets}
+            widgetData={widgetData}
+            operationalWidgets={operationalWidgets}
+            onEditWidget={handleEditWidget}
+            onElementClick={handleElementClick}
+          />
         ) : widgets.length > 0 ? (
           <div ref={containerRef} className="w-full">
             {mounted && (
