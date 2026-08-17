@@ -2,14 +2,22 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { IconSparkles, IconPlus } from "@tabler/icons-react";
+import {
+  IconChartBar,
+  IconFolders,
+  IconLayoutDashboard,
+  IconPlus,
+  IconSparkles,
+} from "@tabler/icons-react";
 import { apiClient } from "@/lib/api-client";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { Button } from "@/components/ui/button";
+import { StatBar } from "@/components/tablescope/project/overview-screen/stat-bar";
 import {
   useProjectDashboards,
   useProjectQueries,
   useProjectDataSources,
+  widgetCount,
   type Dashboard,
 } from "@/lib/ui/use-project-data";
 import { useCurrentUser } from "@/lib/ui/use-shell-data";
@@ -186,13 +194,47 @@ export function DashboardsScreen({
     () => new Set(groups.map((group) => group.templateId).filter((id): id is string => Boolean(id))),
     [groups],
   );
+  const statItems = useMemo(
+    () => [
+      {
+        key: "dashboards",
+        icon: IconLayoutDashboard,
+        iconClass: "bg-brand-50 text-brand-700",
+        value: rows.length,
+        label: "Total dashboards",
+      },
+      {
+        key: "groups",
+        icon: IconFolders,
+        iconClass: "bg-ai-bg text-ai",
+        value: groups.length,
+        label: "Groups",
+      },
+      {
+        key: "ai-generated",
+        icon: IconSparkles,
+        iconClass: "bg-warning-bg text-warning",
+        value: rows.filter((dashboard) => dashboard.ai_generated).length,
+        label: "AI-generated",
+      },
+      {
+        key: "widgets",
+        icon: IconChartBar,
+        iconClass: "bg-success-bg text-success",
+        value: rows.reduce((total, dashboard) => total + widgetCount(dashboard.config), 0),
+        label: "Widgets",
+      },
+    ],
+    [groups, rows],
+  );
 
   return (
     <ProjectShell
       projectId={projectId}
       activeNav="project-dashboards"
       breadcrumbLabel="Dashboards"
-      actions={
+      showProjectHeader={!viewing}
+      headerActions={
         !viewing ? (
           <>
             <Button variant="secondary" onClick={() => setDesigner({ open: true })}>
@@ -221,17 +263,20 @@ export function DashboardsScreen({
           onSelectDashboard={setViewingId}
         />
       ) : (
-        <DashboardOverview
-          groups={groups}
-          loading={isLoading}
-          onOpenDashboard={setViewingId}
-          onAddTemplate={() => setTemplateOpen(true)}
-          onNewDashboard={() => setDesigner({ open: true, dashboardGroupName: "Operational Dashboards" })}
-          onDeleteDashboard={handleDeleteDashboard}
-          onCreateGroup={(name) => createGroupMutation.mutate(name)}
-          onRenameGroup={(group, name) => renameGroupMutation.mutate({ group, name })}
-          onAddDashboardToGroup={(group) => { void addDashboardToGroup(group); }}
-        />
+        <>
+          <StatBar items={statItems} />
+          <DashboardOverview
+            groups={groups}
+            loading={isLoading}
+            onOpenDashboard={setViewingId}
+            onAddTemplate={() => setTemplateOpen(true)}
+            onNewDashboard={() => setDesigner({ open: true, dashboardGroupName: "Operational Dashboards" })}
+            onDeleteDashboard={handleDeleteDashboard}
+            onCreateGroup={(name) => createGroupMutation.mutate(name)}
+            onRenameGroup={(group, name) => renameGroupMutation.mutate({ group, name })}
+            onAddDashboardToGroup={(group) => { void addDashboardToGroup(group); }}
+          />
+        </>
       )}
       <AIDashboardDesigner
         open={designer.open}
