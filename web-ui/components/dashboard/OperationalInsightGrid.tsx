@@ -59,11 +59,18 @@ function toNumber(value: unknown): number | null {
   return Number.isFinite(num) ? num : null;
 }
 
+function niceName(column: string): string {
+  return column.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 /** Adapts a dashboard widget + its fetched rows into the shape ItsmChart
  *  renders, so any AI-Designer chart gets the exact ServiceNow chart
  *  styling rather than an approximation of it. Pivots into one series per
  *  distinct value of groupByColumn when the widget uses one (e.g. "Opened"
- *  vs "Resolved" on the same axis), otherwise a single named series. */
+ *  vs "Resolved" on the same axis); builds a two-series comparison from
+ *  yColumn + y2Column for a combo widget (e.g. actual vs forecast, the
+ *  shape visualization_engine.rank_visualizations already ranks ChartType
+ *  .COMBO for); otherwise a single named series. */
 export function toOperationalChartData(
   widget: WidgetConfig,
   rows: Array<Record<string, unknown>>,
@@ -75,7 +82,14 @@ export function toOperationalChartData(
   let categories: string[];
   let series: ItsmChartSeries[];
 
-  if (groupKey && rows.length > 0 && Object.keys(rows[0]).includes(groupKey)) {
+  if (widget.type === "combo" && widget.y2Column) {
+    const x = rows.map((row) => String(row[xKey] ?? ""));
+    categories = x;
+    series = [
+      { name: niceName(widget.yColumn || yKey || "Value"), x, y: rows.map((row) => toNumber(row[yKey])) },
+      { name: niceName(widget.y2Column), x, y: rows.map((row) => toNumber(row[widget.y2Column!])) },
+    ];
+  } else if (groupKey && rows.length > 0 && Object.keys(rows[0]).includes(groupKey)) {
     const xValues: string[] = [];
     const byGroup = new Map<string, Map<string, number | null>>();
     for (const row of rows) {
