@@ -158,6 +158,25 @@ function modeCopy(mode: DashboardDesignerMode): {
   };
 }
 
+/**
+ * Turns an enumerated list of specific charts into an explicit instruction
+ * prepended to the free-text prompt, so "create" requests can name exact
+ * charts instead of only describing the dashboard as one paragraph and
+ * leaving composition entirely up to the LLM. Falls through to the plain
+ * prompt unchanged when no items are provided -- fully backward compatible
+ * with the single-textarea flow.
+ */
+function buildDesignPrompt(basePrompt: string, desiredCharts: string[]): string {
+  const items = desiredCharts.map((s) => s.trim()).filter(Boolean);
+  if (items.length === 0) return basePrompt.trim();
+  const enumerated = [
+    `Create exactly one widget for each of the following ${items.length} requested chart(s), in this order. Do not merge multiple items into one widget, and do not add widgets beyond this list unless a KPI summary is explicitly useful alongside them.`,
+    ...items.map((item, index) => `${index + 1}. ${item}`),
+  ].join("\n");
+  const extra = basePrompt.trim();
+  return extra ? `${enumerated}\n\n${extra}` : enumerated;
+}
+
 function statusPresentation(status: SupportStatus): {
   label: string;
   tone: "success" | "warning" | "danger";
@@ -201,6 +220,10 @@ export function AIDashboardDesigner({
   const copy = modeCopy(mode);
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [prompt, setPrompt] = useState(initialPrompt);
+  // Only meaningful in "create" mode -- an explicit, growable list of exact
+  // charts the user wants, as an alternative to describing the whole
+  // dashboard as one paragraph and hoping the LLM's composition matches.
+  const [desiredCharts, setDesiredCharts] = useState<string[]>([""]);
   const [audience, setAudience] = useState("operational");
   const [emphasis, setEmphasis] = useState("balanced_operational_health");
   const [period, setPeriod] = useState("1_year");
@@ -212,14 +235,25 @@ export function AIDashboardDesigner({
     if (!open) return;
     setStep(1);
     setPrompt(initialPrompt);
+    setDesiredCharts([""]);
     setReview(null);
     setAcceptPartial(false);
   }, [initialPrompt, mode, open]);
 
+  const requestedChartCount = useMemo(
+    () => (mode === "create" ? desiredCharts.map((s) => s.trim()).filter(Boolean).length : 0),
+    [desiredCharts, mode],
+  );
+
+  const effectivePrompt = useMemo(
+    () => (mode === "create" ? buildDesignPrompt(prompt, desiredCharts) : prompt.trim()),
+    [desiredCharts, mode, prompt],
+  );
+
   const requestBody = useMemo(
     () => ({
       project_id: Number(projectId),
-      prompt: prompt.trim(),
+      prompt: effectivePrompt,
       mode,
       dashboard_id: dashboardId,
       target_insight_id: targetInsightId,
@@ -229,7 +263,7 @@ export function AIDashboardDesigner({
       dimension_label: dimensionLabel.trim() || "Dimension",
       dashboard_group_id: dashboardGroupId,
     }),
-    [audience, dashboardGroupId, dashboardId, dimensionLabel, emphasis, mode, period, projectId, prompt, targetInsightId],
+    [audience, dashboardGroupId, dashboardId, dimensionLabel, effectivePrompt, emphasis, mode, period, projectId, targetInsightId],
   );
 
   const reviewMutation = useMutation({
@@ -253,7 +287,7 @@ export function AIDashboardDesigner({
         "/api/ai/actions/dashboard-designer/apply",
         {
           project_id: Number(projectId),
-          prompt: prompt.trim(),
+          prompt: effectivePrompt,
           mode,
           dashboard_id: dashboardId,
           target_insight_id: targetInsightId,
@@ -334,8 +368,56 @@ export function AIDashboardDesigner({
           <section className="p-4 sm:p-5">
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(300px,.65fr)]">
               <Card className="p-4">
+                {mode === "create" && (
+                  <div className="mb-4">
+                    <div className="text-h3 text-ink-primary">Specific charts (optional)</div>
+                    <p className="mt-1 text-small text-ink-tertiary">
+                      Name exact charts you want instead of leaving composition entirely to AI. Each line becomes
+                      one widget.
+                    </p>
+                    <div className="mt-3 space-y-2">
+                      {desiredCharts.map((item, index) => (
+                        <div key={index} className="flex items-center gap-2">
+                          <input
+                            value={item}
+                            onChange={(event) => {
+                              const next = [...desiredCharts];
+                              next[index] = event.target.value;
+                              setDesiredCharts(next);
+                            }}
+                            placeholder={
+                              index === 0
+                                ? "Example: Vendor spend trend over time"
+                                : "Example: High-priority incidents by priority"
+                            }
+                            className="h-9 w-full rounded-md border border-line-secondary bg-bg-primary px-2 text-[13px] text-ink-primary focus:border-brand-500 focus:outline-none"
+                          />
+                          {desiredCharts.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => setDesiredCharts(desiredCharts.filter((_, i) => i !== index))}
+                              aria-label="Remove this chart"
+                              className="shrink-0 rounded p-1.5 text-ink-tertiary hover:bg-bg-secondary hover:text-red-600"
+                            >
+                              <IconX size={14} />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="mt-2"
+                      onClick={() => setDesiredCharts([...desiredCharts, ""])}
+                    >
+                      + Add another chart
+                    </Button>
+                  </div>
+                )}
+
                 <label htmlFor="ai-dashboard-request" className="text-h3 text-ink-primary">
-                  {copy.prompt}
+                  {mode === "create" && requestedChartCount > 0 ? "Additional context (optional)" : copy.prompt}
                 </label>
                 <p className="mt-1 text-small text-ink-tertiary">
                   Use business language. AI selects the metrics, queries, calculations and compatible charts.
@@ -344,7 +426,7 @@ export function AIDashboardDesigner({
                   id="ai-dashboard-request"
                   value={prompt}
                   onChange={(event) => setPrompt(event.target.value)}
-                  rows={7}
+                  rows={mode === "create" && requestedChartCount > 0 ? 3 : 7}
                   placeholder="Example: Show demand versus resolution capacity, backlog and SLA risk, the sites driving breaches, and the best improvement opportunities."
                   className="mt-3 w-full resize-y rounded-md border border-line-secondary bg-bg-primary p-3 text-[13px] text-ink-primary focus:border-brand-500 focus:outline-none"
                 />
@@ -395,7 +477,7 @@ export function AIDashboardDesigner({
               </Card>
             </div>
             <div className="mt-4 flex justify-end">
-              <Button variant="primary" disabled={prompt.trim().length < 3 || reviewMutation.isPending} onClick={() => reviewMutation.mutate()}>
+              <Button variant="primary" disabled={effectivePrompt.length < 3 || reviewMutation.isPending} onClick={() => reviewMutation.mutate()}>
                 <IconSparkles size={14} />
                 {reviewMutation.isPending ? "Analyzing project data…" : "Analyze data & propose design"}
               </Button>
@@ -405,6 +487,14 @@ export function AIDashboardDesigner({
 
         {step === 2 && review && (
           <section className="p-4 sm:p-5">
+            {requestedChartCount > 0 && (
+              <p className="mb-3 text-[11px] text-ink-tertiary">
+                Requested {requestedChartCount} chart{requestedChartCount === 1 ? "" : "s"}; AI proposed{" "}
+                {review.suggestion?.widgets.length ?? 0}.
+                {(review.suggestion?.widgets.length ?? 0) !== requestedChartCount &&
+                  " A mismatch usually means one request couldn't be grounded in the available data, or two were combined -- check the preview below."}
+              </p>
+            )}
             <SupportReview
               review={review}
               audience={audience}
@@ -415,7 +505,7 @@ export function AIDashboardDesigner({
               onAcceptPartial={setAcceptPartial}
               onAddData={() => router.push(`/projects/${projectId}/data-sources?return=dashboards`)}
               onSaveRequest={() => {
-                window.sessionStorage.setItem(`dashboard-request:${projectId}`, prompt);
+                window.sessionStorage.setItem(`dashboard-request:${projectId}`, effectivePrompt);
                 notify("Dashboard request saved until supporting data is added", "info");
               }}
             />
