@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { IconArrowLeft, IconRefresh, IconX } from "@tabler/icons-react";
 import { apiClient } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
@@ -13,10 +13,10 @@ import type {
   ItsmCardSize,
   ItsmChart as ItsmChartType,
   ItsmDashboardLayout,
-  ItsmDashboardResult,
   ItsmMetricDrilldown,
   ItsmMetricValue,
 } from "./types";
+import { useItsmDashboardQuery } from "./use-itsm-dashboard-query";
 import styles from "./ItsmDashboardScreen.module.css";
 
 const INSIGHT_LABELS: Record<string, string> = {
@@ -52,16 +52,6 @@ interface DrawerState {
 const DEFAULT_CARD_SIZE: ItsmCardSize = "compact";
 const SIZE_CYCLE: ItsmCardSize[] = ["compact", "standard", "wide"];
 
-function readSessionDashboard(key: string): ItsmDashboardResult | undefined {
-  if (typeof window === "undefined") return undefined;
-  try {
-    const value = sessionStorage.getItem(key);
-    return value ? (JSON.parse(value) as { data: ItsmDashboardResult }).data : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 function formatPrevious(metric: ItsmMetricValue): string {
   if (metric.previousValue === null || metric.previousValue === undefined) return "—";
   if (metric.unit === "percent") return `${metric.previousValue.toFixed(1)}%`;
@@ -83,19 +73,15 @@ export function ItsmInsightsDashboardContent({
   preset,
   onBack,
 }: ItsmInsightsDashboardContentProps) {
-  const queryClient = useQueryClient();
   const [selectedPreset, setSelectedPreset] = useState(preset);
   const [period, setPeriod] = useState<PeriodKey>("1_year");
   const [site, setSite] = useState("all");
   const [dimension, setDimension] = useState<"site" | "region">("site");
   const [editingLayout, setEditingLayout] = useState(false);
   const [layout, setLayout] = useState<ItsmDashboardLayout>({ order: [], sizes: {} });
-  const [backgroundRefreshing, setBackgroundRefreshing] = useState(false);
-  const [manualRefreshing, setManualRefreshing] = useState(false);
   const [drawer, setDrawer] = useState<DrawerState>({ open: false, title: "" });
   const draggedMetric = useRef<string | null>(null);
   const draggedChart = useRef<string | null>(null);
-  const refreshedKeys = useRef(new Set<string>());
 
   useEffect(() => {
     setSelectedPreset(preset);
@@ -103,54 +89,18 @@ export function ItsmInsightsDashboardContent({
   }, [preset]);
 
   const queryKey = ["project", projectId, "itsm-insights", selectedPreset, period, site, dimension] as const;
-  const cacheToken = queryKey.join(":");
-  const browserCacheKey = `itsm-dashboard:${cacheToken}`;
   const siteQuery = site === "all" ? "" : `&site=${encodeURIComponent(site)}`;
   const dashboardUrl = `/api/projects/${projectId}/itsm-dashboards/${selectedPreset}?durationUnit=hours&period=${period}${siteQuery}&dimension=${dimension}`;
 
   const {
-    data: dashboard,
+    dashboard,
     isLoading,
     isFetching,
     error,
-  } = useQuery<ItsmDashboardResult>({
-    queryKey,
-    queryFn: () => apiClient.get<ItsmDashboardResult>(dashboardUrl),
-    enabled: Boolean(projectId && selectedPreset),
-    initialData: () => readSessionDashboard(browserCacheKey),
-    refetchOnMount: "always",
-    staleTime: 5 * 60 * 1000,
-    gcTime: 24 * 60 * 60 * 1000,
-  });
-
-  useEffect(() => {
-    if (!dashboard || typeof window === "undefined") return;
-    try {
-      sessionStorage.setItem(browserCacheKey, JSON.stringify({ storedAt: Date.now(), data: dashboard }));
-    } catch {
-      // React Query remains the in-memory fallback when storage is unavailable.
-    }
-  }, [browserCacheKey, dashboard]);
-
-  useEffect(() => {
-    if (!dashboard || isFetching || refreshedKeys.current.has(cacheToken)) return;
-    refreshedKeys.current.add(cacheToken);
-    if (dashboard.dataQuality.cacheStatus === "miss" || dashboard.dataQuality.cacheStatus === "refreshed") return;
-    let cancelled = false;
-    setBackgroundRefreshing(true);
-    apiClient
-      .get<ItsmDashboardResult>(`${dashboardUrl}&refresh=true`)
-      .then((liveDashboard) => {
-        if (!cancelled) queryClient.setQueryData(queryKey, liveDashboard);
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (!cancelled) setBackgroundRefreshing(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [cacheToken, dashboard, dashboardUrl, isFetching, queryClient, queryKey]);
+    backgroundRefreshing,
+    manualRefreshing,
+    forceRefresh,
+  } = useItsmDashboardQuery(queryKey, dashboardUrl, Boolean(projectId && selectedPreset));
 
   const layoutStorageKey = `itsm-layout:${projectId}:${selectedPreset}:insights`;
   useEffect(() => {
@@ -249,16 +199,6 @@ export function ItsmInsightsDashboardContent({
       chartOrder: dashboard.charts.map((chart) => chart.chartKey),
       chartHeights: Object.fromEntries(dashboard.charts.map((chart) => [chart.chartKey, "standard"])),
     });
-  };
-
-  const forceRefresh = async () => {
-    setManualRefreshing(true);
-    try {
-      const liveDashboard = await apiClient.get<ItsmDashboardResult>(`${dashboardUrl}&refresh=true`);
-      queryClient.setQueryData(queryKey, liveDashboard);
-    } finally {
-      setManualRefreshing(false);
-    }
   };
 
   const cardClass = (size: ItsmCardSize) =>
