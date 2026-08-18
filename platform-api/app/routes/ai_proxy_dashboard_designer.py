@@ -25,6 +25,7 @@ from app.models.file_source_meta import FileSourceMeta
 from app.routes.ai_proxy_dashboard_suggest import ai_suggest_dashboards
 from app.routes.ai_proxy_schemas import AISuggestDashboardsRequest
 from app.routes.ai_proxy_shared import _check_project_access
+from app.services.ask_pipeline import resolve_presentation
 from app.services.operational_insight_dashboards import (
     operational_insight_config,
     resolve_dashboard_group,
@@ -804,3 +805,30 @@ async def apply_dashboard_design(
         "support_status": req.support_status,
         "dashboard_url": f"/projects/{project.id}/dashboards/{dashboard.id}",
     }
+
+
+class WidgetChartCandidatesRequest(BaseModel):
+    project_id: int
+    columns: list[str]
+    rows: list[dict[str, Any]]
+
+
+@router.post("/actions/dashboard-designer/chart-candidates")
+async def dashboard_widget_chart_candidates(
+    req: WidgetChartCandidatesRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Rank alternative chart types for one already-fetched widget result.
+
+    The same chart-fit ranking Business Insight cards use
+    (``ask_pipeline.resolve_presentation``), reused here rather than
+    reimplemented, so a dashboard widget's "Chart options" picker agrees with
+    every other surface on what charts a given data shape supports. Takes
+    columns/rows the caller already fetched for the widget (the dashboard
+    page already has this from rendering it) instead of re-executing SQL.
+    """
+    await _check_project_access(session, context, req.project_id)
+
+    presentation = resolve_presentation(req.columns, req.rows)
+    return presentation.to_dict()

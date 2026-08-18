@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
+from app.auth.jwt import create_access_token
 from app.models.file_source_meta import FileSourceMeta
 from app.routes.ai_proxy_dashboard_designer import (
     _chart_recommendations,
@@ -8,6 +11,79 @@ from app.routes.ai_proxy_dashboard_designer import (
     _support_status,
     _validated_chart_recommendations,
 )
+from app.services.supabase_auth_service import SupabaseAuthService, SupabaseUser
+
+pytestmark = pytest.mark.anyio
+
+
+class _FakeSupabase(SupabaseAuthService):
+    def __init__(self) -> None:
+        pass
+
+    async def create_or_invite_user(
+        self, email, *, first_name=None, last_name=None, redirect_to=None
+    ) -> SupabaseUser:
+        return SupabaseUser(
+            id=f"supa-{email}",
+            email=email,
+            created=True,
+            action_link=f"https://invite/{email}",
+        )
+
+
+class _FakeEmail:
+    async def send_transactional_email(
+        self, *, to, template, variables, subject=None, reply_to=None
+    ) -> bool:
+        return True
+
+
+@pytest.fixture(autouse=True)
+def _mock_supabase(monkeypatch):
+    import app.routes.tenants_users as tenants_module
+
+    monkeypatch.setattr(tenants_module, "SupabaseAuthService", _FakeSupabase)
+    monkeypatch.setattr(tenants_module, "EmailService", _FakeEmail)
+
+
+def _editor_headers(tenant_id: int, user_id: int) -> dict:
+    token = create_access_token(
+        sub="u", tenant_id=tenant_id, user_id=user_id, role="editor"
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def _tenant_project(client, service_headers, slug: str = "dd-chart-cand"):
+    r = await client.post(
+        "/api/tenants",
+        json={"slug": slug, "name": "Dashboard Designer Chart Candidates"},
+        headers=service_headers,
+    )
+    assert r.status_code == 201
+    tenant = r.json()
+
+    r = await client.post(
+        f"/api/tenants/{tenant['id']}/users",
+        json={
+            "email": f"{slug}@test.com",
+            "display_name": "DD User",
+            "role": "editor",
+            "external_id": f"ext-{slug}",
+        },
+        headers=service_headers,
+    )
+    assert r.status_code == 201
+    user = r.json()
+    headers = _editor_headers(tenant["id"], user["id"])
+
+    r = await client.post(
+        "/api/projects",
+        json={"name": "Sales Project", "description": "t", "is_shared": False},
+        headers=headers,
+    )
+    assert r.status_code == 201
+    project = r.json()
+    return tenant, project, headers
 
 
 def _source() -> FileSourceMeta:
@@ -126,3 +202,53 @@ def test_missing_concepts_respects_inferred_domain() -> None:
     assert "revenue" not in missing
     assert "expense" in missing
     assert "gross margin" in missing
+
+
+async def test_chart_candidates_reuses_the_shared_ranking_engine(
+    client, service_headers
+) -> None:
+    """The dashboard widget "Chart options" picker must rank the same way
+    Business Insight cards do -- this endpoint is a thin wrapper over
+    ask_pipeline.resolve_presentation, not a separate heuristic."""
+    _tenant, project, headers = await _tenant_project(client, service_headers)
+
+    r = await client.post(
+        "/api/ai/actions/dashboard-designer/chart-candidates",
+        json={
+            "project_id": project["id"],
+            "columns": ["month", "revenue"],
+            "rows": [
+                {"month": "2026-01", "revenue": 100000},
+                {"month": "2026-02", "revenue": 120000},
+                {"month": "2026-03", "revenue": 115000},
+            ],
+        },
+        headers=headers,
+    )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert "chart" in body
+    assert body["chartCandidates"], "a time-series shape must rank at least one chart"
+    chart_types = {c["decision"]["chartType"] for c in body["chartCandidates"]}
+    assert "line" in chart_types or "bar" in chart_types
+
+
+async def test_chart_candidates_requires_project_access(
+    client, service_headers
+) -> None:
+    _tenant, _project, headers = await _tenant_project(client, service_headers, "dd-cc-access")
+    other_tenant, other_project, _other_headers = await _tenant_project(
+        client, service_headers, "dd-cc-other"
+    )
+
+    r = await client.post(
+        "/api/ai/actions/dashboard-designer/chart-candidates",
+        json={
+            "project_id": other_project["id"],
+            "columns": ["x"],
+            "rows": [{"x": 1}],
+        },
+        headers=headers,
+    )
+    assert r.status_code in (403, 404)
