@@ -25,6 +25,7 @@ from app.models.file_source_meta import FileSourceMeta
 from app.routes.ai_proxy_dashboard_suggest import ai_suggest_dashboards
 from app.routes.ai_proxy_schemas import AISuggestDashboardsRequest
 from app.routes.ai_proxy_shared import _check_project_access
+from app.services.ask_pipeline import resolve_presentation
 from app.services.operational_insight_dashboards import (
     operational_insight_config,
     resolve_dashboard_group,
@@ -828,8 +829,6 @@ async def dashboard_widget_chart_candidates(
     page already has this from rendering it) instead of re-executing SQL.
     """
     await _check_project_access(session, context, req.project_id)
-
-    from app.services.ask_pipeline import resolve_presentation
 
     presentation = resolve_presentation(req.columns, req.rows)
     return presentation.to_dict()
