@@ -122,18 +122,43 @@ def _build_relationship_hint_lines(hints: list[dict]) -> str:
     for h in sorted(hints, key=_conf, reverse=True):
         left = h.get("left_table") or ""
         right = h.get("right_table") or ""
-        lkey = h.get("left_join_key") or ""
-        rkey = h.get("right_join_key") or ""
-        if not (left and right and lkey and rkey):
+        # find_relationship_candidates enriches every candidate with
+        # join_key_pairs -- the entity key PLUS any shared reporting-period
+        # column (e.g. AccountNumber AND Month). Rendering only the single
+        # left_join_key/right_join_key pair here, as this used to, silently
+        # dropped the period equality: the LLM would join on the entity key
+        # alone and fan every month's rows out against every other month for
+        # the same entity. Falls back to the singular fields for hints that
+        # were never enriched (e.g. hand-built test fixtures).
+        raw_pairs = h.get("join_key_pairs") or []
+        key_pairs = [
+            (str(p["left"]), str(p["right"]))
+            for p in raw_pairs
+            if isinstance(p, dict) and p.get("left") and p.get("right")
+        ]
+        if not key_pairs:
+            lkey = h.get("left_join_key") or ""
+            rkey = h.get("right_join_key") or ""
+            if lkey and rkey:
+                key_pairs = [(lkey, rkey)]
+        if not (left and right and key_pairs):
             continue
         rel = h.get("relationship_type") or "unknown"
         reason = str(h.get("confidence_reason") or "")[:60]
         risk = h.get("row_multiplication_risk") or "unknown"
         conf_str = f"{_conf(h):.2f}" if h.get("join_confidence") is not None else "n/a"
+        on_clause = " AND ".join(
+            f'"{left}"."{lk}" = "{right}"."{rk}"' for lk, rk in key_pairs
+        )
+        compound_note = (
+            " -- compound key, join on ALL of these together"
+            if len(key_pairs) > 1
+            else ""
+        )
         rows.append(
-            f'  - "{left}"."{lkey}" = "{right}"."{rkey}" '
+            f"  - {on_clause} "
             f"(rel={rel}, conf={conf_str}, risk={risk}"
-            f"{f'; {reason}' if reason else ''})"
+            f"{f'; {reason}' if reason else ''}){compound_note}"
         )
     if not rows:
         return ""
@@ -145,6 +170,12 @@ def _build_relationship_hint_lines(hints: list[dict]) -> str:
         "- JOIN a pair of tables ONLY when the exact pair and keys appear in "
         "the list above. Never invent a join or join on matching names that "
         "are not listed here.\n"
+        "- When a pair's evidence lists more than one equality (marked "
+        "'compound key'), the JOIN's ON clause MUST include ALL of them "
+        "together with AND, never just one. Dropping one (e.g. joining on an "
+        "entity key alone when a shared period column is also listed) fans "
+        "each row out across every value of the omitted key instead of "
+        "aligning them.\n"
         "- At most TWO tables per analysis. Write ONE flat SELECT (no "
         "subqueries, no derived tables): JOIN the two tables directly on the "
         "listed keys, GROUP BY label columns from the entity/master side, and "

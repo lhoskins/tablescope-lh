@@ -139,12 +139,24 @@ async def _run_sql(
             is_connection_timeout = isinstance(
                 exc, TimeoutError | asyncio.TimeoutError | ConnectionError | OSError
             )
+            lowered_msg = err_msg.lower()
+            # "Capabilities for X were not available" (TEIID30498/30492/30496) is
+            # Teiid's per-source translator metadata not being loaded yet -- the
+            # exact cold-VDB condition vdb_warming.py exists to avoid, surfaced
+            # instead of prevented when a query lands before warming finishes.
+            # It clears on its own once the source is queried once, so it is
+            # retried here the same as a stale session / connection timeout
+            # rather than failing outright.
+            is_cold_capabilities = "capabilities for" in lowered_msg and (
+                "were not available" in lowered_msg or "not available" in lowered_msg
+            )
             should_retry = (
                 attempt == 0
                 and (
                     "TEIID4004" in err_msg
                     or is_connection_timeout
-                    or "timeout" in err_msg.lower()
+                    or "timeout" in lowered_msg
+                    or is_cold_capabilities
                 )
             )
             if should_retry:
@@ -157,6 +169,11 @@ async def _run_sql(
                     database=database,
                     username=teiid_username,
                 )
+                if is_cold_capabilities:
+                    # Give translator metadata loading, which is still in
+                    # flight, a moment to finish rather than immediately
+                    # re-hitting the same not-yet-ready state.
+                    await asyncio.sleep(2)
                 continue
             logger.error("Query against database %s failed: %s", database, exc)
             raise HTTPException(status_code=502, detail=f"Query failed: {exc}") from exc

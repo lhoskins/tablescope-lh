@@ -22,10 +22,7 @@ from app.services.kg_context import format_knowledge_graph_context
 from app.services.prompt_loader import load_prompt_reference
 from app.services.sql_validator import SQLValidationError, validate_sql
 
-from .ai_plan_prompt import (
-    _build_relationship_floor_line,
-    _build_relationship_hint_lines,
-)
+from .ai_plan_prompt import _build_relationship_hint_lines
 from .ai_shared import (
     _TEIID_JOIN_EXCEPTION_RULE,
     _TEIID_RULES_COMMON,
@@ -55,6 +52,30 @@ _DASHBOARD_INSIGHT_SYSTEM_PROMPT = (
     "documents. If the context cannot support a proposed insight, leave it out. "
     "Prefer fewer strong, non-empty, decision-grade widgets over many weak ones."
 )
+
+
+def _dashboard_relationship_floor_line(has_relationship_evidence: bool) -> str:
+    """A dashboard-prompt-appropriate counterpart to the plan prompt's floor.
+
+    ai_plan_prompt._build_relationship_floor_line's wording ("the single-table
+    relationship analyses described below", "no other section of this prompt
+    (documents, knowledge-graph hypotheses, depth guidance)") refers to
+    /ai/intelligence/plan's specific "analyses by category" structure, which
+    this widget/grid prompt does not have. Reusing it verbatim here dangled a
+    reference to a section that does not exist in this prompt -- confusing
+    boilerplate a smaller model can misread, at worst degrading unrelated
+    single-table output. With no evidence there is nothing to floor, so this
+    returns "" rather than injecting text that fits a different prompt shape.
+    """
+    if not has_relationship_evidence:
+        return ""
+    return (
+        "The RELATIONSHIP EVIDENCE list above is non-empty: include at least "
+        "one widget built as an EXPLICIT JOIN across those verified keys (see "
+        "the join exception above) whenever the data supports a genuine "
+        "cross-table insight -- do not restrict every widget to a single "
+        "table just because most of them are.\n"
+    )
 
 
 @router.post("/dashboard/suggest", response_model=SuggestDashboardResponse)
@@ -144,7 +165,7 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
         if relationship_lines
         else _TEIID_SQL_RULES
     )
-    relationship_floor = _build_relationship_floor_line(bool(relationship_lines), 1)
+    relationship_floor = _dashboard_relationship_floor_line(bool(relationship_lines))
 
     prompt = (
         f"{context_text}\n\n"
@@ -363,7 +384,7 @@ async def suggest_dashboards_multi(
     table_rule = _TEIID_RULES_HEADER + (
         _TEIID_JOIN_EXCEPTION_RULE if relationship_lines else _TEIID_SINGLE_TABLE_RULE
     )
-    relationship_floor = _build_relationship_floor_line(bool(relationship_lines), 1)
+    relationship_floor = _dashboard_relationship_floor_line(bool(relationship_lines))
 
     prompt = (
         f"{context_text}\n\n"
