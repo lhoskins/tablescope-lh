@@ -358,6 +358,40 @@ def test_find_relationship_candidates_rejects_weak_join() -> None:
     assert hi.find_relationship_candidates(tables) == []
 
 
+def test_find_relationship_candidates_finds_shared_reporting_period() -> None:
+    """Two same-grain monthly rollups (e.g. actuals and a forecast) with no
+    shared entity key must still surface a join candidate on their shared
+    period column, at lower confidence than an entity-key match."""
+    tables = [
+        _table("sales_revenue_monthly", ["month", "actual_revenue"]),
+        _table("sales_bookings_forecast_monthly", ["month", "forecast_revenue"]),
+    ]
+    cands = hi.find_relationship_candidates(tables)
+    assert len(cands) == 1
+    c = cands[0]
+    assert {c["left_table"], c["right_table"]} == {
+        "sales_revenue_monthly", "sales_bookings_forecast_monthly",
+    }
+    assert c["left_join_key"] == "month"
+    assert c["right_join_key"] == "month"
+    assert "reporting-period" in c["confidence_reason"]
+    assert c["join_confidence"] < 0.6  # below an entity-key match's confidence
+
+
+def test_find_relationship_candidates_prefers_entity_key_over_shared_period() -> None:
+    """When a pair has BOTH an entity-key match and a shared period column,
+    the entity-key evidence (higher confidence) wins -- period alignment is
+    a fallback, not competing evidence for the same pair."""
+    tables = [
+        _table("orders", ["OrderID", "month", "amount"]),
+        _table("shipments", ["OrderID", "month", "days_late"]),
+    ]
+    cands = hi.find_relationship_candidates(tables)
+    assert len(cands) == 1
+    assert cands[0]["left_join_key"] == "OrderID"
+    assert "exact key-name match" in cands[0]["confidence_reason"]
+
+
 def test_normalize_severity_rejects_unknown_and_allows_warning() -> None:
     assert hi._normalize_severity("warning") == "warning"
     assert hi._normalize_severity("critical") == "critical"
