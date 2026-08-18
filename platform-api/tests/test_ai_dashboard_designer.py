@@ -6,11 +6,11 @@ from app.auth.jwt import create_access_token
 from app.models.file_source_meta import FileSourceMeta
 from app.routes.ai_proxy_dashboard_designer import (
     _chart_recommendations,
+    _engine_chart_recommendations,
     _grounded_chart_selection,
     _infer_domain,
     _missing_concepts,
     _support_status,
-    _validated_chart_recommendations,
 )
 from app.services.supabase_auth_service import SupabaseAuthService, SupabaseUser
 
@@ -152,11 +152,12 @@ def test_grounded_chart_selection_corrects_a_chart_type_the_data_cannot_support(
         },
     }
 
-    chart_type, label_column, value_column = _grounded_chart_selection(widget)
+    chart_type, label_column, value_column, value_column_2 = _grounded_chart_selection(widget)
 
     assert chart_type != "kpi"
     assert label_column == "region"
     assert value_column == "incident_count"
+    assert value_column_2 is None
 
 
 def test_grounded_chart_selection_falls_back_without_preview_data() -> None:
@@ -165,7 +166,7 @@ def test_grounded_chart_selection_falls_back_without_preview_data() -> None:
     rather than guessing from nothing."""
     widget = {"chartType": "line", "labelColumn": "month", "valueColumn": "revenue"}
 
-    assert _grounded_chart_selection(widget) == ("line", "month", "revenue")
+    assert _grounded_chart_selection(widget) == ("line", "month", "revenue", None)
 
 
 def test_grounded_chart_selection_falls_back_when_engine_finds_no_chart() -> None:
@@ -179,14 +180,48 @@ def test_grounded_chart_selection_falls_back_when_engine_finds_no_chart() -> Non
         "previewData": {"columns": ["note"], "rows": [{"note": "hello"}]},
     }
 
-    chart_type, label_column, _value_column = _grounded_chart_selection(widget)
+    chart_type, label_column, _value_column, value_column_2 = _grounded_chart_selection(widget)
 
     assert chart_type == "bar"
     assert label_column == "note"
+    assert value_column_2 is None
 
 
-def test_executed_preview_can_validate_a_chart_when_profile_metadata_is_sparse() -> None:
-    recommendations = _validated_chart_recommendations(
+def test_grounded_chart_selection_produces_a_combo_for_two_measures_over_time() -> None:
+    """A time axis with two measures (e.g. actual vs. forecast revenue) is
+    exactly the shape the shared engine already ranks ChartType.COMBO for,
+    above a plain line (see visualization_engine/recommend.py). Grounding
+    must surface the engine's second value column, not just the first."""
+    widget = {
+        "chartType": "line",
+        "labelColumn": "month",
+        "valueColumn": "actual_revenue",
+        "previewData": {
+            "columns": ["month", "actual_revenue", "forecast_revenue"],
+            "rows": [
+                {"month": "2026-01", "actual_revenue": 100000, "forecast_revenue": 98000},
+                {"month": "2026-02", "actual_revenue": 110000, "forecast_revenue": 105000},
+                {"month": "2026-03", "actual_revenue": 108000, "forecast_revenue": 112000},
+                {"month": "2026-04", "actual_revenue": 121000, "forecast_revenue": 118000},
+            ],
+        },
+    }
+
+    chart_type, label_column, value_column, value_column_2 = _grounded_chart_selection(widget)
+
+    assert chart_type == "combo"
+    assert label_column == "month"
+    assert value_column == "actual_revenue"
+    assert value_column_2 == "forecast_revenue"
+
+
+def test_engine_chart_recommendations_ranks_widgets_from_executed_preview_data() -> None:
+    """The "charts compatible with this data" panel is ranked from each
+    widget's real executed preview data via the shared engine, not project
+    column metadata -- it must produce a confident result even when that
+    metadata is sparse/absent, exactly the case the old heuristic needed a
+    special-cased validation path for."""
+    recommendations = _engine_chart_recommendations(
         [],
         {
             "widgets": [
@@ -194,13 +229,60 @@ def test_executed_preview_can_validate_a_chart_when_profile_metadata_is_sparse()
                     "status": "valid",
                     "sql": 'SELECT "site", COUNT(*) AS "count" FROM "incidents" GROUP BY "site"',
                     "chartType": "bar",
+                    "previewData": {
+                        "columns": ["site", "count"],
+                        "rows": [
+                            {"site": "East", "count": 42},
+                            {"site": "West", "count": 31},
+                            {"site": "North", "count": 18},
+                        ],
+                    },
                 }
             ]
         },
     )
-    horizontal = next(item for item in recommendations if item["chartType"] == "horizontal_bar")
-    assert horizontal["compatible"] is True
-    assert "executing" in horizontal["reason"]
+    assert recommendations
+    assert all(item["compatible"] for item in recommendations)
+    assert any("bar" in item["chartType"] for item in recommendations)
+
+
+def test_engine_chart_recommendations_falls_back_without_preview_data() -> None:
+    """No widgets (or none with executed preview data) yet -- fall back to
+    the project-level column-shape heuristic rather than an empty panel."""
+    columns = [
+        {"name": "opened_at", "type": "datetime"},
+        {"name": "site", "type": "string"},
+        {"name": "resolution_hours", "type": "decimal"},
+    ]
+    assert _engine_chart_recommendations(columns, None) == _chart_recommendations(columns)
+
+
+def test_engine_chart_recommendations_surfaces_combo_for_two_measures_over_time() -> None:
+    """The compatibility panel must agree with the widget's actual grounded
+    type -- a combo-eligible shape should show as compatible here too, not
+    just at apply time."""
+    recommendations = _engine_chart_recommendations(
+        [],
+        {
+            "widgets": [
+                {
+                    "status": "valid",
+                    "sql": "SELECT month, actual_revenue, forecast_revenue FROM revenue",
+                    "chartType": "line",
+                    "previewData": {
+                        "columns": ["month", "actual_revenue", "forecast_revenue"],
+                        "rows": [
+                            {"month": "2026-01", "actual_revenue": 100000, "forecast_revenue": 98000},
+                            {"month": "2026-02", "actual_revenue": 110000, "forecast_revenue": 105000},
+                            {"month": "2026-03", "actual_revenue": 108000, "forecast_revenue": 112000},
+                            {"month": "2026-04", "actual_revenue": 121000, "forecast_revenue": 118000},
+                        ],
+                    },
+                }
+            ]
+        },
+    )
+    assert any(item["chartType"] == "combo" for item in recommendations)
 
 
 def test_support_status_has_three_explicit_outcomes() -> None:

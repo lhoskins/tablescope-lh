@@ -246,6 +246,69 @@ async def test_suggest_dashboards_returns_min_three(
     assert first["qualityScore"] == 90
 
 
+async def test_suggest_dashboards_stops_after_first_valid_plan_when_asked(
+    client, service_headers, monkeypatch
+) -> None:
+    """``stop_after_first_valid`` -- used by the AI Dashboard Designer's
+    review step, which only ever uses the first plan with valid widgets --
+    must not pay for SQL-preview execution on the remaining plans. That
+    redundant per-plan execution was the dominant cost behind the "Analyze
+    data" step's 3-5 minute latency and the intermittent 504s at nginx's
+    300s proxy_read_timeout."""
+    _, _, project, headers = await _setup_tenant_and_project(client, service_headers)
+    pid = project["id"]
+
+    async def _fake_forward(path: str, payload: dict):
+        return {
+            "model_used": "test-model",
+            "suggestions": [
+                {
+                    "title": f"Dashboard {i}",
+                    "widgets": [
+                        {
+                            "title": "Widget",
+                            "chart_type": "bar",
+                            "sql": 'SELECT "site", COUNT(*) AS "count" FROM "incidents" GROUP BY "site"',
+                            "label_column": "site",
+                            "value_column": "count",
+                        }
+                    ],
+                    "data_sources": [],
+                    "confidence": 0.8,
+                    "quality_score": 90,
+                }
+                for i in range(3)
+            ],
+        }
+
+    render_calls = 0
+
+    async def _fake_runner(sql: str) -> dict:
+        nonlocal render_calls
+        render_calls += 1
+        return {"columns": ["site", "count"], "rows": [{"site": "East", "count": 3}]}
+
+    import app.routes.ai_proxy as ai_proxy
+    import app.routes.home_intelligence_suite as home_intelligence_suite
+
+    monkeypatch.setattr(ai_proxy, "_forward_to_ai", _fake_forward)
+    monkeypatch.setattr(home_intelligence_suite, "_make_runner", lambda *a, **k: _fake_runner)
+
+    r = await client.post(
+        "/api/ai/actions/suggest-dashboards",
+        params={"stop_after_first_valid": "true"},
+        json={"project_id": pid, "prompt": "site incident volume", "desired_count": 3},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # One plan returned (not >= 3), and its one valid widget's SQL executed
+    # exactly once -- the other two candidate plans' SQL never ran.
+    assert len(body["suggestions"]) == 1
+    assert body["suggestions"][0]["widgets"][0]["status"] == "valid"
+    assert render_calls == 1
+
+
 async def test_save_dashboard_suggestion_persists_with_url(
     client, service_headers, monkeypatch
 ) -> None:

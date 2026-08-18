@@ -30,6 +30,7 @@ from app.services.operational_insight_dashboards import (
     operational_insight_config,
     resolve_dashboard_group,
 )
+from app.services.visualization_engine import rank_visualizations
 
 router = APIRouter()
 
@@ -315,33 +316,77 @@ def _chart_recommendations(columns: list[dict[str, str]]) -> list[dict[str, Any]
     ]
 
 
-def _validated_chart_recommendations(
+_CHART_LABELS: dict[str, str] = {
+    "kpi": "KPI with prior-period comparison",
+    "line": "Trend line",
+    "dual_line": "Dual trend lines",
+    "area": "Area trend",
+    "bar": "Bar comparison",
+    "horizontal_bar": "Skinny horizontal bars",
+    "stacked_bar": "Stacked comparison",
+    "grouped_bar": "Grouped comparison",
+    "combo": "Combo (bar + line)",
+    "heatmap": "Concentration heatmap",
+    "scatter": "Relationship scatterplot",
+    "bubble": "Relationship bubbles",
+    "pie": "Category mix",
+    "donut": "Category mix (donut)",
+    "treemap": "Proportional treemap",
+    "funnel": "Funnel",
+    "radar": "Radar comparison",
+    "table": "Detail table",
+}
+
+
+def _chart_label(chart_type: str, chart_style: str) -> str:
+    return (
+        _CHART_LABELS.get(chart_style)
+        or _CHART_LABELS.get(chart_type)
+        or chart_type.replace("_", " ").title()
+    )
+
+
+def _engine_chart_recommendations(
     columns: list[dict[str, str]], suggestion: dict[str, Any] | None
 ) -> list[dict[str, Any]]:
-    recommendations = _chart_recommendations(columns)
-    validated_types = {
-        str(widget.get("chartType") or "").lower()
-        for widget in _valid_suggestion_widgets(suggestion or {})
-    }
-    aliases = {
-        "bar": "horizontal_bar",
-        "column": "stacked_bar",
-        "area": "line",
-        "scorecard": "kpi",
-    }
-    validated_types |= {aliases[value] for value in validated_types if value in aliases}
-    return [
-        {
-            **item,
-            "compatible": bool(item["compatible"] or item["chartType"] in validated_types),
-            "reason": item["reason"]
-            if item["compatible"]
-            else "Validated by executing the proposed query against project data"
-            if item["chartType"] in validated_types
-            else item["reason"],
-        }
-        for item in recommendations
-    ]
+    """"Charts compatible with this data", ranked by the same engine that
+    grounds each widget's chart type (``visualization_engine.rank_visualizations``)
+    instead of a separate column-name heuristic.
+
+    Ranks every valid widget's real executed preview data (already captured
+    by ``ai_suggest_dashboards`` -- see ``_grounded_chart_selection`` for the
+    same data used to ground the widget itself) and merges results across
+    widgets, keeping the highest-confidence decision per chart family so the
+    review step's compatibility list agrees with what widgets actually get
+    built with. Falls back to the project-level column-shape heuristic only
+    when there's no executed preview data yet to rank against.
+    """
+    best_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for widget in _valid_suggestion_widgets(suggestion or {}):
+        preview = widget.get("previewData") or {}
+        preview_columns = [str(c) for c in (preview.get("columns") or [])]
+        preview_rows = list(preview.get("rows") or [])
+        if not preview_columns or not preview_rows:
+            continue
+        for candidate in rank_visualizations(preview_columns, preview_rows, limit=10):
+            decision = candidate.decision
+            key = (decision.chart_type.value, decision.chart_style)
+            existing = best_by_key.get(key)
+            if existing is not None and existing["_confidence"] >= decision.confidence:
+                continue
+            best_by_key[key] = {
+                "chartType": decision.chart_style or decision.chart_type.value,
+                "label": _chart_label(decision.chart_type.value, decision.chart_style),
+                "compatible": True,
+                "reason": decision.reason,
+                "_confidence": decision.confidence,
+            }
+
+    if not best_by_key:
+        return _chart_recommendations(columns)
+
+    ranked = sorted(best_by_key.values(), key=lambda item: -item["_confidence"])
+    return [{k: v for k, v in item.items() if k != "_confidence"} for item in ranked]
 
 
 def _valid_suggestion_widgets(suggestion: dict[str, Any]) -> list[dict[str, Any]]:
@@ -469,6 +514,7 @@ async def review_dashboard_design(
         ),
         session=session,
         context=context,
+        stop_after_first_valid=True,
     )
     suggestion = next(
         (
@@ -503,7 +549,7 @@ async def review_dashboard_design(
         "supportSummary": summary,
         "missingRequirements": missing,
         "questions": _questions(req),
-        "chartRecommendations": _validated_chart_recommendations(columns, suggestion),
+        "chartRecommendations": _engine_chart_recommendations(columns, suggestion),
         "sources": source_profiles,
         "suggestion": suggestion,
         "domain": domain,
@@ -551,7 +597,9 @@ def _operational_widgets(prompt: str, suggestion: dict[str, Any]) -> list[dict[s
     ]
 
 
-def _grounded_chart_selection(widget: dict[str, Any]) -> tuple[str, str | None, str | None]:
+def _grounded_chart_selection(
+    widget: dict[str, Any],
+) -> tuple[str, str | None, str | None, str | None]:
     """Ground a suggested widget's chart type in the same ranking engine
     Business Insight and Ask Anything use, instead of trusting the LLM's
     ``chartType`` field unconstrained.
@@ -567,6 +615,14 @@ def _grounded_chart_selection(widget: dict[str, Any]) -> tuple[str, str | None, 
     preview data to rank, or when the engine can't find a plottable shape
     (resolves to "table") -- a dashboard widget defaulting to the LLM's
     guess beats defaulting to a table.
+
+    The engine already recognises a time axis with two measures and ranks
+    ``ChartType.COMBO`` above a plain line for it (see
+    ``visualization_engine/recommend.py``, "Time series -> line / area /
+    combo"), returning both ``y_field`` and ``y2_field``. This is the same
+    decision Business Insight's combo cards rely on -- the fix here is
+    consuming the engine's second value column instead of discarding it,
+    not a separate heuristic.
     """
     chart_type = str(widget.get("chartType") or "bar")
     label_column = str(widget.get("labelColumn") or "") or None
@@ -576,12 +632,12 @@ def _grounded_chart_selection(widget: dict[str, Any]) -> tuple[str, str | None, 
     columns = [str(c) for c in (preview.get("columns") or [])]
     rows = list(preview.get("rows") or [])
     if not columns or not rows:
-        return chart_type, label_column, value_column
+        return chart_type, label_column, value_column, None
 
     presentation = resolve_presentation(columns, rows, intent_hint=chart_type)
     chart = presentation.chart
     if not chart or chart.get("type") in (None, "table"):
-        return chart_type, label_column, value_column
+        return chart_type, label_column, value_column, None
 
     # `_map_chart_type`/`_map_chart_subtype` (ai_proxy_widget_helpers) key on
     # this same compound-string convention -- a subtype like "horizontal_bar"
@@ -592,7 +648,8 @@ def _grounded_chart_selection(widget: dict[str, Any]) -> tuple[str, str | None, 
     grounded_label = chart.get("labelColumn") or label_column
     value_columns = chart.get("valueColumns") or []
     grounded_value = value_columns[0] if value_columns else value_column
-    return grounded_type, grounded_label, grounded_value
+    grounded_value_2 = value_columns[1] if len(value_columns) > 1 else None
+    return grounded_type, grounded_label, grounded_value, grounded_value_2
 
 
 async def _widget_configs(
@@ -633,13 +690,14 @@ async def _widget_configs(
             allowed_tables=allowed_tables,
             existing_by_sql=existing_by_sql,
         )
-        chart_type, label_column, value_column = _grounded_chart_selection(widget)
+        chart_type, label_column, value_column, value_column_2 = _grounded_chart_selection(widget)
         config = build_widget_config(
             title=str(widget.get("title") or widget.get("businessQuestion") or "Dashboard insight"),
             query_id=query.id,
             chart_type=chart_type,
             label_column=label_column,
             value_column=value_column,
+            value_column_2=value_column_2,
             explanation=str(widget.get("businessQuestion") or ""),
             visualization_options={
                 "colorScheme": "operational_insight",
