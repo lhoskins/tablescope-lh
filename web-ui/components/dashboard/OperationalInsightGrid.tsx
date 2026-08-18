@@ -1,6 +1,7 @@
 "use client";
 
-import { IconChartBar } from "@tabler/icons-react";
+import { useCallback, useMemo } from "react";
+import { IconChartBar, IconTrash } from "@tabler/icons-react";
 import { Card } from "@/components/ui/card";
 import { WidgetRenderer } from "./WidgetRenderer";
 import type { WidgetConfig, ChartClickEvent } from "./types";
@@ -119,44 +120,46 @@ export function toOperationalChartData(
 }
 
 /**
- * Curated operational-insight layout: brief, KPI grid, a main chart + side
- * stack, then a bottom row pairing charts with Best Improvement
- * Opportunities — the same structure `ItsmInsightsDashboardContent` uses,
- * generalized to any AI-Designer-created dashboard's widgets rather than
- * the bespoke ITSM data source. Rendered instead of the free-form
- * react-grid-layout widget grid when the dashboard carries the narrative
- * `operationalWidgets` the AI Designer already persists at creation time.
+ * One chart card, as its own component rather than an inline-rendered
+ * function, so `useMemo`/`useCallback` can keep the `ItsmChart` instance
+ * stable across renders that don't actually change this widget's config or
+ * data. Without that, every unrelated re-render of the parent grid (a
+ * cross-filter click, another widget's data arriving, a dialog opening)
+ * rebuilt the chart-data object and the click handler from scratch, which
+ * forced `ItsmChart` to fully dispose and re-`echarts.init()` on every
+ * tick -- harmless in isolation, but the visible symptom (flashing/frozen
+ * chart) when combined with a render loop elsewhere.
  */
-export function OperationalInsightGrid({
-  widgets,
-  widgetData,
-  operationalWidgets,
+function OperationalChartCard({
+  widget,
+  rows,
+  heightClass,
   onEditWidget,
-  onElementClick,
   onChartOptions,
+  onDeleteWidget,
+  onElementClick,
 }: {
-  widgets: WidgetConfig[];
-  widgetData: Record<string, Array<Record<string, unknown>>>;
-  operationalWidgets: OperationalNarrativeWidget[];
+  widget: WidgetConfig;
+  rows: Array<Record<string, unknown>>;
+  heightClass: string;
   onEditWidget: (widget: WidgetConfig) => void;
-  onElementClick: (widget: WidgetConfig, event: ChartClickEvent) => void;
-  /** Opens the lightweight "pick a compatible chart type" picker, reusing
-   *  the same ranking Business Insight cards use, as an alternative to a
-   *  full AI re-design via `onEditWidget`. */
   onChartOptions?: (widget: WidgetConfig) => void;
+  onDeleteWidget?: (widget: WidgetConfig) => void;
+  onElementClick: (widget: WidgetConfig, event: ChartClickEvent) => void;
 }) {
-  const brief = findNarrative(operationalWidgets, "operational_brief");
-  const improvements = findNarrative(operationalWidgets, "improvement_opportunities");
+  const chartData = useMemo(() => toOperationalChartData(widget, rows), [widget, rows]);
+  const handleElementClick = useCallback(
+    (name: string, value: number | null) =>
+      onElementClick(widget, {
+        sourceField: widget.xColumn || widget.xKey || "",
+        value: value ?? name,
+        label: name,
+      }),
+    [widget, onElementClick],
+  );
 
-  const kpiWidgets = widgets.filter((w) => w.type === "kpi");
-  const chartWidgets = widgets.filter((w) => w.type !== "kpi");
-  const [mainChart, ...restCharts] = chartWidgets;
-  const sideCharts = restCharts.slice(0, 2);
-  const bottomCharts = restCharts.slice(2, 4);
-  const overflowCharts = restCharts.slice(4);
-
-  const chartCard = (widget: WidgetConfig, heightClass: string) => (
-    <Card key={widget.id} className="overflow-hidden p-3">
+  return (
+    <Card className="overflow-hidden p-3">
       <div className="mb-1 flex items-start justify-between gap-3">
         <h3 className="truncate text-small font-semibold text-ink-primary">
           {widget.title || "Untitled"}
@@ -180,22 +183,76 @@ export function OperationalInsightGrid({
           >
             {EDIT_ICON}
           </button>
+          {onDeleteWidget && (
+            <button
+              type="button"
+              onClick={() => onDeleteWidget(widget)}
+              title="Delete widget"
+              className="rounded p-1 text-ink-tertiary transition-colors hover:bg-red-50 hover:text-red-600"
+            >
+              <IconTrash size={14} />
+            </button>
+          )}
         </div>
       </div>
       <div className={heightClass}>
-        <OperationalChart
-          chart={toOperationalChartData(widget, widgetData[widget.id] ?? [])}
-          className="h-full"
-          onElementClick={(name, value) =>
-            onElementClick(widget, {
-              sourceField: widget.xColumn || widget.xKey || "",
-              value: value ?? name,
-              label: name,
-            })
-          }
-        />
+        <OperationalChart chart={chartData} className="h-full" onElementClick={handleElementClick} />
       </div>
     </Card>
+  );
+}
+
+/**
+ * Curated operational-insight layout: brief, KPI grid, a main chart + side
+ * stack, then a bottom row pairing charts with Best Improvement
+ * Opportunities — the same structure `ItsmInsightsDashboardContent` uses,
+ * generalized to any AI-Designer-created dashboard's widgets rather than
+ * the bespoke ITSM data source. Rendered instead of the free-form
+ * react-grid-layout widget grid when the dashboard carries the narrative
+ * `operationalWidgets` the AI Designer already persists at creation time.
+ */
+export function OperationalInsightGrid({
+  widgets,
+  widgetData,
+  operationalWidgets,
+  onEditWidget,
+  onElementClick,
+  onChartOptions,
+  onDeleteWidget,
+}: {
+  widgets: WidgetConfig[];
+  widgetData: Record<string, Array<Record<string, unknown>>>;
+  operationalWidgets: OperationalNarrativeWidget[];
+  onEditWidget: (widget: WidgetConfig) => void;
+  onElementClick: (widget: WidgetConfig, event: ChartClickEvent) => void;
+  /** Opens the lightweight "pick a compatible chart type" picker, reusing
+   *  the same ranking Business Insight cards use, as an alternative to a
+   *  full AI re-design via `onEditWidget`. */
+  onChartOptions?: (widget: WidgetConfig) => void;
+  /** Removes the widget from the dashboard entirely. */
+  onDeleteWidget?: (widget: WidgetConfig) => void;
+}) {
+  const brief = findNarrative(operationalWidgets, "operational_brief");
+  const improvements = findNarrative(operationalWidgets, "improvement_opportunities");
+
+  const kpiWidgets = widgets.filter((w) => w.type === "kpi");
+  const chartWidgets = widgets.filter((w) => w.type !== "kpi");
+  const [mainChart, ...restCharts] = chartWidgets;
+  const sideCharts = restCharts.slice(0, 2);
+  const bottomCharts = restCharts.slice(2, 4);
+  const overflowCharts = restCharts.slice(4);
+
+  const chartCard = (widget: WidgetConfig, heightClass: string) => (
+    <OperationalChartCard
+      key={widget.id}
+      widget={widget}
+      rows={widgetData[widget.id] ?? []}
+      heightClass={heightClass}
+      onEditWidget={onEditWidget}
+      onChartOptions={onChartOptions}
+      onDeleteWidget={onDeleteWidget}
+      onElementClick={onElementClick}
+    />
   );
 
   return (
@@ -235,14 +292,26 @@ export function OperationalInsightGrid({
                   <span className="truncate text-[11px] font-semibold uppercase tracking-[0.02em] text-ink-secondary">
                     {widget.title}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => onEditWidget(widget)}
-                    title="Modify with AI"
-                    className="shrink-0 rounded p-0.5 text-ink-tertiary hover:bg-bg-secondary"
-                  >
-                    {EDIT_ICON}
-                  </button>
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => onEditWidget(widget)}
+                      title="Modify with AI"
+                      className="rounded p-0.5 text-ink-tertiary hover:bg-bg-secondary"
+                    >
+                      {EDIT_ICON}
+                    </button>
+                    {onDeleteWidget && (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteWidget(widget)}
+                        title="Delete widget"
+                        className="rounded p-0.5 text-ink-tertiary hover:bg-red-50 hover:text-red-600"
+                      >
+                        <IconTrash size={14} />
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <WidgetRenderer
                   widget={widget}

@@ -121,6 +121,48 @@ describe("AIDashboardDesigner", () => {
     expect(push).toHaveBeenCalledWith("/projects/44/data-sources?return=dashboards");
   });
 
+  it("builds an enumerated prompt from specific chart rows and enables submit without free text", async () => {
+    post.mockResolvedValueOnce(review("fully_supported"));
+    renderDesigner();
+
+    const submit = screen.getByRole("button", { name: /analyze data/i });
+    expect(submit).toBeDisabled();
+
+    fireEvent.change(screen.getByPlaceholderText(/vendor spend trend/i), {
+      target: { value: "Vendor spend trend over time" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /\+ add another chart/i }));
+    fireEvent.change(screen.getByPlaceholderText(/high-priority incidents by priority/i), {
+      target: { value: "High-priority incidents by priority" },
+    });
+
+    expect(submit).not.toBeDisabled();
+    fireEvent.click(submit);
+    await screen.findByText("Fully supported");
+
+    const [, body] = post.mock.calls[0];
+    expect(body.prompt).toContain("Create exactly one widget for each of the following 2 requested chart(s)");
+    expect(body.prompt).toContain("1. Vendor spend trend over time");
+    expect(body.prompt).toContain("2. High-priority incidents by priority");
+  });
+
+  it("flags a mismatch between requested and generated chart counts in the review step", async () => {
+    // review() stubs a suggestion with exactly one widget.
+    post.mockResolvedValueOnce(review("fully_supported"));
+    renderDesigner();
+
+    fireEvent.change(screen.getByPlaceholderText(/vendor spend trend/i), {
+      target: { value: "Vendor spend trend over time" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /\+ add another chart/i }));
+    fireEvent.change(screen.getByPlaceholderText(/high-priority incidents by priority/i), {
+      target: { value: "High-priority incidents by priority" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /analyze data/i }));
+
+    await screen.findByText(/Requested 2 charts; AI proposed 1\./);
+  });
+
   it("adds one validated insight without regenerating the dashboard", async () => {
     post
       .mockResolvedValueOnce(review("fully_supported"))

@@ -52,6 +52,7 @@ import {
   type DashboardDesignerMode,
 } from "@/components/tablescope/project/ai-dashboard-designer";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 function templateMetadata(dashboard: Dashboard): DashboardTemplateMetadata | undefined {
   const value = dashboard.config?.dashboardTemplate;
@@ -100,6 +101,13 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   });
 
   const [widgetData, setWidgetData] = useState<Record<string, Array<Record<string, unknown>>>>({});
+  // Read (not reactive-depended-on) by columnNamesForWidget below, so that
+  // callback doesn't have to list `widgetData` as a dependency -- doing so
+  // created a fetch loop (see the comment there).
+  const widgetDataRef = useRef(widgetData);
+  useEffect(() => {
+    widgetDataRef.current = widgetData;
+  }, [widgetData]);
   const [designerMode, setDesignerMode] = useState<DashboardDesignerMode | null>(null);
   const [dashboardStatus, setDashboardStatus] = useState(dashboard.status);
 
@@ -157,12 +165,17 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   }, [widgets, savedQueries]);
 
   // Fetch missing queries (e.g. AI-generated ones not yet in parent's cache)
-  const { data: fetchedQueries = [] } = useQuery({
+  const { data: fetchedQueriesRaw } = useQuery({
     queryKey: ["missing-queries", projectId, missingQueryIds],
     queryFn: () =>
       apiClient.get<SavedQuery[]>(`/api/projects/${projectId}/queries`),
     enabled: missingQueryIds.length > 0,
   });
+  // A `= []` destructuring default re-allocates a new array every render
+  // while `data` stays undefined (query disabled/pending) -- that instability
+  // was the third contributor to the render loop fixed above, cascading
+  // through allQueries -> fetchWidgetData -> the widget-data fetch effect.
+  const fetchedQueries = useMemo(() => fetchedQueriesRaw ?? [], [fetchedQueriesRaw]);
 
   // Merged list of all queries available to widgets
   const allQueries = useMemo(() => {
@@ -242,13 +255,23 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
     })),
   });
 
+  // `useQueries` returns a new array reference every render regardless of
+  // whether any query's data actually changed, so memoizing directly on
+  // `schemaQueries` re-derives `viewColumns` (and everything downstream --
+  // columnNamesForWidget, fetchWidgetData, the widget-data fetch effect)
+  // every render, which re-triggers that effect every render: the same
+  // render-loop class as the widgetData issue fixed above, via a second,
+  // independent path. `dataUpdatedAt` is a stable primitive per query that
+  // only changes when that query's data actually updates.
+  const schemaDataUpdatedAt = schemaQueries.map((q) => q.dataUpdatedAt).join(",");
   const viewColumns = useMemo(() => {
     const map: Record<string, ColumnInfo[]> = {};
     viewNames.forEach((vn, i) => {
       map[vn] = schemaQueries[i]?.data?.columns ?? [];
     });
     return map;
-  }, [viewNames, schemaQueries]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewNames, schemaDataUpdatedAt]);
 
   const allColumns: ColumnInfo[] = useMemo(() => {
     const map = new Map<string, ColumnInfo>();
@@ -259,15 +282,22 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   }, [viewColumns]);
 
   // Known column names for a widget (used for runtime filter compatibility).
+  // Deliberately reads widgetData via the ref above, not as a hook
+  // dependency: this callback feeds into fetchWidgetData below, whose own
+  // effect is what writes widgetData. Depending on the state it writes
+  // created a render loop -- fetch -> setWidgetData -> this callback's
+  // identity changes -> fetchWidgetData's identity changes -> its effect
+  // re-fires -> fetch again, forever. The ref breaks that cycle while still
+  // reading the latest loaded rows when needed.
   const columnNamesForWidget = useCallback((w: WidgetConfig): string[] => {
     if (w.dataSource?.kind === "datasource" && w.dataSource.viewName) {
       const cols = viewColumns[w.dataSource.viewName];
       if (cols && cols.length > 0) return cols.map((c) => c.name);
     }
-    const loaded = widgetData[w.id];
+    const loaded = widgetDataRef.current[w.id];
     if (loaded && loaded.length > 0) return Object.keys(loaded[0]);
     return [];
-  }, [viewColumns, widgetData]);
+  }, [viewColumns]);
 
   const updateMutation = useMutation({
     mutationFn: (body: { config: DashboardConfig }) =>
@@ -408,6 +438,15 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
     },
     [chartOptionsWidget, dashboard.config, globalFilters, updateMutation, widgets],
   );
+
+  const [widgetPendingDelete, setWidgetPendingDelete] = useState<WidgetConfig | null>(null);
+
+  const confirmDeleteWidget = useCallback(() => {
+    if (!widgetPendingDelete) return;
+    const updatedWidgets = widgets.filter((w) => w.id !== widgetPendingDelete.id);
+    updateMutation.mutate({ config: { ...dashboard.config, widgets: updatedWidgets, globalFilters } });
+    setWidgetPendingDelete(null);
+  }, [dashboard.config, globalFilters, updateMutation, widgetPendingDelete, widgets]);
 
   const handleFiltersChange = (newFilters: DashboardFilter[]) => {
     updateMutation.mutate({ config: { ...dashboard.config, widgets, globalFilters: newFilters } });
@@ -671,6 +710,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
             onEditWidget={handleEditWidget}
             onElementClick={handleElementClick}
             onChartOptions={setChartOptionsWidget}
+            onDeleteWidget={setWidgetPendingDelete}
           />
         ) : widgets.length > 0 ? (
           <div ref={containerRef} className="w-full">
@@ -741,6 +781,9 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
                       <button onClick={() => handleEditWidget(w)} title={operational ? "Modify with AI" : "Edit"} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors">
                         <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                       </button>
+                      <button onClick={() => setWidgetPendingDelete(w)} title="Delete widget" className="rounded p-1 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600">
+                        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
                     </div>
                   </div>
                   {/* Chart */}
@@ -790,6 +833,14 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
           onApply={handleApplyChartOptions}
         />
       )}
+      <ConfirmDialog
+        open={widgetPendingDelete !== null}
+        title="Delete this widget?"
+        message={`Remove "${widgetPendingDelete?.title || "this widget"}" from the dashboard? This cannot be undone.`}
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteWidget}
+        onCancel={() => setWidgetPendingDelete(null)}
+      />
       <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </div>
   );
