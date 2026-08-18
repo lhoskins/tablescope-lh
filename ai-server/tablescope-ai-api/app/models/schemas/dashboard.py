@@ -11,6 +11,11 @@ class SuggestDashboardRequest(AIBaseRequest):
     prompt: str = ""
     allowed_tables: list[str] = []
     knowledge_graph_context: dict[str, Any] = Field(default_factory=dict)
+    # Evidence-backed join candidates the platform discovered between the
+    # allowed tables (see ai_plan_prompt._build_relationship_hint_lines --
+    # the same mechanism /ai/intelligence/plan already uses). Empty by
+    # default, which leaves single-table behaviour unchanged.
+    relationship_hints: list[dict] = Field(default_factory=list)
 
 
 class SuggestDashboardsMultiRequest(AIBaseRequest):
@@ -28,6 +33,11 @@ class SuggestDashboardsMultiRequest(AIBaseRequest):
     allowed_tables: list[str] = []
     kpis: list[str] = Field(default_factory=list)
     knowledge_graph_context: dict[str, Any] = Field(default_factory=dict)
+    # Evidence-backed join candidates the platform discovered between the
+    # allowed tables (see ai_plan_prompt._build_relationship_hint_lines --
+    # the same mechanism /ai/intelligence/plan already uses). Empty by
+    # default, which leaves single-table behaviour unchanged.
+    relationship_hints: list[dict] = Field(default_factory=list)
 
 
 class WidgetValidationExpectations(BaseModel):

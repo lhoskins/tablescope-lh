@@ -23,6 +23,7 @@ from .ai_proxy_shared import (
     _forward_to_ai,
     _kg_context,
     _kg_context_chips,
+    _relationship_hints,
 )
 from .ai_proxy_widget_helpers import (
     _derive_dashboard_title,
@@ -66,8 +67,13 @@ async def ai_suggest_dashboards(
         FileSourceMeta.tenant_id == context.tenant_id,
         FileSourceMeta.archived.is_(False),
     )
-    ds_result = await session.execute(ds_stmt)
-    allowed_tables = [ds.view_name for ds in ds_result.scalars()]
+    sources = list((await session.execute(ds_stmt)).scalars())
+    allowed_tables = [ds.view_name for ds in sources]
+    # Evidence-backed join candidates (e.g. two monthly tables sharing a
+    # "month" column) -- lets the planner combine measures that live in
+    # separate sources (actuals vs. a forecast table) instead of being
+    # restricted to one table per widget with no way to express that.
+    relationship_hints = _relationship_hints(sources)
 
     # Real KPI names from the project graph (never invented).
     from app.models.ai_project_graph import AIProjectGraphNode
@@ -98,6 +104,7 @@ async def ai_suggest_dashboards(
         "kpis": kpis,
         # Steer each preview toward the graph's risks/gaps/KPIs/governing docs.
         "knowledge_graph_context": kg_context,
+        "relationship_hints": relationship_hints,
     }
     ai_result = await _forward_to_ai("/ai/dashboard/suggest-multi", payload)
     raw_suggestions = ai_result.get("suggestions", []) or []

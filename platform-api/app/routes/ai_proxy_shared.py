@@ -22,6 +22,7 @@ from app.config import get_settings
 from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project, ProjectMember
 from app.models.saved_query import SavedQuery
+from app.services.home_intelligence import TableInfo, find_relationship_candidates
 from app.services.knowledge_graph_ai_context import collect_knowledge_graph_ai_context
 from app.services.llm_framework import resolve_active_routing_for_capability
 
@@ -263,6 +264,34 @@ def _kg_context_chips(kg: dict[str, Any]) -> dict[str, Any]:
         "recommendedKpis": _titles("recommended_kpis"),
         "governingDocuments": _titles("governing_documents"),
     }
+
+
+def _relationship_hints(sources: list[FileSourceMeta]) -> list[dict[str, Any]]:
+    """Evidence-backed join candidates between a project's datasources.
+
+    Reuses the exact join-discovery engine Home Intelligence already relies
+    on (``find_relationship_candidates`` -- exact-key-name matches at
+    minimum, upgraded by sampled value containment when available) so
+    dashboard/widget SQL generation can be told about a real relationship
+    like two monthly tables sharing a ``month`` column, instead of being
+    silently restricted to one table per widget with no way to combine
+    e.g. actuals and a forecast that live in separate sources.
+
+    Best-effort: relationship discovery is enrichment, never a hard
+    dependency -- a failure here must not block dashboard generation.
+    """
+    try:
+        tables = [
+            TableInfo(
+                view_name=source.view_name,
+                columns=[(str(c.get("name")), str(c.get("type") or "unknown")) for c in (source.column_types or []) if isinstance(c, dict) and c.get("name")],
+            )
+            for source in sources
+        ]
+        return find_relationship_candidates(tables)
+    except Exception:  # relationship evidence is optional enrichment
+        logger.exception("Failed to discover relationship candidates for %d source(s)", len(sources))
+        return []
 
 
 def _shorten_ai_name(prompt: str) -> str:

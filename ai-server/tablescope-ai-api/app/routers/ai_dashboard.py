@@ -22,7 +22,15 @@ from app.services.kg_context import format_knowledge_graph_context
 from app.services.prompt_loader import load_prompt_reference
 from app.services.sql_validator import SQLValidationError, validate_sql
 
+from .ai_plan_prompt import (
+    _build_relationship_floor_line,
+    _build_relationship_hint_lines,
+)
 from .ai_shared import (
+    _TEIID_JOIN_EXCEPTION_RULE,
+    _TEIID_RULES_COMMON,
+    _TEIID_RULES_HEADER,
+    _TEIID_SINGLE_TABLE_RULE,
     _TEIID_SQL_RULES,
     _clean_sql,
     _parse_json_response,
@@ -125,6 +133,19 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
     kg_block = format_knowledge_graph_context(req.knowledge_graph_context)
     kg_prompt_block = f"{kg_block}\n\n" if kg_block else ""
 
+    # With relationship evidence in play, the flat "Do NOT write JOINs" rule
+    # would contradict (and, sitting later in the prompt, override) the
+    # cross-table exception -- swap in the exception-aware variant, exactly
+    # as /ai/intelligence/plan already does. Without evidence this is
+    # byte-identical to the original single-table rules.
+    relationship_lines = _build_relationship_hint_lines(req.relationship_hints)
+    teiid_rules = (
+        _TEIID_RULES_HEADER + _TEIID_JOIN_EXCEPTION_RULE + _TEIID_RULES_COMMON
+        if relationship_lines
+        else _TEIID_SQL_RULES
+    )
+    relationship_floor = _build_relationship_floor_line(bool(relationship_lines), 1)
+
     prompt = (
         f"{context_text}\n\n"
         f"{kg_prompt_block}"
@@ -133,7 +154,9 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
         "CRITICAL: every widget's SQL must reference ONLY the allowed tables "
         "above. Never invent or assume any other table (e.g. Sales, Product, "
         "Customers).\n\n"
-        f"{_TEIID_SQL_RULES}\n"
+        f"{teiid_rules}\n"
+        f"{relationship_lines}"
+        f"{relationship_floor}\n"
         f"{user_instruction}\n"
         "Think like a senior business analyst and KPI strategist. Do NOT start "
         "by making charts. First decide what a well-run company in this domain "
@@ -168,7 +191,12 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
         "SQL rules: read-only, never SELECT *, give every selected expression a "
         "stable alias, and make label_column / value_column / value_column_2 / "
         "series_column / target_column EXACTLY match aliases in the SELECT list. "
-        "Query a single allowed table per widget (no JOINs).\n\n"
+        + (
+            "Query a single allowed table per widget, with the documented "
+            "join exception above.\n\n"
+            if relationship_lines
+            else "Query a single allowed table per widget (no JOINs).\n\n"
+        ) +
         "Layout: 12-column grid. Put the highest-priority executive KPIs in the "
         "top row, place related charts near each other, give trend/table/heatmap/"
         "waterfall charts more width (gridW 8-12), and create a clear top-left to "
@@ -327,6 +355,16 @@ async def suggest_dashboards_multi(
     kg_block = format_knowledge_graph_context(req.knowledge_graph_context)
     kg_prompt_block = f"{kg_block}\n\n" if kg_block else ""
 
+    # Same exception-aware swap /ai/intelligence/plan and /dashboard/suggest
+    # use: without relationship evidence this is byte-identical to the
+    # original single-table rule, so plans without a discovered join are
+    # unaffected.
+    relationship_lines = _build_relationship_hint_lines(req.relationship_hints)
+    table_rule = _TEIID_RULES_HEADER + (
+        _TEIID_JOIN_EXCEPTION_RULE if relationship_lines else _TEIID_SINGLE_TABLE_RULE
+    )
+    relationship_floor = _build_relationship_floor_line(bool(relationship_lines), 1)
+
     prompt = (
         f"{context_text}\n\n"
         f"{kg_prompt_block}"
@@ -349,6 +387,7 @@ async def suggest_dashboards_multi(
         "real KPI references.\n"
         "- Reference Library documents are authoritative guidance, NOT data "
         "sources: never list a reference document as a data source.\n"
+        f"{table_rule}"
         "- 3-6 widgets per plan. Each chart/table/KPI widget MUST include a "
         "complete, runnable SQL query grounded in the allowed tables/columns "
         "above so the dashboard can render real data. Use exact table and column "
@@ -358,6 +397,8 @@ async def suggest_dashboards_multi(
         "value_column (numeric/y axis) from the SELECT list.\n"
         "- A narrative/risk/gap widget (chart_type 'narrative_insight') has an "
         "empty sql; use these sparingly and prefer real data widgets.\n\n"
+        f"{relationship_lines}"
+        f"{relationship_floor}\n"
         f"Return ONLY a JSON object with at least {desired} suggestions:\n"
         "{\n"
         '  "suggestions": [ {\n'

@@ -29,6 +29,7 @@ from .ai_proxy_shared import (
     _detect_datasource,
     _forward_to_ai,
     _kg_context,
+    _relationship_hints,
     _shorten_ai_name,
 )
 from .ai_proxy_widget_helpers import (
@@ -68,8 +69,8 @@ async def ai_generate_and_save_dashboard(
         FileSourceMeta.tenant_id == context.tenant_id,
         FileSourceMeta.archived.is_(False),
     )
-    ds_result = await session.execute(ds_stmt)
-    allowed_tables = [ds.view_name for ds in ds_result.scalars()]
+    sources = list((await session.execute(ds_stmt)).scalars())
+    allowed_tables = [ds.view_name for ds in sources]
 
     # Step 1 — Plan: ask the AI server for an insight-first dashboard plan.
     payload = {
@@ -83,6 +84,10 @@ async def ai_generate_and_save_dashboard(
         "knowledge_graph_context": await _kg_context(
             session, context, req.project_id,
         ),
+        # Evidence-backed join candidates (e.g. two monthly tables sharing a
+        # "month" column) -- lets the planner combine measures that live in
+        # separate sources instead of being restricted to one table per widget.
+        "relationship_hints": _relationship_hints(sources),
     }
     ai_result = await _forward_to_ai("/ai/dashboard/suggest", payload)
     suggestions = ai_result.get("suggestions", [])
