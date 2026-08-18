@@ -37,6 +37,7 @@ async def ai_suggest_dashboards(
     req: AISuggestDashboardsRequest,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
+    stop_after_first_valid: bool = False,
 ) -> dict[str, Any]:
     """Return >= 3 dashboard plan suggestions for a project (insight-first).
 
@@ -44,6 +45,18 @@ async def ai_suggest_dashboards(
     These are previews only — nothing is saved. The user saves a chosen plan via
     the existing ``/actions/generate-and-save-dashboard`` pipeline, which runs the
     full SQL validation/judge and drops empty widgets.
+
+    ``stop_after_first_valid``: the LLM call above always proposes >= 3
+    candidate plans, but ``_render_preview_widgets`` -- executing every
+    widget's SQL against Teiid for the SQL-preview shape -- runs once per
+    plan. A caller that only ever uses the first plan with valid widgets
+    (``review_dashboard_design``, the AI Dashboard Designer's "Analyze
+    data" step) does not need previews for the other 1-2, which were pure
+    waste on that path: full per-plan SQL execution 2-3x over, contributing
+    the bulk of that step's 3-5 minute latency and the intermittent 504s at
+    nginx's 300s proxy_read_timeout. Defaults to False so the direct
+    ``/actions/suggest-dashboards`` HTTP endpoint (Home's "New Dashboard
+    Suggestions", which lets the user browse all of them) is unaffected.
     """
     project = await _check_project_access(session, context, req.project_id)
 
@@ -153,6 +166,12 @@ async def ai_suggest_dashboards(
                 "savePayload": save_payload,
             }
         )
+
+        if stop_after_first_valid and any(
+            isinstance(w, dict) and str(w.get("status") or "") == "valid" and str(w.get("sql") or "").strip()
+            for w in widgets
+        ):
+            break
 
     logger.info(
         "AI action: suggest_dashboards | count=%d project=%d tenant=%d user=%d",

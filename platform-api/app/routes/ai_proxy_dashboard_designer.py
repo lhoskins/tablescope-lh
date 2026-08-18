@@ -514,6 +514,7 @@ async def review_dashboard_design(
         ),
         session=session,
         context=context,
+        stop_after_first_valid=True,
     )
     suggestion = next(
         (
