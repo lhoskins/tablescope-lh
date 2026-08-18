@@ -551,6 +551,50 @@ def _operational_widgets(prompt: str, suggestion: dict[str, Any]) -> list[dict[s
     ]
 
 
+def _grounded_chart_selection(widget: dict[str, Any]) -> tuple[str, str | None, str | None]:
+    """Ground a suggested widget's chart type in the same ranking engine
+    Business Insight and Ask Anything use, instead of trusting the LLM's
+    ``chartType`` field unconstrained.
+
+    ``ai_suggest_dashboards`` already executes each widget's SQL during
+    review and attaches the result as ``previewData`` (see
+    ``_render_preview_widgets`` in ``ai_proxy_dashboard_suggest.py``), so no
+    extra query runs here. The LLM's own chart type is passed as
+    ``intent_hint``: the engine still weights toward it when the data shape
+    supports it, but a shape that can't actually render that way (e.g. a
+    single numeric column the LLM called "line") is corrected rather than
+    persisted as-is. Falls back to the LLM's raw fields when there's no
+    preview data to rank, or when the engine can't find a plottable shape
+    (resolves to "table") -- a dashboard widget defaulting to the LLM's
+    guess beats defaulting to a table.
+    """
+    chart_type = str(widget.get("chartType") or "bar")
+    label_column = str(widget.get("labelColumn") or "") or None
+    value_column = str(widget.get("valueColumn") or "") or None
+
+    preview = widget.get("previewData") or {}
+    columns = [str(c) for c in (preview.get("columns") or [])]
+    rows = list(preview.get("rows") or [])
+    if not columns or not rows:
+        return chart_type, label_column, value_column
+
+    presentation = resolve_presentation(columns, rows, intent_hint=chart_type)
+    chart = presentation.chart
+    if not chart or chart.get("type") in (None, "table"):
+        return chart_type, label_column, value_column
+
+    # `_map_chart_type`/`_map_chart_subtype` (ai_proxy_widget_helpers) key on
+    # this same compound-string convention -- a subtype like "horizontal_bar"
+    # or "donut" is itself a top-level key; a bare family ("line", "kpi", ...)
+    # is too. Falling back to "bar" only if the engine's own family is empty,
+    # which resolve_presentation never actually returns.
+    grounded_type = str(chart.get("subtype") or chart.get("type") or "bar")
+    grounded_label = chart.get("labelColumn") or label_column
+    value_columns = chart.get("valueColumns") or []
+    grounded_value = value_columns[0] if value_columns else value_column
+    return grounded_type, grounded_label, grounded_value
+
+
 async def _widget_configs(
     *,
     session: AsyncSession,
@@ -589,19 +633,20 @@ async def _widget_configs(
             allowed_tables=allowed_tables,
             existing_by_sql=existing_by_sql,
         )
+        chart_type, label_column, value_column = _grounded_chart_selection(widget)
         config = build_widget_config(
             title=str(widget.get("title") or widget.get("businessQuestion") or "Dashboard insight"),
             query_id=query.id,
-            chart_type=str(widget.get("chartType") or "bar"),
-            label_column=str(widget.get("labelColumn") or "") or None,
-            value_column=str(widget.get("valueColumn") or "") or None,
+            chart_type=chart_type,
+            label_column=label_column,
+            value_column=value_column,
             explanation=str(widget.get("businessQuestion") or ""),
             visualization_options={
                 "colorScheme": "operational_insight",
                 "showTooltip": True,
                 "showGrid": True,
                 "roundedCorners": True,
-                "barLayout": "horizontal" if str(widget.get("chartType")) == "horizontal_bar" else "vertical",
+                "barLayout": "horizontal" if chart_type == "horizontal_bar" else "vertical",
             },
             index=index,
             widget_id=f"ai_insight_{int(datetime.now(UTC).timestamp() * 1000)}_{index}",

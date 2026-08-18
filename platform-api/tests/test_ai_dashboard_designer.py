@@ -6,6 +6,7 @@ from app.auth.jwt import create_access_token
 from app.models.file_source_meta import FileSourceMeta
 from app.routes.ai_proxy_dashboard_designer import (
     _chart_recommendations,
+    _grounded_chart_selection,
     _infer_domain,
     _missing_concepts,
     _support_status,
@@ -130,6 +131,58 @@ def test_chart_recommendations_follow_detected_data_shape() -> None:
     )
     compatible = {item["chartType"] for item in recommendations if item["compatible"]}
     assert {"kpi", "line", "horizontal_bar", "heatmap"}.issubset(compatible)
+
+
+def test_grounded_chart_selection_corrects_a_chart_type_the_data_cannot_support() -> None:
+    """The LLM asked for a KPI (single aggregate value); the executed preview
+    is multi-row categorical data, which no KPI can render. Grounding through
+    the shared ranking engine must not persist that mismatch."""
+    widget = {
+        "chartType": "kpi",
+        "labelColumn": "",
+        "valueColumn": "incident_count",
+        "previewData": {
+            "columns": ["region", "incident_count"],
+            "rows": [
+                {"region": "East", "incident_count": 42},
+                {"region": "West", "incident_count": 31},
+                {"region": "North", "incident_count": 18},
+                {"region": "South", "incident_count": 27},
+            ],
+        },
+    }
+
+    chart_type, label_column, value_column = _grounded_chart_selection(widget)
+
+    assert chart_type != "kpi"
+    assert label_column == "region"
+    assert value_column == "incident_count"
+
+
+def test_grounded_chart_selection_falls_back_without_preview_data() -> None:
+    """A widget with no executed preview (e.g. narrative, or the query
+    failed) has nothing to ground against -- keep the LLM's raw fields
+    rather than guessing from nothing."""
+    widget = {"chartType": "line", "labelColumn": "month", "valueColumn": "revenue"}
+
+    assert _grounded_chart_selection(widget) == ("line", "month", "revenue")
+
+
+def test_grounded_chart_selection_falls_back_when_engine_finds_no_chart() -> None:
+    """A shape with no plottable measure resolves to a table in the shared
+    engine; a dashboard widget defaulting to the LLM's original guess beats
+    silently downgrading every such widget to a table."""
+    widget = {
+        "chartType": "bar",
+        "labelColumn": "note",
+        "valueColumn": "",
+        "previewData": {"columns": ["note"], "rows": [{"note": "hello"}]},
+    }
+
+    chart_type, label_column, _value_column = _grounded_chart_selection(widget)
+
+    assert chart_type == "bar"
+    assert label_column == "note"
 
 
 def test_executed_preview_can_validate_a_chart_when_profile_metadata_is_sparse() -> None:
