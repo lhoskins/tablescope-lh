@@ -13,8 +13,6 @@ Run from ``platform-api``: ``pytest -q tests/test_query_sql_helpers_retry.py``.
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 from fastapi import HTTPException
 
