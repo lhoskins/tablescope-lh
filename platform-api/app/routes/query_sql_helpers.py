@@ -205,8 +205,19 @@ async def _run_sql(
 # on CSV columns that Teiid imports as string type. COUNT is excluded (works on
 # any type). Matches e.g. SUM("revenue") or AVG(col) but NOT already-cast
 # expressions like SUM(CAST(...)).
+#
+# The quoted-column alternative accepts an optional `alias.` prefix
+# (r."RevenueUSD", sales_revenue_monthly_CSV."RevenueUSD") as well as a bare
+# quoted column ("RevenueUSD") -- a table-qualified quoted reference used to
+# silently fail to match at all (the unquoted alternative's character class
+# allows a dotted path like `r.` but not the quote that follows it, so the
+# whole call fell through uncast), which Teiid then rejects with TEIID30492
+# "aggregate function SUM cannot be used with non-numeric expressions" once a
+# query is written to qualify every column, as multi-table joins must.
 _AGG_CAST_RE = re.compile(
-    r'\b(SUM|AVG|MIN|MAX)\(\s*(?!CAST\b)(\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_$.]*)\s*\)',
+    r'\b(SUM|AVG|MIN|MAX)\(\s*(?!CAST\b)'
+    r'((?:[A-Za-z_][A-Za-z0-9_$]*\.)?\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_$.]*)'
+    r'\s*\)',
     re.IGNORECASE,
 )
 
