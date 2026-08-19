@@ -249,6 +249,16 @@ async def _render_preview_widgets(
             )
             if chart:
                 widget["chart"] = chart
+                # chartType above is the LLM's raw, unvalidated guess (e.g.
+                # "dual_line"). _build_chart grounds it in the real result
+                # shape and, for a two-metric time series, correctly resolves
+                # to combo/bar_line -- but only the nested chart dict carried
+                # that, so the widget's own chartType field (what the review
+                # UI displays) stayed frozen at the pre-grounding guess even
+                # after a genuinely different type was rendered.
+                widget["chartType"] = str(
+                    chart.get("subtype") or chart.get("type") or chart_type or "bar"
+                )
         return widget
 
     rendered = await asyncio.gather(
