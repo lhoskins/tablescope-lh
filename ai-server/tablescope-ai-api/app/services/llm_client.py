@@ -62,7 +62,22 @@ async def _generate_openai(
         resp.raise_for_status()
         data = resp.json()
         message = data["choices"][0]["message"]
-        content = message.get("content") or message.get("reasoning") or ""
+        content = message.get("content") or ""
+        if not content and message.get("reasoning"):
+            # A reasoning model (e.g. muse-glimmer) returns "reasoning" and
+            # "content" as separate fields. When content comes back empty the
+            # model spent its completion on the reasoning channel and never
+            # emitted an answer -- falling back to the reasoning trace here
+            # used to hand a paraphrase of the prompt to callers expecting
+            # JSON, guaranteeing a downstream parse failure that looked like
+            # malformed output rather than what it actually was: no output.
+            # Log it for diagnosis and return empty so that failure is honest.
+            logger.warning(
+                "vLLM target %s returned no content, only reasoning (%d chars); "
+                "treating as an empty completion",
+                target_url,
+                len(str(message.get("reasoning") or "")),
+            )
         text = str(content)
         # Muse Glimmer emits channel-scoped messages (to=self reasoning,
         # assistant to=user final answer). When the vLLM parser does not split
@@ -134,13 +149,27 @@ async def generate(
     target_url = (ollama_url or settings.ollama_url).rstrip("/")
 
     if _is_openai_target(target_url):
+        # vLLM/OpenAI-compatible targets have no per-request context-window
+        # override -- max_model_len is fixed by the server at startup, unlike
+        # Ollama's num_ctx -- so num_ctx was silently dropped for this path
+        # entirely. A caller asking for a large context (e.g. a big
+        # dashboard-suggest prompt) got no completion-budget signal on a vLLM
+        # target at all, leaving it to the server's own max_tokens default.
+        # Translate the request into an explicit max_tokens reservation when
+        # the caller hasn't already set one, so the model has a guaranteed,
+        # generous budget to produce its actual answer. Halved and capped
+        # well under any reasonable model's max_model_len so this can never
+        # itself request more completion tokens than the server allows.
+        effective_max_tokens = max_tokens
+        if effective_max_tokens is None and num_ctx is not None:
+            effective_max_tokens = min(num_ctx // 2, 4096)
         return await _generate_openai(
             prompt=prompt,
             system_prompt=system_prompt,
             model=model,
             target_url=target_url,
             temperature=temperature,
-            max_tokens=max_tokens,
+            max_tokens=effective_max_tokens,
             stop=stop,
             response_format=response_format,
         )
