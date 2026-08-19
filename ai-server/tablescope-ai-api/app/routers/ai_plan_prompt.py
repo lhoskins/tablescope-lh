@@ -1,5 +1,47 @@
 """Prompt-block builders for the intelligence plan."""
 
+from app.core.config import settings
+
+
+def _fit_plan_prompt(
+    prompt: str,
+    system_prompt: str,
+    *,
+    max_model_len: int | None = None,
+    max_tokens: int = 2048,
+    chars_per_token: float = 3.5,
+) -> str:
+    """Trim the front of the user prompt so system + prompt + output fit vLLM.
+
+    ai-server has no tokenizer, so this is a conservative character-based
+    estimate, not an exact count -- chars_per_token errs low (English text is
+    typically ~4 chars/token) so the trim is never too small. Reserves room
+    for both the system prompt and ``max_tokens`` of output; callers must
+    pass the SAME ``max_tokens`` to ``llm_client.generate`` so the reserved
+    budget is actually honored request-side, not just assumed here.
+
+    Shared by every planner prompt (single-table/relationship analyses,
+    dashboard suggestion) that can grow large enough on a big project to
+    starve a reasoning model of room to answer -- confirmed live: a project
+    with an inflated context (many saved queries/dashboards/scopes/junk
+    datasources) filled vLLM's whole context window with prompt, leaving a
+    reasoning model ~120 completion tokens -- enough for its reasoning
+    channel but none for its actual answer, silently returning 0 results
+    every time.
+    """
+    max_model_len = max_model_len or settings.vllm_max_model_len
+    reserve_tokens = max_tokens + int(len(system_prompt) / chars_per_token) + 40
+    token_budget = max(0, max_model_len - reserve_tokens)
+    char_budget = int(token_budget * chars_per_token)
+    if len(prompt) <= char_budget:
+        return prompt
+    # Keep the instruction/output-format tail and drop excess context from the front.
+    truncated = prompt[-char_budget:]
+    idx = truncated.find("\n")
+    if idx != -1 and idx < 120:
+        truncated = truncated[idx + 1 :]
+    return "[context truncated for length]\n\n" + truncated
+
 
 def _build_kg_hypothesis_lines(kg: dict) -> str:
     """Render the platform's Knowledge Graph digest as hypotheses to test.
