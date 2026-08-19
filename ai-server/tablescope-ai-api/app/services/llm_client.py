@@ -59,7 +59,20 @@ async def _generate_openai(
             f"{target_url}/chat/completions",
             json=payload,
         )
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError:
+            # raise_for_status() alone discards the response body, so a vLLM
+            # rejection (e.g. requested max_tokens + prompt tokens exceeding
+            # max_model_len) surfaced as a bare "400 Bad Request" with no
+            # explanation anywhere in the logs. Log the body before
+            # re-raising so the cause is visible without reproducing the
+            # call by hand against the model server.
+            logger.error(
+                "vLLM target %s rejected the request (%s): %s",
+                target_url, resp.status_code, resp.text[:1000],
+            )
+            raise
         data = resp.json()
         message = data["choices"][0]["message"]
         content = message.get("content") or ""
@@ -151,25 +164,26 @@ async def generate(
     if _is_openai_target(target_url):
         # vLLM/OpenAI-compatible targets have no per-request context-window
         # override -- max_model_len is fixed by the server at startup, unlike
-        # Ollama's num_ctx -- so num_ctx was silently dropped for this path
-        # entirely. A caller asking for a large context (e.g. a big
-        # dashboard-suggest prompt) got no completion-budget signal on a vLLM
-        # target at all, leaving it to the server's own max_tokens default.
-        # Translate the request into an explicit max_tokens reservation when
-        # the caller hasn't already set one, so the model has a guaranteed,
-        # generous budget to produce its actual answer. Halved and capped
-        # well under any reasonable model's max_model_len so this can never
-        # itself request more completion tokens than the server allows.
-        effective_max_tokens = max_tokens
-        if effective_max_tokens is None and num_ctx is not None:
-            effective_max_tokens = min(num_ctx // 2, 4096)
+        # Ollama's num_ctx -- so num_ctx has no meaningful translation here
+        # and is intentionally left unused for this path.
+        #
+        # A prior version of this function derived an explicit max_tokens
+        # from num_ctx (halved and capped at 4096) to try to guarantee
+        # reasoning models a completion budget. That is unsafe: ai-server has
+        # no tokenizer, so it cannot know the actual prompt token count, and
+        # vLLM rejects prompt_tokens + max_tokens > max_model_len with a 400
+        # rather than truncating -- turning a large prompt's soft failure
+        # (empty content, 0 widgets) into a hard 500 on every call. Passing
+        # max_tokens through unset (the caller's default) lets vLLM size the
+        # completion itself from the real prompt it just tokenized, which is
+        # strictly safer than any client-side guess.
         return await _generate_openai(
             prompt=prompt,
             system_prompt=system_prompt,
             model=model,
             target_url=target_url,
             temperature=temperature,
-            max_tokens=effective_max_tokens,
+            max_tokens=max_tokens,
             stop=stop,
             response_format=response_format,
         )
