@@ -25,6 +25,33 @@ def test_leaves_already_cast_aggregate() -> None:
     assert _auto_cast_aggregates(sql) == sql
 
 
+def test_casts_table_alias_qualified_column() -> None:
+    # A join must table-qualify every column reference (r."RevenueUSD"), per
+    # the Teiid join rules -- this used to fall through uncast entirely,
+    # since the unquoted branch's character class allows the dotted alias
+    # prefix but not the quote mark that follows it, so the whole SUM(...)
+    # call failed to match and Teiid rejected it with TEIID30492 ("aggregate
+    # function SUM cannot be used with non-numeric expressions") against a
+    # CSV-imported string column.
+    assert _auto_cast_aggregates(
+        'SELECT SUM(r."RevenueUSD") FROM sales_revenue_monthly_CSV r'
+    ) == 'SELECT SUM(CAST(r."RevenueUSD" AS double)) FROM sales_revenue_monthly_CSV r'
+
+
+def test_casts_full_table_name_qualified_column() -> None:
+    assert _auto_cast_aggregates(
+        'SELECT AVG(sales_revenue_monthly_CSV."RevenueUSD") FROM sales_revenue_monthly_CSV'
+    ) == (
+        'SELECT AVG(CAST(sales_revenue_monthly_CSV."RevenueUSD" AS double)) '
+        "FROM sales_revenue_monthly_CSV"
+    )
+
+
+def test_leaves_already_cast_qualified_aggregate() -> None:
+    sql = 'SELECT AVG(CAST(r."RevenueUSD" AS double)) FROM t r'
+    assert _auto_cast_aggregates(sql) == sql
+
+
 def test_wraps_timestampdiff_in_cast() -> None:
     out = _cast_timestampdiff(f"SELECT AVG({TD}) FROM t")
     assert f"CAST({TD} AS double)" in out
