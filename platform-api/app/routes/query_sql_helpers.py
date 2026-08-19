@@ -215,17 +215,26 @@ async def _run_sql(
 # TEIID30328 "Unable to evaluate convert(...)". COUNT is excluded too (works
 # on any type, never needs a cast).
 #
-# The quoted-column alternative accepts an optional `alias.` prefix
-# (r."RevenueUSD", sales_revenue_monthly_CSV."RevenueUSD") as well as a bare
-# quoted column ("RevenueUSD") -- a table-qualified quoted reference used to
-# silently fail to match at all (the unquoted alternative's character class
-# allows a dotted path like `r.` but not the quote that follows it, so the
-# whole call fell through uncast), which Teiid then rejects with TEIID30492
-# "aggregate function SUM cannot be used with non-numeric expressions" once a
-# query is written to qualify every column, as multi-table joins must.
+# The quoted-column alternative accepts an optional qualifying prefix --
+# either an unquoted alias (r."RevenueUSD") or a QUOTED table name
+# ("sales_revenue_monthly_CSV"."RevenueUSD") -- as well as a bare quoted
+# column ("RevenueUSD"). Two distinct qualified forms used to fall through
+# uncast entirely, each only caught once reproduced live:
+#   - unquoted-alias prefix (r."RevenueUSD"): the unquoted alternative's
+#     character class allows a dotted path like `r.` but not the quote that
+#     follows it, so the whole call failed to match.
+#   - quoted-table-name prefix ("sales_revenue_monthly_CSV"."RevenueUSD"):
+#     normalize_teiid_identifiers (which runs before this, in _prepare_sql)
+#     quotes real table names, and the original fix only ever accepted an
+#     UNQUOTED prefix -- so a query the model qualified with the full table
+#     name, rather than an alias, still fell through uncast after
+#     normalization even though the alias-qualified form worked.
+# Both are rejected by Teiid with TEIID30492 "aggregate function SUM cannot
+# be used with non-numeric expressions" once a query is written to qualify
+# every column, as multi-table joins must.
 _AGG_CAST_RE = re.compile(
     r'\b(SUM|AVG)\(\s*(?!CAST\b)'
-    r'((?:[A-Za-z_][A-Za-z0-9_$]*\.)?\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_$.]*)'
+    r'((?:(?:[A-Za-z_][A-Za-z0-9_$]*|\"[^\"]+\")\.)?\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_$.]*)'
     r'\s*\)',
     re.IGNORECASE,
 )
