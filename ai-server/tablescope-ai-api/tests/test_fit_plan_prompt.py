@@ -149,3 +149,116 @@ def test_suggest_dashboard_leaves_a_small_prompt_unchanged(monkeypatch):
 
     assert captured["max_tokens"] == 2048
     assert not captured["prompt"].startswith("[context truncated for length]")
+
+
+# ── Regression: the user's actual request must survive trimming ────────────
+#
+# The first version of this fix positioned `user_instruction` (rendered from
+# req.prompt -- e.g. a user-named list of specific charts, "Monthly Revenue
+# (bar) vs Monthly backlog (line)") near the FRONT of the prompt, right after
+# context_text/kg/best-practices. _fit_plan_prompt trims from the front and
+# keeps the tail, so on a large project that combination silently dropped the
+# user's actual request while every fixed instruction/schema block at the
+# tail survived untouched -- the model saw no named charts at all and fell
+# back to generic ones. Confirmed live: "Requested 5 charts; AI proposed 5"
+# but only 2 of 5 -- neither the requested combo chart -- reached the final
+# dashboard. Fixed by moving user_instruction to sit immediately before the
+# JSON-schema tail, which is unconditionally preserved by the trim.
+
+_NAMED_CHART_REQUEST = (
+    "Monthly Revenue||Total Revenu KPI card||Total Backlog KPI card||"
+    "Monthly Revenue (bar) vs Monthly backlog (line)||Monthly Backlog"
+)
+
+
+# _fit_plan_prompt always trims from the front and keeps a fixed-size SUFFIX
+# (char_budget characters counted from the end). So the safety of a block's
+# position is entirely determined by how many characters follow it -- that
+# distance-from-end never changes no matter how much front content (a huge
+# project's context_text) is added. Using a small, untrimmed context here and
+# asserting that distance directly proves survival for ANY context size,
+# rather than depending on hitting a specific truncation boundary by luck.
+_SAFE_TAIL_DISTANCE = 5000  # generous margin under the ~34.9k char_budget
+# the default settings (max_tokens=2048, vllm_max_model_len=12288) reserve.
+
+
+def test_suggest_dashboard_places_the_user_request_within_the_safe_tail(monkeypatch):
+    captured = _capture_generate(monkeypatch, _SUGGEST_RESPONSE)
+    req = SuggestDashboardRequest(
+        tenant_id=1, user_id=1, project_id=1, allowed_tables=["a", "b"],
+        prompt=_NAMED_CHART_REQUEST,
+    )
+
+    asyncio.run(ai_dashboard.suggest_dashboard(req))
+
+    prompt = captured["prompt"]
+    idx = prompt.index(_NAMED_CHART_REQUEST)
+    assert len(prompt) - idx < _SAFE_TAIL_DISTANCE
+
+
+def test_suggest_dashboards_multi_places_the_user_request_within_the_safe_tail(monkeypatch):
+    captured = _capture_generate(monkeypatch, _SUGGEST_MULTI_RESPONSE)
+    req = SuggestDashboardsMultiRequest(
+        tenant_id=1, user_id=1, project_id=1, allowed_tables=["a", "b"],
+        prompt=_NAMED_CHART_REQUEST,
+    )
+
+    asyncio.run(ai_dashboard.suggest_dashboards_multi(req))
+
+    prompt = captured["prompt"]
+    idx = prompt.index(_NAMED_CHART_REQUEST)
+    assert len(prompt) - idx < _SAFE_TAIL_DISTANCE
+
+
+# ── best_practices_block must be sacrificed before context_text ────────────
+#
+# dashboard_best_practices.md is ~19k chars (~5.5k tokens) -- over half of
+# the ~34.9k char_budget the default settings leave after reserving output.
+# It used to sit ahead of context_text, so a front-trim protected 19k chars
+# of static, identical-every-call reference text while cutting into the
+# project's actual per-request schema first -- backwards, since the model
+# cannot write correct SQL for a source it never saw the columns for.
+# Reordered so context_text (what SPECIFIC columns this project's sources
+# have) outranks best_practices_block (generic policy) when something has
+# to give.
+
+def test_suggest_dashboard_sacrifices_best_practices_before_project_schema(monkeypatch):
+    monkeypatch.setattr(
+        ai_dashboard, "load_prompt_reference",
+        lambda *a, **k: "BP_MARKER_START " + ("x" * 40_000),
+    )
+    monkeypatch.setattr(
+        ai_dashboard.context_builder, "context_to_prompt_text",
+        lambda ctx: "CTX_MARKER_START " + ("y" * 3_000),
+    )
+    captured = _capture_generate(monkeypatch, _SUGGEST_RESPONSE)
+    req = SuggestDashboardRequest(
+        tenant_id=1, user_id=1, project_id=1, allowed_tables=["a", "b"],
+    )
+
+    asyncio.run(ai_dashboard.suggest_dashboard(req))
+
+    prompt = captured["prompt"]
+    assert "BP_MARKER_START" not in prompt
+    assert "CTX_MARKER_START" in prompt
+
+
+def test_suggest_dashboards_multi_sacrifices_best_practices_before_project_schema(monkeypatch):
+    monkeypatch.setattr(
+        ai_dashboard, "load_prompt_reference",
+        lambda *a, **k: "BP_MARKER_START " + ("x" * 40_000),
+    )
+    monkeypatch.setattr(
+        ai_dashboard.context_builder, "context_to_prompt_text",
+        lambda ctx: "CTX_MARKER_START " + ("y" * 3_000),
+    )
+    captured = _capture_generate(monkeypatch, _SUGGEST_MULTI_RESPONSE)
+    req = SuggestDashboardsMultiRequest(
+        tenant_id=1, user_id=1, project_id=1, allowed_tables=["a", "b"],
+    )
+
+    asyncio.run(ai_dashboard.suggest_dashboards_multi(req))
+
+    prompt = captured["prompt"]
+    assert "BP_MARKER_START" not in prompt
+    assert "CTX_MARKER_START" in prompt

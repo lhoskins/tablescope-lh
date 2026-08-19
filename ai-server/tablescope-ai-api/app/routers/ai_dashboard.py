@@ -168,9 +168,20 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
     relationship_floor = _dashboard_relationship_floor_line(bool(relationship_lines))
 
     prompt = (
+        # best_practices_block first: it is the single largest block (the
+        # full dashboard_best_practices.md reference, ~19k chars/~5.5k
+        # tokens -- over half of _fit_plan_prompt's entire trim budget) and
+        # the LEAST request-specific -- static guidance, identical on every
+        # call. _fit_plan_prompt trims from the front, so whatever sits
+        # first is sacrificed first. Putting it ahead of context_text means
+        # an oversized prompt trims generic policy text before it ever
+        # touches the project's actual schema -- previously reversed: the
+        # per-project schema (which columns this SPECIFIC dashboard's SQL
+        # needs) was first in line to be cut while the same boilerplate
+        # every request shares was protected near the tail.
+        f"{best_practices_block}"
         f"{context_text}\n\n"
         f"{kg_prompt_block}"
-        f"{best_practices_block}"
         f"Allowed tables (use ONLY these exact names): {', '.join(allowed_tables)}\n\n"
         "CRITICAL: every widget's SQL must reference ONLY the allowed tables "
         "above. Never invent or assume any other table (e.g. Sales, Product, "
@@ -178,7 +189,6 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
         f"{teiid_rules}\n"
         f"{relationship_lines}"
         f"{relationship_floor}\n"
-        f"{user_instruction}\n"
         "Think like a senior business analyst and KPI strategist. Do NOT start "
         "by making charts. First decide what a well-run company in this domain "
         "should monitor, where the risk or opportunity is, and which insights "
@@ -222,6 +232,7 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
         "top row, place related charts near each other, give trend/table/heatmap/"
         "waterfall charts more width (gridW 8-12), and create a clear top-left to "
         "bottom-right reading path. Aim for 4-8 strong widgets.\n\n"
+        f"{user_instruction}\n"
         "Return ONLY a JSON object:\n"
         "{\n"
         '  "title": "specific, descriptive dashboard name (never generic like AI Dashboard)",\n'
@@ -405,13 +416,17 @@ async def suggest_dashboards_multi(
     relationship_floor = _dashboard_relationship_floor_line(bool(relationship_lines))
 
     prompt = (
+        # See suggest_dashboard's identical reordering: best_practices_block
+        # is the largest block (~19k chars) and the least request-specific
+        # (static, identical every call), so it goes first -- _fit_plan_
+        # prompt trims from the front, and the project's actual schema in
+        # context_text needs to survive that far more than boilerplate does.
+        f"{best_practices_block}"
         f"{context_text}\n\n"
         f"{kg_prompt_block}"
-        f"{best_practices_block}"
         f"Allowed tables (use ONLY these exact names): {', '.join(allowed_tables)}\n\n"
         f"{audience_line}"
         f"{kpi_line}"
-        f"{user_instruction}\n"
         f"Propose {desired} DISTINCT, non-overlapping dashboard PLANS a senior "
         "analyst would build for this project. Each plan must target a different "
         "business theme, audience, or decision (e.g. executive overview, supplier "
@@ -438,6 +453,7 @@ async def suggest_dashboards_multi(
         "empty sql; use these sparingly and prefer real data widgets.\n\n"
         f"{relationship_lines}"
         f"{relationship_floor}\n"
+        f"{user_instruction}\n"
         f"Return ONLY a JSON object with at least {desired} suggestions:\n"
         "{\n"
         '  "suggestions": [ {\n'
