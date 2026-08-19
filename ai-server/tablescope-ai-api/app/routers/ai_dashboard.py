@@ -275,12 +275,22 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
     # otherwise fill vLLM's whole context window with prompt, leaving a
     # reasoning model just enough room to think and none to answer -- a
     # confirmed live failure mode (0 widgets, every time, on a large project).
+    #
+    # This endpoint's per-widget schema is far richer than suggest-multi's
+    # (~20 fields: reference_lines, validation_expectations, grid layout,
+    # etc. vs. 6), so even one plan's worth of 4-8 widgets can need more than
+    # 2048 tokens -- and this is the endpoint the final "Create dashboard"
+    # step actually calls to build the saved dashboard, so a truncated
+    # response here silently drops widgets (or leaves one mid-generation,
+    # e.g. a JOIN cut off before its ON clause) exactly like the confirmed
+    # suggest-multi truncation, just for the saved dashboard instead of the
+    # review preview.
     logger.info(
         "dashboard suggest prompt len=%d (pre-fit) tenant=%s project=%s",
         len(prompt), req.tenant_id, req.project_id,
     )
     prompt = _fit_plan_prompt(
-        prompt, _DASHBOARD_INSIGHT_SYSTEM_PROMPT, max_tokens=2048
+        prompt, _DASHBOARD_INSIGHT_SYSTEM_PROMPT, max_tokens=3072
     )
     logger.info(
         "dashboard suggest prompt len=%d (post-fit) tenant=%s project=%s",
@@ -291,7 +301,7 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
         system_prompt=_DASHBOARD_INSIGHT_SYSTEM_PROMPT,
         model=req.model or settings.sql_model,
         temperature=0.3,
-        max_tokens=2048,
+        max_tokens=3072,
         # Larger window so the injected dashboard_best_practices reference fits
         # alongside the project context without truncation.
         num_ctx=24576,
@@ -477,12 +487,23 @@ async def suggest_dashboards_multi(
     # See suggest_dashboard's identical fit call: a large project can fill
     # vLLM's whole context window with prompt, leaving a reasoning model no
     # room to answer -- a confirmed live failure mode on this endpoint.
+    #
+    # max_tokens is double suggest_dashboard's: this endpoint emits up to
+    # `desired` (>= 3) full plans in one JSON response, not one -- 2048
+    # matched suggest_dashboard's single-plan budget but was confirmed live
+    # to truncate a multi-widget request here (5 named charts came back as
+    # 2 widgets even once the prompt-trimming fix landed and context
+    # trimming was ruled out; a 1-widget isolated request of the same shape
+    # succeeded fully). _repair_truncated_json silently salvages whatever
+    # completed before the cutoff, so a too-small budget here looks
+    # identical to bad grounding rather than what it actually is: the
+    # response ran out of room mid-plan.
     logger.info(
         "dashboard suggest-multi prompt len=%d (pre-fit) tenant=%s project=%s",
         len(prompt), req.tenant_id, req.project_id,
     )
     prompt = _fit_plan_prompt(
-        prompt, _DASHBOARD_INSIGHT_SYSTEM_PROMPT, max_tokens=2048
+        prompt, _DASHBOARD_INSIGHT_SYSTEM_PROMPT, max_tokens=4096
     )
     logger.info(
         "dashboard suggest-multi prompt len=%d (post-fit) tenant=%s project=%s",
@@ -493,7 +514,7 @@ async def suggest_dashboards_multi(
         system_prompt=_DASHBOARD_INSIGHT_SYSTEM_PROMPT,
         model=req.model or settings.sql_model,
         temperature=0.4,
-        max_tokens=2048,
+        max_tokens=4096,
         num_ctx=24576,
         response_format="json",
         ollama_url=req.ollama_url,

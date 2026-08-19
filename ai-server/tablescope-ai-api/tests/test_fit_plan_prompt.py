@@ -110,6 +110,17 @@ _SUGGEST_RESPONSE = json.dumps(
 _SUGGEST_MULTI_RESPONSE = json.dumps({"suggestions": []})
 
 
+# max_tokens=2048 (matched to suggest_dashboard's single-plan budget)
+# confirmed live to truncate suggest_dashboards_multi's response for a
+# 5-named-chart request: "Requested 5 charts; AI proposed 5" at the LLM
+# layer, but only 2 widgets survived _repair_truncated_json's salvage of
+# whatever completed before the cutoff -- reproduced 1:1 by a smaller,
+# 1-widget isolated request of the same shape succeeding fully. suggest_
+# dashboard (singular) carries the same risk with an even richer ~20-field
+# widget schema (vs. 6 for suggest-multi) and is what the final "Create
+# dashboard" step actually calls, so both got a larger, endpoint-specific
+# budget rather than sharing suggest_dashboard's original 2048.
+
 def test_suggest_dashboard_trims_an_oversized_prompt_and_reserves_output_tokens(monkeypatch):
     captured = _capture_generate(monkeypatch, _SUGGEST_RESPONSE)
     req = SuggestDashboardRequest(
@@ -118,7 +129,7 @@ def test_suggest_dashboard_trims_an_oversized_prompt_and_reserves_output_tokens(
 
     asyncio.run(ai_dashboard.suggest_dashboard(req))
 
-    assert captured["max_tokens"] == 2048
+    assert captured["max_tokens"] == 3072
     assert captured["prompt"].startswith("[context truncated for length]")
     assert len(captured["prompt"]) < 132_000
 
@@ -131,7 +142,7 @@ def test_suggest_dashboards_multi_trims_an_oversized_prompt_and_reserves_output_
 
     asyncio.run(ai_dashboard.suggest_dashboards_multi(req))
 
-    assert captured["max_tokens"] == 2048
+    assert captured["max_tokens"] == 4096
     assert captured["prompt"].startswith("[context truncated for length]")
     assert len(captured["prompt"]) < 132_000
 
@@ -147,7 +158,7 @@ def test_suggest_dashboard_leaves_a_small_prompt_unchanged(monkeypatch):
 
     asyncio.run(ai_dashboard.suggest_dashboard(req))
 
-    assert captured["max_tokens"] == 2048
+    assert captured["max_tokens"] == 3072
     assert not captured["prompt"].startswith("[context truncated for length]")
 
 
@@ -178,8 +189,9 @@ _NAMED_CHART_REQUEST = (
 # project's context_text) is added. Using a small, untrimmed context here and
 # asserting that distance directly proves survival for ANY context size,
 # rather than depending on hitting a specific truncation boundary by luck.
-_SAFE_TAIL_DISTANCE = 5000  # generous margin under the ~34.9k char_budget
-# the default settings (max_tokens=2048, vllm_max_model_len=12288) reserve.
+_SAFE_TAIL_DISTANCE = 5000  # generous margin under the ~27.7k-31.3k char_budget
+# ai_dashboard.py's actual max_tokens (4096 for suggest-multi, 3072 for
+# suggest) leave against vllm_max_model_len=12288.
 
 
 def test_suggest_dashboard_places_the_user_request_within_the_safe_tail(monkeypatch):
