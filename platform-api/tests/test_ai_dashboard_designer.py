@@ -6,6 +6,7 @@ from app.auth.jwt import create_access_token
 from app.models.file_source_meta import FileSourceMeta
 from app.routes.ai_proxy_dashboard_designer import (
     _chart_recommendations,
+    _concept_supported,
     _engine_chart_recommendations,
     _grounded_chart_selection,
     _infer_domain,
@@ -322,6 +323,38 @@ def test_infer_domain_prefers_real_column_matches_over_prompt_words() -> None:
 
     # Unmatched prompts/columns fall back to generic, not a forced ITSM label.
     assert _infer_domain("Interesting data", [{"name": "foo", "type": "string"}]) == "generic"
+
+
+def test_infer_domain_ignores_short_junk_columns_that_coincidentally_substring_match() -> None:
+    """A real project's ITSM columns plus a couple of unrelated demo CSVs
+    with 2-letter column names (e.g. "IP", "PL") must not tip the domain to
+    manufacturing just because those short names happen to appear inside
+    long compound concept terms ("ip" in "equipmenteffectiveness", "pl" in
+    "unplanneddowntime") -- reproduces the project-44 misclassification
+    (manufacturing 12 vs itsm 10) traced to _concept_supported's reversed
+    substring check having no minimum length on the actual column name."""
+    columns = [
+        {"name": "IncidentID", "type": "string"},
+        {"name": "Priority", "type": "string"},
+        {"name": "OpenedDate", "type": "date"},
+        {"name": "ResolvedAt", "type": "date"},
+        {"name": "AssignmentGroup", "type": "string"},
+        {"name": "State", "type": "string"},
+        # Unrelated demo CSVs with short, coincidentally-matching columns.
+        {"name": "IP", "type": "string"},
+        {"name": "PL", "type": "string"},
+        {"name": "NS", "type": "string"},
+    ]
+    assert _infer_domain("IT incident count by priority", columns) == "itsm"
+
+
+def test_concept_supported_still_matches_genuine_short_abbreviations() -> None:
+    """The length floor targets uncurated column names, not the curated
+    concept terms -- a real 3-letter abbreviation like "sla" must still
+    match a longer concept term like "slamet"."""
+    assert _concept_supported(("slamet", "slabreached"), {"sla"})
+    assert not _concept_supported(("equipmenteffectiveness",), {"ip"})
+    assert not _concept_supported(("unplanneddowntime",), {"pl"})
 
 
 def test_missing_concepts_respects_inferred_domain() -> None:

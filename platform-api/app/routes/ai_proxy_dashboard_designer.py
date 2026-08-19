@@ -212,9 +212,21 @@ def _source_columns(source: FileSourceMeta) -> list[dict[str, str]]:
 def _concept_supported(
     field_terms: tuple[str, ...], available: set[str]
 ) -> bool:
+    """Does any actual column name plausibly represent one of these concepts?
+
+    ``field`` (an actual, uncurated column name from the project's data) is
+    only checked as a substring of the curated concept term -- never the
+    other way for short fields. Without the length floor, a 2-letter column
+    name from an unrelated demo source (e.g. "IP", "PL") is trivially a
+    substring of *some* long compound concept term ("ip" inside
+    "equipmenteffectiveness", "pl" inside "unplanneddowntime"), scoring a
+    domain match on pure coincidence rather than a real abbreviation like
+    "sla" genuinely abbreviating "slamet".
+    """
     return any(
         any(
-            _normal(candidate) in field or field in _normal(candidate)
+            _normal(candidate) in field
+            or (len(field) >= 3 and field in _normal(candidate))
             for field in available
         )
         for candidate in field_terms
