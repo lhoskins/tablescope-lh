@@ -25,6 +25,16 @@ def test_leaves_already_cast_aggregate() -> None:
     assert _auto_cast_aggregates(sql) == sql
 
 
+def test_does_not_cast_min_or_max() -> None:
+    # MIN/MAX are valid on any orderable type -- unlike SUM/AVG, which are
+    # meaningless on a string and MUST be cast to work at all. Casting
+    # MIN/MAX unconditionally used to turn MIN(r."Month") into
+    # MIN(CAST(r."Month" AS double)), which Teiid rejects outright for a
+    # date/text column (TEIID30328 "Unable to evaluate convert(...)").
+    sql = 'SELECT MIN(r."Month") AS m, MAX(r."Month") AS x FROM t r'
+    assert _auto_cast_aggregates(sql) == sql
+
+
 def test_casts_table_alias_qualified_column() -> None:
     # A join must table-qualify every column reference (r."RevenueUSD"), per
     # the Teiid join rules -- this used to fall through uncast entirely,

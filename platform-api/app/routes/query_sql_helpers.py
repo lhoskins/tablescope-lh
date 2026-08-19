@@ -201,10 +201,19 @@ async def _run_sql(
     return {"columns": columns, "rows": rows}
 
 
-# Regex to add CAST(... AS double) inside SUM/AVG/MIN/MAX so aggregations work
-# on CSV columns that Teiid imports as string type. COUNT is excluded (works on
-# any type). Matches e.g. SUM("revenue") or AVG(col) but NOT already-cast
-# expressions like SUM(CAST(...)).
+# Regex to add CAST(... AS double) inside SUM/AVG so aggregations work on CSV
+# columns that Teiid imports as string type. Matches e.g. SUM("revenue") or
+# AVG(col) but NOT already-cast expressions like SUM(CAST(...)).
+#
+# MIN/MAX are deliberately excluded: unlike SUM/AVG, which are mathematically
+# meaningless on a string and MUST be cast to work at all, MIN/MAX are valid
+# on any orderable type -- a string/date column sorts fine as-is in the
+# common case (consistently formatted dates, zero-padded numbers). Casting
+# them unconditionally traded a narrow correctness win (an inconsistently
+# formatted numeric-as-string column) for a hard failure on every date/text
+# column: MIN(r."Month") -> MIN(CAST(r."Month" AS double)) ->
+# TEIID30328 "Unable to evaluate convert(...)". COUNT is excluded too (works
+# on any type, never needs a cast).
 #
 # The quoted-column alternative accepts an optional `alias.` prefix
 # (r."RevenueUSD", sales_revenue_monthly_CSV."RevenueUSD") as well as a bare
@@ -215,7 +224,7 @@ async def _run_sql(
 # "aggregate function SUM cannot be used with non-numeric expressions" once a
 # query is written to qualify every column, as multi-table joins must.
 _AGG_CAST_RE = re.compile(
-    r'\b(SUM|AVG|MIN|MAX)\(\s*(?!CAST\b)'
+    r'\b(SUM|AVG)\(\s*(?!CAST\b)'
     r'((?:[A-Za-z_][A-Za-z0-9_$]*\.)?\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_$.]*)'
     r'\s*\)',
     re.IGNORECASE,
@@ -274,7 +283,7 @@ def _cast_timestampdiff(sql: str) -> str:
 
 
 def _auto_cast_aggregates(sql: str) -> str:
-    """Wrap SUM/AVG/MIN/MAX column arguments with CAST(col AS double).
+    """Wrap SUM/AVG column arguments with CAST(col AS double).
 
     Teiid imports CSV columns as string, causing numeric aggregations to fail.
     This transparently casts the argument for the user. TIMESTAMPDIFF results
