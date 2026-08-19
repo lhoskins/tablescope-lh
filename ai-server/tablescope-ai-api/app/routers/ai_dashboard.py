@@ -23,6 +23,7 @@ from app.services.prompt_loader import load_prompt_reference
 from app.services.sql_validator import SQLValidationError, validate_sql
 
 from .ai_plan_prompt import _build_relationship_hint_lines, _fit_plan_prompt
+from .ai_plan_sql import _ensure_group_by
 from .ai_shared import (
     _TEIID_JOIN_EXCEPTION_RULE,
     _TEIID_RULES_COMMON,
@@ -328,7 +329,7 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
         for w in s.get("widgets", []):
             sql = w.get("sql")
             if sql:
-                w["sql"] = _clean_sql(sql)
+                w["sql"] = _ensure_group_by(_clean_sql(sql))
                 try:
                     validate_sql(w["sql"], allowed_tables)
                 except SQLValidationError as e:
@@ -544,7 +545,7 @@ async def suggest_dashboards_multi(
                 # Clean + validate against the allowed tables. Drop widgets whose
                 # SQL references tables outside the project (hallucinated/reference
                 # docs); narrative widgets (empty sql) are always kept.
-                sql = _clean_sql(sql)
+                sql = _ensure_group_by(_clean_sql(sql))
                 try:
                     validate_sql(sql, allowed_tables)
                 except SQLValidationError as e:
