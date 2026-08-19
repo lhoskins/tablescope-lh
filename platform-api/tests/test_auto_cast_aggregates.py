@@ -62,6 +62,33 @@ def test_leaves_already_cast_qualified_aggregate() -> None:
     assert _auto_cast_aggregates(sql) == sql
 
 
+def test_casts_quoted_table_name_qualified_column() -> None:
+    # _prepare_sql runs normalize_teiid_identifiers before _auto_cast_
+    # aggregates, and it quotes real table names -- so a query the model
+    # qualified with the full table name (rather than an alias) reaches this
+    # function as "table"."column", not table."column". The original
+    # qualified-column fix only ever accepted an UNQUOTED prefix before the
+    # quoted column, so this form still fell through uncast and Teiid
+    # rejected it with the same TEIID30492 the alias-qualified fix targeted.
+    assert _auto_cast_aggregates(
+        'SELECT SUM("sales_revenue_monthly_CSV"."RevenueUSD") '
+        'FROM "sales_revenue_monthly_CSV"'
+    ) == (
+        'SELECT SUM(CAST("sales_revenue_monthly_CSV"."RevenueUSD" AS double)) '
+        'FROM "sales_revenue_monthly_CSV"'
+    )
+
+
+def test_leaves_already_cast_quoted_table_qualified_aggregate() -> None:
+    sql = 'SELECT AVG(CAST("t"."qty" AS double)) FROM "t"'
+    assert _auto_cast_aggregates(sql) == sql
+
+
+def test_does_not_cast_min_over_quoted_table_qualified_column() -> None:
+    sql = 'SELECT MIN("sales_revenue_monthly_CSV"."Month") FROM "sales_revenue_monthly_CSV"'
+    assert _auto_cast_aggregates(sql) == sql
+
+
 def test_wraps_timestampdiff_in_cast() -> None:
     out = _cast_timestampdiff(f"SELECT AVG({TD}) FROM t")
     assert f"CAST({TD} AS double)" in out
