@@ -14,12 +14,15 @@ import {
   IconTable,
   IconShare,
   IconClock,
+  IconCode,
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { AddDatasourceModal } from "@/components/datasource/AddDatasourceModal";
+import { GenerateQueryPreviewModal } from "@/components/ai/GenerateQueryPreviewModal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { useToasts, ToastViewport } from "@/components/ui/toast";
 import { cn } from "@/lib/cn";
 import { apiClient } from "@/lib/api-client";
 import { timeAgo } from "@/lib/ui/format";
@@ -104,60 +107,20 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
     }
   }, []);
 
-  // ── AI "Generate Query with AI" prompt ──────────────────────────────
+  // ── "Create Query with AI" prompt → preview-before-save modal ───────
+  // Mirrors the AI Dashboard Designer's flow: generate, show the chart/table/
+  // SQL preview, and only persist on explicit Save -- instead of the previous
+  // blind generate-and-save-query call, which committed a query the user had
+  // no chance to review or discard.
   const [aiPrompt, setAiPrompt] = useState("");
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState<string | null>(null);
-  const [aiSuccess, setAiSuccess] = useState<string | null>(null);
-  const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
+  const [previewQuestion, setPreviewQuestion] = useState<string | null>(null);
+  const { toasts, push, dismiss } = useToasts();
 
-  const handleGenerateQuery = useCallback(async () => {
+  const handleGenerateQuery = useCallback(() => {
     const prompt = aiPrompt.trim();
-    if (!prompt || aiLoading) return;
-    setAiLoading(true);
-    setAiError(null);
-    setAiSuccess(null);
-    setAiSuggestions([]);
-    try {
-      const result = await apiClient.post<{
-        name?: string;
-        status: string;
-        message?: string;
-        suggested_sources?: string[];
-        selected_sources?: { name: string; reason?: string }[];
-        repaired?: boolean;
-      }>("/api/ai/actions/generate-and-save-query", {
-        project_id: Number(projectId),
-        prompt,
-      });
-      if (result.status === "needs_clarification") {
-        // Friendly clarification — no raw validation error shown to the user.
-        setAiError(
-          result.message ??
-            "I could not match part of your request to an authorized source.",
-        );
-        setAiSuggestions(result.suggested_sources ?? []);
-        return;
-      }
-      const verb = result.status === "updated" ? "updated" : "saved";
-      const sources = result.selected_sources ?? [];
-      let note = `Query ${verb}: ${result.name ?? prompt}`;
-      if (sources.length > 0) {
-        note += ` — AI selected ${sources
-          .map((s) => s.name)
-          .join(", ")}`;
-      }
-      setAiSuccess(note);
-      setAiPrompt("");
-      queryClient.invalidateQueries({
-        queryKey: ["project", projectId, "queries"],
-      });
-    } catch (err) {
-      setAiError(err instanceof Error ? err.message : "AI query generation failed");
-    } finally {
-      setAiLoading(false);
-    }
-  }, [aiPrompt, aiLoading, projectId, queryClient]);
+    if (!prompt) return;
+    setPreviewQuestion(prompt);
+  }, [aiPrompt]);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -243,10 +206,16 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
       showProjectHeader={listMode}
       headerActions={
         listMode ? (
-          <Button variant="primary" size="md" onClick={() => setShowAddTable(true)}>
-            <IconPlus size={15} />
-            New Table
-          </Button>
+          <>
+            <Button variant="secondary" size="md" onClick={() => setCreating(true)}>
+              <IconCode size={15} />
+              Query Builder (legacy)
+            </Button>
+            <Button variant="primary" size="md" onClick={() => setShowAddTable(true)}>
+              <IconPlus size={15} />
+              New Table
+            </Button>
+          </>
         ) : undefined
       }
     >
@@ -308,33 +277,12 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
             <Button
               variant="primary"
               onClick={handleGenerateQuery}
-              disabled={!aiPrompt.trim() || aiLoading}
+              disabled={!aiPrompt.trim()}
             >
               <IconSparkles size={14} />
-              {aiLoading ? "Generating…" : "Generate Query with AI"}
+              Create Query with AI
             </Button>
           </div>
-          {aiError && (
-            <p className="mt-2 text-[12px] text-danger">{aiError}</p>
-          )}
-          {aiSuggestions.length > 0 && (
-            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px] text-ink-secondary">
-              <span>Related sources:</span>
-              {aiSuggestions.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setAiPrompt((p) => `${p} using ${s}`.trim())}
-                  className="rounded-full border border-line-secondary px-2 py-0.5 font-medium text-ink-primary hover:bg-bg-secondary"
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          )}
-          {aiSuccess && (
-            <p className="mt-2 text-[12px] text-success">{aiSuccess}</p>
-          )}
         </div>
         )}
 
@@ -468,6 +416,19 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
         )}
       </div>
       )}
+      <GenerateQueryPreviewModal
+        open={previewQuestion !== null}
+        projectId={projectId}
+        question={previewQuestion ?? ""}
+        onClose={() => setPreviewQuestion(null)}
+        onSaved={() => {
+          setPreviewQuestion(null);
+          setAiPrompt("");
+          refreshQueries();
+        }}
+        notify={push}
+      />
+      <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </ProjectShell>
   );
 }
