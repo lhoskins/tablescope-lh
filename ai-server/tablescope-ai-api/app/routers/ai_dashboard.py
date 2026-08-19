@@ -22,7 +22,7 @@ from app.services.kg_context import format_knowledge_graph_context
 from app.services.prompt_loader import load_prompt_reference
 from app.services.sql_validator import SQLValidationError, validate_sql
 
-from .ai_plan_prompt import _build_relationship_hint_lines
+from .ai_plan_prompt import _build_relationship_hint_lines, _fit_plan_prompt
 from .ai_shared import (
     _TEIID_JOIN_EXCEPTION_RULE,
     _TEIID_RULES_COMMON,
@@ -258,11 +258,29 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
         "prose, no markdown, no code fences. Begin with { and end with }."
     )
 
+    # Trim the prompt from the front while preserving the output-format
+    # instructions at the tail, and reserve real output budget explicitly.
+    # A large project (many saved queries/dashboards/scopes/datasources) can
+    # otherwise fill vLLM's whole context window with prompt, leaving a
+    # reasoning model just enough room to think and none to answer -- a
+    # confirmed live failure mode (0 widgets, every time, on a large project).
+    logger.info(
+        "dashboard suggest prompt len=%d (pre-fit) tenant=%s project=%s",
+        len(prompt), req.tenant_id, req.project_id,
+    )
+    prompt = _fit_plan_prompt(
+        prompt, _DASHBOARD_INSIGHT_SYSTEM_PROMPT, max_tokens=2048
+    )
+    logger.info(
+        "dashboard suggest prompt len=%d (post-fit) tenant=%s project=%s",
+        len(prompt), req.tenant_id, req.project_id,
+    )
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt=_DASHBOARD_INSIGHT_SYSTEM_PROMPT,
         model=req.model or settings.sql_model,
         temperature=0.3,
+        max_tokens=2048,
         # Larger window so the injected dashboard_best_practices reference fits
         # alongside the project context without truncation.
         num_ctx=24576,
@@ -440,11 +458,26 @@ async def suggest_dashboards_multi(
         "prose, no markdown, no code fences. Begin with { and end with }."
     )
 
+    # See suggest_dashboard's identical fit call: a large project can fill
+    # vLLM's whole context window with prompt, leaving a reasoning model no
+    # room to answer -- a confirmed live failure mode on this endpoint.
+    logger.info(
+        "dashboard suggest-multi prompt len=%d (pre-fit) tenant=%s project=%s",
+        len(prompt), req.tenant_id, req.project_id,
+    )
+    prompt = _fit_plan_prompt(
+        prompt, _DASHBOARD_INSIGHT_SYSTEM_PROMPT, max_tokens=2048
+    )
+    logger.info(
+        "dashboard suggest-multi prompt len=%d (post-fit) tenant=%s project=%s",
+        len(prompt), req.tenant_id, req.project_id,
+    )
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt=_DASHBOARD_INSIGHT_SYSTEM_PROMPT,
         model=req.model or settings.sql_model,
         temperature=0.4,
+        max_tokens=2048,
         num_ctx=24576,
         response_format="json",
         ollama_url=req.ollama_url,

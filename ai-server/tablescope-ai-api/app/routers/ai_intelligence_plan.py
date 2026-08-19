@@ -22,6 +22,7 @@ from .ai_plan_prompt import (
     _build_kg_hypothesis_lines,
     _build_relationship_floor_line,
     _build_relationship_hint_lines,
+    _fit_plan_prompt,
 )
 from .ai_plan_sql import (
     _ensure_group_by,
@@ -44,29 +45,6 @@ from .ai_shared import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-
-def _fit_plan_prompt(
-    prompt: str,
-    system_prompt: str,
-    *,
-    max_model_len: int | None = None,
-    max_tokens: int = 2048,
-    chars_per_token: float = 3.5,
-) -> str:
-    """Trim the front of the user prompt so system + prompt + output fit vLLM."""
-    max_model_len = max_model_len or settings.vllm_max_model_len
-    reserve_tokens = max_tokens + int(len(system_prompt) / chars_per_token) + 40
-    token_budget = max(0, max_model_len - reserve_tokens)
-    char_budget = int(token_budget * chars_per_token)
-    if len(prompt) <= char_budget:
-        return prompt
-    # Keep the instruction/output-format tail and drop excess context from the front.
-    truncated = prompt[-char_budget:]
-    idx = truncated.find("\n")
-    if idx != -1 and idx < 120:
-        truncated = truncated[idx + 1 :]
-    return "[context truncated for length]\n\n" + truncated
 
 
 def _first_pass_lines(first_pass: list[FirstPassResult]) -> str:
