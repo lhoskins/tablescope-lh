@@ -264,6 +264,17 @@ def _infer_domain(prompt: str, columns: list[dict[str, str]]) -> str:
         return best_domains[0]
     best_prompt_score = max(prompt_scores[d] for d in best_domains)
     best_by_prompt = [d for d in best_domains if prompt_scores[d] == best_prompt_score]
+    if len(best_by_prompt) > 1:
+        # Column matches AND prompt keywords are genuinely tied across
+        # multiple domains -- nothing in the data or the request actually
+        # distinguishes them. Picking one anyway is an arbitrary guess
+        # driven only by _DOMAIN_CONCEPTS's dict order, which can land on
+        # the wrong domain (e.g. a sales project scoring equally on itsm's
+        # generic "backlog"/"state" concepts) and then skews the dashboard
+        # suggestion prompt and "missing concept" messaging toward a domain
+        # the project isn't actually about. "generic" applies no
+        # domain-specific bias, so it's the safe answer when truly tied.
+        return "generic"
     return best_by_prompt[0]
 
 
@@ -819,7 +830,9 @@ async def apply_dashboard_design(
             tenant_id=context.tenant_id,
             name=dashboard_name,
             description=str(suggestion.get("description") or suggestion.get("businessPurpose") or ""),
-            status="draft",
+            # AI-generated (operational_insight) dashboards go live immediately --
+            # the ITSM-style header they render with has no draft/publish concept.
+            status="published",
             config=config,
             ai_generated=True,
         )

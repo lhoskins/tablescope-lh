@@ -463,7 +463,9 @@ async def ai_generate_and_save_dashboard(
             or req.prompt
             or ""
         ),
-        status="draft",
+        # AI-generated (operational_insight) dashboards go live immediately --
+        # the ITSM-style header they render with has no draft/publish concept.
+        status="published",
         config=operational_insight_config(
             {
                 "widgets": widgets_config,
