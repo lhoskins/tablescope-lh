@@ -30,6 +30,10 @@ class GenerateSQLRequest(AIBaseRequest):
     knowledge_graph_context: dict[str, Any] = Field(default_factory=dict)
     # Proactive hybrid retrieval evidence (document passages, KG nodes, KPIs).
     grounding_evidence: GroundingEvidence | None = None
+    # Verified join candidates discovered by the platform (same shape as the
+    # dashboard pipeline's relationship_hints). Empty leaves single-table
+    # behaviour unchanged.
+    relationship_hints: list[dict] = Field(default_factory=list)
 
 
 class MatchQueryRequest(AIBaseRequest):
