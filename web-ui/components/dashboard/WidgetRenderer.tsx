@@ -1,11 +1,17 @@
 "use client";
 
 import { useMemo } from "react";
-import type { WidgetConfig, ChartClickEvent } from "./types";
+import type { WidgetConfig, ChartClickEvent, VisualizationOptions } from "./types";
 import { toNumber, type Row } from "@/lib/visualizations/dataTransforms";
 import { EChartsWidget } from "./EChartsWidget";
 
-function fmtNumber(v: number): string {
+const SCALE_DIVISORS = { hundreds: 100, thousands: 1_000, millions: 1_000_000 } as const;
+const SCALE_SUFFIXES = { hundreds: "H", thousands: "K", millions: "M" } as const;
+
+function fmtNumber(v: number, scale?: VisualizationOptions["valueScale"]): string {
+  if (scale && scale !== "auto") {
+    return `$${(v / SCALE_DIVISORS[scale]).toLocaleString(undefined, { maximumFractionDigits: 1 })}${SCALE_SUFFIXES[scale]}`;
+  }
   if (Math.abs(v) >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
   if (Math.abs(v) >= 1_000) return `$${(v / 1_000).toFixed(0)}K`;
   return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -101,7 +107,7 @@ function KpiWidget({ widget, data, operational = false }: { widget: WidgetConfig
     ? String(rawValue ?? "\u2014")
     : isCount
       ? numVal.toLocaleString()
-      : fmtNumber(numVal);
+      : fmtNumber(numVal, widget.visualizationOptions?.valueScale);
 
   const deltaValue = data.length > 0 ? Number(data[0].deltaPercent) : Number.NaN;
   const hasDelta = Number.isFinite(deltaValue);

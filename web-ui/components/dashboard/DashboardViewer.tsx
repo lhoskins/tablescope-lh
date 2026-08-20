@@ -366,9 +366,16 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
         if (query?.sql_text) {
           const tableMatch = query.sql_text.match(/FROM\s+"?([A-Za-z0-9_]+)"?/i);
           const tableName = tableMatch ? tableMatch[1] : "dual";
+          // Query-backed widgets have no other hook for the date-range/
+          // cross-filter runtime controls -- their saved SQL is otherwise
+          // replayed verbatim regardless of the period selected.
+          const runtimeFilters = buildRuntimeWidgetFilters(w, runtime, columnNamesForWidget(w));
           const resp = await apiClient.post<{ columns: string[]; rows: Record<string, unknown>[] }>(
             "/api/query/datasource",
-            { tableName, sql: query.sql_text, limit: 500, project_id: projectId }
+            {
+              tableName, sql: query.sql_text, limit: 500, project_id: projectId,
+              global_filters: [...globalFiltersForApi(), ...runtimeFilters],
+            }
           );
           return resp.rows ?? [];
         }
