@@ -18,6 +18,7 @@ from app.auth.context import RequestContext
 from app.auth.membership import require_membership
 from app.auth.rbac import Role, require_role
 from app.database import SessionLocal
+from app.routes.dashboards_widget_query import WidgetFilter, _build_where
 from app.routes.query_sql_helpers import (
     _auto_cast_aggregates,
     _cast_timestampdiff,
@@ -99,6 +100,29 @@ class DatasourceQueryRequest(BaseModel):
     offset: int = Field(default=0, ge=0)
     project_id: int | None = Field(default=None)
     sql: str | None = Field(default=None)
+    # Runtime dashboard filters (date range, cross-filters) applied by
+    # wrapping ``sql`` in a filtered subquery -- see query_datasource().
+    global_filters: list[WidgetFilter] = Field(default_factory=list)
+
+
+def _apply_global_filters(sql: str, global_filters: list[WidgetFilter]) -> str:
+    """Wrap ``sql`` as a filtered derived table for the given global filters.
+
+    A query-backed dashboard widget replays its saved SQL text verbatim with
+    no other hook for the dashboard's date-range/cross-filter runtime
+    controls (unlike datasource-backed widgets, which build their own
+    filtered SQL from scratch via the widget-query endpoint) -- this closes
+    that gap so those controls actually affect what a query-backed widget
+    shows. Returns ``sql`` unchanged when there are no filters to apply.
+    """
+    where_clauses = _build_where(global_filters)
+    if not where_clauses:
+        return sql
+    trimmed = sql.strip().rstrip(";").strip()
+    return (
+        f"SELECT * FROM ({trimmed}) __filtered_base__"
+        f" WHERE {' AND '.join(where_clauses)}"
+    )
 
 
 @router.post("/fetch", response_model=QueryResponse)
@@ -223,7 +247,7 @@ async def query_datasource(
                 status_code=400, detail="project_id is required when executing SQL"
             )
         result, final_sql, _ = await _execute_sql_with_repair(
-            raw_sql=payload.sql,
+            raw_sql=_apply_global_filters(payload.sql, payload.global_filters),
             tenant_id=context.tenant_id,
             user_id=context.user_id,
             project_id=project_id,

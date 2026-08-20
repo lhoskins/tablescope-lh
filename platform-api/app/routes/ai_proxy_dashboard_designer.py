@@ -22,6 +22,7 @@ from app.auth.rbac import Role, require_role
 from app.database import get_db
 from app.models.dashboard import Dashboard
 from app.models.file_source_meta import FileSourceMeta
+from app.models.saved_query import SavedQuery
 from app.routes.ai_proxy_dashboard_suggest import ai_suggest_dashboards
 from app.routes.ai_proxy_schemas import AISuggestDashboardsRequest
 from app.routes.ai_proxy_shared import _check_project_access
@@ -30,12 +31,28 @@ from app.services.operational_insight_dashboards import (
     operational_insight_config,
     resolve_dashboard_group,
 )
-from app.services.visualization_engine import rank_visualizations
+from app.services.visualization_engine import _is_period_dimension, derive_shape, rank_visualizations
 
 router = APIRouter()
 
 DesignMode = Literal["create", "edit_dashboard", "add_insight", "edit_insight"]
 SupportStatus = Literal["fully_supported", "partially_supported", "not_supported"]
+
+
+class ChartOverride(BaseModel):
+    """An explicit per-chart request from the "Specific charts" list picker.
+
+    ``chart_type`` is a chart FAMILY (e.g. "bar", "line", "combo" -- the
+    same vocabulary as web-ui's CHART_REGISTRY top-level keys / WidgetType);
+    ``chart_subtype`` is one of that family's variant values (e.g.
+    "stacked_bar", "horizontal_bar"; "" is the family's default variant).
+    Left at their defaults ("" / "auto"), the engine decides, matching
+    today's behaviour.
+    """
+    label: str
+    chart_type: str = ""
+    chart_subtype: str = ""
+    unit: str = "auto"
 
 
 class DashboardDesignRequest(BaseModel):
@@ -49,6 +66,7 @@ class DashboardDesignRequest(BaseModel):
     period: str = "1_year"
     dimension_label: str = "Site"
     dashboard_group_id: int | None = None
+    chart_overrides: list[ChartOverride] = Field(default_factory=list)
 
 
 class DashboardDesignApplyRequest(BaseModel):
@@ -58,6 +76,11 @@ class DashboardDesignApplyRequest(BaseModel):
     dashboard_id: int | None = None
     target_insight_id: str | None = None
     dashboard_group_id: int | None = None
+    dashboard_title: str = ""
+    # A saved query the user picked as the dimension's real value source
+    # (must return exactly one column) -- None keeps today's decorative,
+    # unbound "manual" dimension label.
+    primary_dimension_query_id: int | None = None
     audience: str = "operational"
     emphasis: str = "balanced_operational_health"
     period: str = "1_year"
@@ -422,6 +445,58 @@ def _valid_suggestion_widgets(suggestion: dict[str, Any]) -> list[dict[str, Any]
     ]
 
 
+def _normalize_title(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+
+
+def _apply_chart_overrides(
+    suggestion: dict[str, Any], overrides: list[ChartOverride]
+) -> None:
+    """Force a widget's chart type / value scale from an explicit per-chart
+    request in the designer's "Specific charts" list, matched to the AI's
+    widget by title-word overlap rather than list position -- the AI's
+    proposed title doesn't always match the requested label verbatim, and
+    the request/widget counts can differ (see the "Requested N charts; AI
+    proposed M" mismatch the review step already surfaces). An override
+    left at its defaults (chart_type "", unit "auto") is a no-op, so this
+    changes nothing for a request that never touched these controls.
+
+    Mutates ``suggestion["widgets"]`` in place: sets ``_chartTypeForced`` so
+    ``_grounded_chart_selection`` keeps this exact family/subtype instead of
+    re-deriving it from the ranking engine, and ``_valueScale`` for
+    ``_widget_configs`` to copy into ``visualizationOptions`` at apply time.
+    """
+    real_overrides = [o for o in overrides if o.chart_type or o.unit not in ("", "auto")]
+    if not real_overrides:
+        return
+    candidates = [
+        w for w in (suggestion.get("widgets") or [])
+        if isinstance(w, dict) and str(w.get("status") or "") == "valid"
+    ]
+    for override in real_overrides:
+        target_words = set(_normalize_title(override.label).split())
+        if not target_words:
+            continue
+        best: dict[str, Any] | None = None
+        best_score = 0.0
+        for widget in candidates:
+            title_words = set(_normalize_title(str(widget.get("title") or "")).split())
+            if not title_words:
+                continue
+            overlap = len(title_words & target_words) / len(title_words | target_words)
+            if overlap > best_score:
+                best_score, best = overlap, widget
+        if best is None or best_score < 0.25:
+            continue
+        if override.chart_type:
+            best["chartType"] = override.chart_type
+            best["_chartTypeForced"] = True
+            best["_forcedChartSubtype"] = override.chart_subtype
+        if override.unit and override.unit != "auto":
+            best["_valueScale"] = override.unit
+        candidates.remove(best)
+
+
 def _support_status(
     *,
     sources: list[FileSourceMeta],
@@ -547,6 +622,8 @@ async def review_dashboard_design(
         ),
         None,
     )
+    if suggestion is not None:
+        _apply_chart_overrides(suggestion, req.chart_overrides)
     missing = _missing_concepts(req.prompt, columns, domain)
     support = _support_status(sources=sources, suggestion=suggestion, missing=missing)
     if support == "not_supported" and not missing:
@@ -650,29 +727,98 @@ def _grounded_chart_selection(
     chart_type = str(widget.get("chartType") or "bar")
     label_column = str(widget.get("labelColumn") or "") or None
     value_column = str(widget.get("valueColumn") or "") or None
+    # An explicit per-chart type the user picked in the designer (see
+    # _apply_chart_overrides) always wins over the engine's own ranking --
+    # everything else about the widget (label/value columns) still comes
+    # from the engine below, since only the final family/subtype is forced.
+    forced_type = chart_type if widget.get("_chartTypeForced") else None
 
     preview = widget.get("previewData") or {}
     columns = [str(c) for c in (preview.get("columns") or [])]
     rows = list(preview.get("rows") or [])
     if not columns or not rows:
-        return chart_type, label_column, value_column, None
+        return forced_type or chart_type, label_column, value_column, None
 
     presentation = resolve_presentation(columns, rows, intent_hint=chart_type)
     chart = presentation.chart
     if not chart or chart.get("type") in (None, "table"):
-        return chart_type, label_column, value_column, None
+        return forced_type or chart_type, label_column, value_column, None
 
     # `_map_chart_type`/`_map_chart_subtype` (ai_proxy_widget_helpers) key on
     # this same compound-string convention -- a subtype like "horizontal_bar"
     # or "donut" is itself a top-level key; a bare family ("line", "kpi", ...)
     # is too. Falling back to "bar" only if the engine's own family is empty,
     # which resolve_presentation never actually returns.
-    grounded_type = str(chart.get("subtype") or chart.get("type") or "bar")
+    grounded_type = forced_type or str(chart.get("subtype") or chart.get("type") or "bar")
     grounded_label = chart.get("labelColumn") or label_column
     value_columns = chart.get("valueColumns") or []
     grounded_value = value_columns[0] if value_columns else value_column
     grounded_value_2 = value_columns[1] if len(value_columns) > 1 else None
+    # Forcing combo when the engine ranked a single-metric shape (so it
+    # never found a second value column): fall back to the widget's own
+    # second value field so the forced combo still has two series to plot.
+    if forced_type == "combo" and not grounded_value_2:
+        grounded_value_2 = str(widget.get("valueColumn2") or "") or None
     return grounded_type, grounded_label, grounded_value, grounded_value_2
+
+
+def _widget_date_field(
+    widget: dict[str, Any], label_column: str | None
+) -> dict[str, Any] | None:
+    """Detect whether a widget's label column is a real time/period axis.
+
+    Query-backed widgets replay their saved SQL verbatim with no other hook
+    for the dashboard's date-range control (DashboardViewer.tsx's
+    fetchWidgetData only builds a filtered query for datasource-backed
+    widgets) -- buildRuntimeWidgetFilters only applies a date range when the
+    widget carries an enabled dateField naming a real period column, so
+    AI-generated widgets need this set explicitly or the period control is
+    silently a no-op for them.
+    """
+    if not label_column:
+        return None
+    preview = widget.get("previewData") or {}
+    columns = [str(c) for c in (preview.get("columns") or [])]
+    rows = list(preview.get("rows") or [])
+    if not columns or not rows or label_column not in columns:
+        return None
+    shape = derive_shape(columns, rows)
+    if not _is_period_dimension(shape, label_column):
+        return None
+    return {"enabled": True, "field": label_column}
+
+
+async def _dimension_parameters(
+    session: AsyncSession,
+    *,
+    project_id: int,
+    dimension_label: str,
+    default_period: str,
+    query_id: int | None,
+) -> dict[str, Any]:
+    """Build the dashboard template's dimension parameters.
+
+    A picked single-column query binds the dimension to real values (the
+    same ``valueSource: "query"`` mechanism DashboardViewer.tsx already
+    hydrates for manually-built dashboards); otherwise falls back to
+    today's decorative, unbound "manual" label with no values.
+    """
+    params = {
+        "dimensionLabel": dimension_label,
+        "dimensionField": _normal(dimension_label) or "dimension",
+        "manualValues": [],
+        "defaultPeriod": default_period,
+    }
+    if query_id is not None:
+        query = await session.scalar(
+            select(SavedQuery).where(
+                SavedQuery.id == query_id,
+                SavedQuery.project_id == project_id,
+            )
+        )
+        if query is not None:
+            return {**params, "valueSource": "query", "queryId": query_id}
+    return {**params, "valueSource": "manual"}
 
 
 async def _widget_configs(
@@ -739,6 +885,21 @@ async def _widget_configs(
                 "sourceField": config["xColumn"],
                 "applyTo": "dashboard",
             }
+        date_field = _widget_date_field(widget, label_column)
+        if date_field:
+            config["dateField"] = date_field
+        value_scale = widget.get("_valueScale")
+        if value_scale:
+            config["visualizationOptions"]["valueScale"] = value_scale
+        # A forced chart type/subtype from the designer's picker is already
+        # the exact WidgetType + variant value the frontend registry uses --
+        # _map_chart_type's narrower planner vocabulary (built for LLM-guessed
+        # strings) doesn't recognise all of them and can map some outright
+        # wrong for this purpose (e.g. "heatmap" maps to a table elsewhere).
+        # An explicit user pick always wins over that mapping.
+        if widget.get("_chartTypeForced"):
+            config["type"] = chart_type
+            config["chartSubtype"] = widget.get("_forcedChartSubtype") or ""
         configs.append(config)
     return configs
 
@@ -795,20 +956,22 @@ async def apply_dashboard_design(
             suggestion=suggestion,
             start_index=0,
         )
-        dashboard_name = str(suggestion.get("title") or "Operational Insight Dashboard")[:255]
+        dashboard_name = (
+            req.dashboard_title.strip()
+            or str(suggestion.get("title") or "Operational Insight Dashboard")
+        )[:255]
+        dimension_parameters = await _dimension_parameters(
+            session,
+            project_id=project.id,
+            dimension_label=req.dimension_label,
+            default_period=req.period,
+            query_id=req.primary_dimension_query_id,
+        )
         config = operational_insight_config(
             {
                 "widgets": configs,
                 "globalFilters": [],
-                "dashboardTemplate": {
-                    "parameters": {
-                        "dimensionLabel": req.dimension_label,
-                        "dimensionField": _normal(req.dimension_label) or "dimension",
-                        "valueSource": "manual",
-                        "manualValues": [],
-                        "defaultPeriod": req.period,
-                    }
-                },
+                "dashboardTemplate": {"parameters": dimension_parameters},
                 "operationalWidgets": _operational_widgets(req.prompt, suggestion),
                 "aiDesign": {
                     "version": 1,

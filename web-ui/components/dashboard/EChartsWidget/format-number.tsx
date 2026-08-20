@@ -63,9 +63,35 @@ import { LegacyGridContainLabel } from "echarts/features";
 import { CanvasRenderer } from "echarts/renderers";
 
 
-export function formatNumber(v: number, format?: string): string {
+export type ValueScale = "auto" | "hundreds" | "thousands" | "millions";
+
+const SCALE_DIVISORS: Record<Exclude<ValueScale, "auto">, number> = {
+  hundreds: 100,
+  thousands: 1_000,
+  millions: 1_000_000,
+};
+const SCALE_SUFFIXES: Record<Exclude<ValueScale, "auto">, string> = {
+  hundreds: "H",
+  thousands: "K",
+  millions: "M",
+};
+
+/**
+ * `scale` forces the display unit (e.g. always show a $-millions axis even
+ * for a metric that dips under $1M) instead of the auto K/M breakpoints
+ * `format: "currency"|"compact"` already apply based on each value's own
+ * magnitude. Left at "auto" (or omitted), behavior is unchanged. Percent
+ * values are never rescaled -- a forced scale on a 0-100% axis would be
+ * meaningless.
+ */
+export function formatNumber(v: number, format?: string, scale?: ValueScale): string {
   if (!Number.isFinite(v)) return "—";
   if (format === "percent") return `${(v * 100).toFixed(1)}%`;
+  if (scale && scale !== "auto") {
+    const scaled = v / SCALE_DIVISORS[scale];
+    const prefix = format === "currency" ? "$" : "";
+    return `${prefix}${scaled.toLocaleString(undefined, { maximumFractionDigits: 1 })}${SCALE_SUFFIXES[scale]}`;
+  }
   if (format === "currency") {
     if (Math.abs(v) >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
     if (Math.abs(v) >= 1_000) return `$${(v / 1_000).toFixed(0)}K`;

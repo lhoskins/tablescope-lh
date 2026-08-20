@@ -105,7 +105,7 @@ export function buildComboOption(
       type: "bar" as const,
       data: chartData.map((r) => toNumber(r[barName]) ?? 0),
       itemStyle: { color: colors[0] },
-      label: { show: !!opts.showLabels, position: "top", fontSize: 9, color: colorsForChart.text, formatter: (p: any) => formatNumber(Number(p.value ?? 0), opts.yAxisFormat) },
+      label: { show: !!opts.showLabels, position: "top", fontSize: 9, color: colorsForChart.text, formatter: (p: any) => formatNumber(Number(p.value ?? 0), opts.yAxisFormat, opts.valueScale) },
       yAxisIndex: 0,
       barMaxWidth: 40,
       animation: animate,
@@ -117,7 +117,7 @@ export function buildComboOption(
       data: chartData.map((r) => toNumber(r[lineName]) ?? 0),
       itemStyle: { color: colors[1 % colors.length] },
       yAxisIndex: dualAxis ? 1 : 0,
-      label: { show: !!opts.showLabels, position: "top", fontSize: 9, color: colorsForChart.text, formatter: (p: any) => formatNumber(Number(p.value ?? 0), opts.yAxisFormat) },
+      label: { show: !!opts.showLabels, position: "top", fontSize: 9, color: colorsForChart.text, formatter: (p: any) => formatNumber(Number(p.value ?? 0), opts.yAxisFormat, opts.valueScale) },
       animation: animate,
     });
   } else if (y2Key) {
@@ -168,12 +168,12 @@ export function buildComboOption(
     aria: { enabled: true, description: `${widget.title || widget.type} chart` },
     color: colors,
     grid: commonGrid(tiny),
-    tooltip: opts.showTooltip === false || tiny ? { show: false } : { trigger: "axis", formatter: (params: any) => tooltipFormatter(params, opts.yAxisFormat) },
+    tooltip: opts.showTooltip === false || tiny ? { show: false } : { trigger: "axis", formatter: (params: any) => tooltipFormatter(params, opts.yAxisFormat, opts.valueScale) },
     legend: showLegend ? getLegendConfig(opts, isDark) : undefined,
     xAxis: { type: "category" as const, data: categoryData, show: !tiny, axisLabel: { rotate: opts.xAxisLabelRotate ?? (categoryData.length > 8 ? -30 : 0), fontSize: 10, color: colorsForChart.text }, axisLine: { lineStyle: { color: colorsForChart.line } }, splitLine: { show: false } },
     yAxis: [
-      { type: "value" as const, show: !tiny, axisLabel: { formatter: (v: number) => formatNumber(v, opts.yAxisFormat), fontSize: 10, color: colorsForChart.text }, splitLine: showGrid ? { lineStyle: { color: colorsForChart.grid } } : undefined },
-      ...(dualAxis && !tiny ? [{ type: "value" as const, show: true, position: "right" as const, axisLabel: { formatter: (v: number) => formatNumber(v, opts.yAxisFormat), fontSize: 10, color: colorsForChart.text }, splitLine: { show: false } }] : []),
+      { type: "value" as const, show: !tiny, axisLabel: { formatter: (v: number) => formatNumber(v, opts.yAxisFormat, opts.valueScale), fontSize: 10, color: colorsForChart.text }, splitLine: showGrid ? { lineStyle: { color: colorsForChart.grid } } : undefined },
+      ...(dualAxis && !tiny ? [{ type: "value" as const, show: true, position: "right" as const, axisLabel: { formatter: (v: number) => formatNumber(v, opts.yAxisFormat, opts.valueScale), fontSize: 10, color: colorsForChart.text }, splitLine: { show: false } }] : []),
     ],
     series,
     dataZoom: !tiny && opts.dataZoom ? [{ type: "inside" as const }, { type: "slider" as const, start: 0, end: 100, height: 16, bottom: 0 }] : undefined,

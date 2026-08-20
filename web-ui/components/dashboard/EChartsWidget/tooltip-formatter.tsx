@@ -60,13 +60,13 @@ import {
   TransformComponent,
 } from "echarts/components";
 import { LegacyGridContainLabel } from "echarts/features";
-import { CanvasRenderer } from "echarts/renderers";import { formatNumber } from "./format-number";
+import { CanvasRenderer } from "echarts/renderers";import { formatNumber, type ValueScale } from "./format-number";
 
 
 
-export function tooltipFormatter(params: any, format?: string) {
+export function tooltipFormatter(params: any, format?: string, scale?: ValueScale) {
   const rows = Array.isArray(params) ? params : [params];
   if (!rows.length) return "";
   const axis = rows[0].axisValueLabel ?? rows[0].name ?? "";
-  return axis + rows.map((p: any) => `<br/>${p.marker} ${p.seriesName}: ${formatNumber(Number(p.value ?? 0), format)}`).join("");
+  return axis + rows.map((p: any) => `<br/>${p.marker} ${p.seriesName}: ${formatNumber(Number(p.value ?? 0), format, scale)}`).join("");
 }

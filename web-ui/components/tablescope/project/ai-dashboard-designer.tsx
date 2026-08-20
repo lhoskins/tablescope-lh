@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   IconAlertTriangle,
@@ -18,6 +18,11 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { InsightChartBlock } from "@/components/tablescope/home/intelligence-card";
 import type { InsightChart } from "@/lib/api/home-intelligence";
+import type { WidgetType } from "@/components/dashboard/types";
+import { ChartTypePicker, type ChartTypeChoice } from "./chart-type-picker";
+import { CHART_REGISTRY } from "@/lib/visualizations/chartRegistry";
+import { useProjectQueries, type SavedQuery } from "@/lib/ui/use-project-data";
+import { safeTableName } from "./detail-views/safe-table-name";
 
 export type DashboardDesignerMode =
   | "create"
@@ -158,6 +163,21 @@ function modeCopy(mode: DashboardDesignerMode): {
   };
 }
 
+/** One row of the "Specific charts" list: a requested widget plus its
+ * optional chart-type/unit overrides (from ChartTypePicker and the Unit of
+ * Measure select). Left on "Auto"/"" both, the AI and the confidence-ranked
+ * engine decide -- matching today's behavior. */
+export interface DesiredChart {
+  label: string;
+  chartType: string;
+  chartSubtype: string;
+  unit: string;
+}
+
+function emptyDesiredChart(): DesiredChart {
+  return { label: "", chartType: "", chartSubtype: "", unit: "auto" };
+}
+
 /**
  * Turns an enumerated list of specific charts into an explicit instruction
  * prepended to the free-text prompt, so "create" requests can name exact
@@ -166,8 +186,8 @@ function modeCopy(mode: DashboardDesignerMode): {
  * prompt unchanged when no items are provided -- fully backward compatible
  * with the single-textarea flow.
  */
-function buildDesignPrompt(basePrompt: string, desiredCharts: string[]): string {
-  const items = desiredCharts.map((s) => s.trim()).filter(Boolean);
+function buildDesignPrompt(basePrompt: string, desiredCharts: DesiredChart[]): string {
+  const items = desiredCharts.map((c) => c.label.trim()).filter(Boolean);
   if (items.length === 0) return basePrompt.trim();
   const enumerated = [
     `Create exactly one widget for each of the following ${items.length} requested chart(s), in this order. Do not merge multiple items into one widget, and do not add widgets beyond this list unless a KPI summary is explicitly useful alongside them.`,
@@ -220,14 +240,20 @@ export function AIDashboardDesigner({
   const copy = modeCopy(mode);
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [prompt, setPrompt] = useState(initialPrompt);
+  const [dashboardTitle, setDashboardTitle] = useState("");
   // Only meaningful in "create" mode -- an explicit, growable list of exact
   // charts the user wants, as an alternative to describing the whole
   // dashboard as one paragraph and hoping the LLM's composition matches.
-  const [desiredCharts, setDesiredCharts] = useState<string[]>([""]);
+  const [desiredCharts, setDesiredCharts] = useState<DesiredChart[]>([emptyDesiredChart()]);
+  const [chartPickerIndex, setChartPickerIndex] = useState<number | null>(null);
   const [audience, setAudience] = useState("operational");
   const [emphasis, setEmphasis] = useState("balanced_operational_health");
   const [period, setPeriod] = useState("1_year");
   const [dimensionLabel, setDimensionLabel] = useState("Site");
+  // A saved query the user picked as the dimension's real value source
+  // (must return exactly one column); undefined keeps today's decorative,
+  // unbound free-text label with "Not listed -- Generate from AI".
+  const [primaryDimensionQueryId, setPrimaryDimensionQueryId] = useState<number | undefined>(undefined);
   const [review, setReview] = useState<DesignReview | null>(null);
   const [acceptPartial, setAcceptPartial] = useState(false);
 
@@ -235,19 +261,73 @@ export function AIDashboardDesigner({
     if (!open) return;
     setStep(1);
     setPrompt(initialPrompt);
-    setDesiredCharts([""]);
+    setDashboardTitle("");
+    setDesiredCharts([emptyDesiredChart()]);
+    setPrimaryDimensionQueryId(undefined);
     setReview(null);
     setAcceptPartial(false);
   }, [initialPrompt, mode, open]);
 
+  const { data: projectQueries } = useProjectQueries(projectId);
+  const [singleColumnQueryIds, setSingleColumnQueryIds] = useState<Set<number> | null>(null);
+  const loadingSingleColumnQueries = useRef(false);
+
+  // Lazily probes each saved query's column count on first dropdown open --
+  // there's no cached column metadata on SavedQuery today, so this is the
+  // only way to filter to single-column queries, and it's deferred so a
+  // project with many queries doesn't pay for it on every designer open.
+  const loadSingleColumnQueries = async () => {
+    if (singleColumnQueryIds !== null || loadingSingleColumnQueries.current || !projectQueries?.length) return;
+    loadingSingleColumnQueries.current = true;
+    try {
+      const results = await Promise.all(
+        projectQueries.map(async (query) => {
+          if (!query.sql_text) return null;
+          try {
+            const resp = await apiClient.post<{ columns?: string[] }>("/api/query/datasource", {
+              tableName: safeTableName(query.left_datasource),
+              sql: query.sql_text,
+              limit: 1,
+              project_id: Number(projectId),
+            });
+            return (resp.columns?.length ?? 0) === 1 ? query.id : null;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      setSingleColumnQueryIds(new Set(results.filter((id): id is number => id !== null)));
+    } finally {
+      loadingSingleColumnQueries.current = false;
+    }
+  };
+
+  const singleColumnQueries: SavedQuery[] = useMemo(() => {
+    if (!projectQueries || !singleColumnQueryIds) return [];
+    return projectQueries.filter((q) => singleColumnQueryIds.has(q.id));
+  }, [projectQueries, singleColumnQueryIds]);
+
   const requestedChartCount = useMemo(
-    () => (mode === "create" ? desiredCharts.map((s) => s.trim()).filter(Boolean).length : 0),
+    () => (mode === "create" ? desiredCharts.map((c) => c.label.trim()).filter(Boolean).length : 0),
     [desiredCharts, mode],
   );
 
   const effectivePrompt = useMemo(
     () => (mode === "create" ? buildDesignPrompt(prompt, desiredCharts) : prompt.trim()),
     [desiredCharts, mode, prompt],
+  );
+
+  const chartOverrides = useMemo(
+    () =>
+      desiredCharts
+        .filter((c) => c.label.trim())
+        .map((c) => ({
+          label: c.label.trim(),
+          chart_type: c.chartType,
+          chart_subtype: c.chartSubtype,
+          unit: c.unit,
+        })),
+    [desiredCharts],
   );
 
   const requestBody = useMemo(
@@ -261,6 +341,7 @@ export function AIDashboardDesigner({
       emphasis,
       period,
       dimension_label: dimensionLabel.trim() || "Dimension",
+      chart_overrides: mode === "create" ? chartOverrides : [],
       dashboard_group_id: dashboardGroupId,
     }),
     [audience, dashboardGroupId, dashboardId, dimensionLabel, effectivePrompt, emphasis, mode, period, projectId, targetInsightId],
@@ -292,10 +373,12 @@ export function AIDashboardDesigner({
           dashboard_id: dashboardId,
           target_insight_id: targetInsightId,
           dashboard_group_id: dashboardGroupId,
+          dashboard_title: dashboardTitle.trim(),
           audience,
           emphasis,
           period,
           dimension_label: dimensionLabel.trim() || "Dimension",
+          primary_dimension_query_id: primaryDimensionQueryId ?? null,
           support_status: review.supportStatus,
           accept_partial: acceptPartial,
           suggestion: review.suggestion,
@@ -370,46 +453,101 @@ export function AIDashboardDesigner({
               <Card className="p-4">
                 {mode === "create" && (
                   <div className="mb-4">
+                    <label htmlFor="dashboard-title" className="text-h3 text-ink-primary">
+                      Dashboard title <span className="font-normal text-ink-tertiary">(optional)</span>
+                    </label>
+                    <p className="mt-1 text-small text-ink-tertiary">
+                      Leave blank and AI names the dashboard from the request.
+                    </p>
+                    <input
+                      id="dashboard-title"
+                      value={dashboardTitle}
+                      onChange={(event) => setDashboardTitle(event.target.value)}
+                      placeholder="e.g. Operational Revenue and Backlog Health"
+                      className="mt-2 h-9 w-full rounded-md border border-line-secondary bg-bg-primary px-2 text-[13px] text-ink-primary focus:border-brand-500 focus:outline-none"
+                    />
+                  </div>
+                )}
+
+                {mode === "create" && (
+                  <div className="mb-4">
                     <div className="text-h3 text-ink-primary">Specific charts (optional)</div>
                     <p className="mt-1 text-small text-ink-tertiary">
-                      Name exact charts you want instead of leaving composition entirely to AI. Each line becomes
-                      one widget.
+                      Name exact charts you want instead of leaving composition entirely to AI. Set a chart type
+                      and unit scale per row, or leave them on Auto.
                     </p>
-                    <div className="mt-3 space-y-2">
-                      {desiredCharts.map((item, index) => (
-                        <div key={index} className="flex items-center gap-2">
-                          <input
-                            value={item}
-                            onChange={(event) => {
-                              const next = [...desiredCharts];
-                              next[index] = event.target.value;
-                              setDesiredCharts(next);
-                            }}
-                            placeholder={
-                              index === 0
-                                ? "Example: Vendor spend trend over time"
-                                : "Example: High-priority incidents by priority"
-                            }
-                            className="h-9 w-full rounded-md border border-line-secondary bg-bg-primary px-2 text-[13px] text-ink-primary focus:border-brand-500 focus:outline-none"
-                          />
-                          {desiredCharts.length > 1 && (
+                    <div className="mt-3 grid grid-cols-[1fr_34px_108px_26px] gap-2 px-0.5">
+                      <span />
+                      <span className="text-center text-[10px] font-semibold uppercase tracking-wide text-ink-tertiary">Type</span>
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-tertiary">Unit</span>
+                      <span />
+                    </div>
+                    <div className="mt-1 space-y-2">
+                      {desiredCharts.map((item, index) => {
+                        const definition = item.chartType
+                          ? CHART_REGISTRY[item.chartType as keyof typeof CHART_REGISTRY]
+                          : undefined;
+                        return (
+                          <div key={index} className="grid grid-cols-[1fr_34px_108px_26px] items-center gap-2">
+                            <input
+                              value={item.label}
+                              onChange={(event) => {
+                                const next = [...desiredCharts];
+                                next[index] = { ...next[index], label: event.target.value };
+                                setDesiredCharts(next);
+                              }}
+                              placeholder={
+                                index === 0
+                                  ? "Example: Vendor spend trend over time"
+                                  : "Example: High-priority incidents by priority"
+                              }
+                              className="h-9 w-full rounded-md border border-line-secondary bg-bg-primary px-2 text-[13px] text-ink-primary focus:border-brand-500 focus:outline-none"
+                            />
                             <button
                               type="button"
-                              onClick={() => setDesiredCharts(desiredCharts.filter((_, i) => i !== index))}
-                              aria-label="Remove this chart"
-                              className="shrink-0 rounded p-1.5 text-ink-tertiary hover:bg-bg-secondary hover:text-red-600"
+                              onClick={() => setChartPickerIndex(index)}
+                              title={definition ? `Chart type: ${definition.label}` : "Choose chart type"}
+                              className="flex h-[34px] w-[34px] items-center justify-center rounded-md border border-line-secondary bg-bg-primary text-ink-secondary hover:bg-bg-secondary"
                             >
-                              <IconX size={14} />
+                              {definition ? (
+                                <span aria-hidden="true">{definition.icon}</span>
+                              ) : (
+                                <IconChartBar size={16} />
+                              )}
                             </button>
-                          )}
-                        </div>
-                      ))}
+                            <select
+                              value={item.unit}
+                              onChange={(event) => {
+                                const next = [...desiredCharts];
+                                next[index] = { ...next[index], unit: event.target.value };
+                                setDesiredCharts(next);
+                              }}
+                              className="h-[34px] w-full rounded-md border border-line-secondary bg-bg-primary px-1.5 text-[11px] text-ink-primary"
+                            >
+                              <option value="auto">Auto</option>
+                              <option value="hundreds">Hundreds</option>
+                              <option value="thousands">Thousands</option>
+                              <option value="millions">Millions</option>
+                            </select>
+                            {desiredCharts.length > 1 ? (
+                              <button
+                                type="button"
+                                onClick={() => setDesiredCharts(desiredCharts.filter((_, i) => i !== index))}
+                                aria-label="Remove this chart"
+                                className="shrink-0 rounded p-1.5 text-ink-tertiary hover:bg-bg-secondary hover:text-red-600"
+                              >
+                                <IconX size={14} />
+                              </button>
+                            ) : <span />}
+                          </div>
+                        );
+                      })}
                     </div>
                     <Button
                       size="sm"
                       variant="secondary"
                       className="mt-2"
-                      onClick={() => setDesiredCharts([...desiredCharts, ""])}
+                      onClick={() => setDesiredCharts([...desiredCharts, emptyDesiredChart()])}
                     >
                       + Add another chart
                     </Button>
@@ -462,7 +600,30 @@ export function AIDashboardDesigner({
                   </label>
                   <label className="text-small font-medium text-ink-secondary">
                     Primary dimension
-                    <input value={dimensionLabel} onChange={(event) => setDimensionLabel(event.target.value)} className="mt-1 h-9 w-full rounded-md border border-line-secondary bg-bg-primary px-2 text-[12px]" />
+                    <select
+                      value={primaryDimensionQueryId ?? "ai"}
+                      onFocus={loadSingleColumnQueries}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        if (value === "ai") {
+                          setPrimaryDimensionQueryId(undefined);
+                          setDimensionLabel("Dimension");
+                          return;
+                        }
+                        const id = Number(value);
+                        setPrimaryDimensionQueryId(id);
+                        setDimensionLabel(singleColumnQueries.find((q) => q.id === id)?.name || "Dimension");
+                      }}
+                      className="mt-1 h-9 w-full rounded-md border border-line-secondary bg-bg-primary px-2 text-[12px]"
+                    >
+                      {singleColumnQueries.map((query) => (
+                        <option key={query.id} value={query.id}>{query.name}</option>
+                      ))}
+                      <option value="ai">Not listed — Generate from AI</option>
+                    </select>
+                    <span className="mt-1 block text-[11px] leading-4 text-ink-tertiary">
+                      Only single-column queries are listed. Pick &quot;Not listed&quot; to let AI derive the dimension.
+                    </span>
                   </label>
                   <label className="text-small font-medium text-ink-secondary">
                     Operational emphasis
@@ -541,6 +702,30 @@ export function AIDashboardDesigner({
           </section>
         )}
       </div>
+
+      <ChartTypePicker
+        open={chartPickerIndex !== null}
+        initial={
+          chartPickerIndex !== null
+            ? {
+                chartType: desiredCharts[chartPickerIndex].chartType as WidgetType | "",
+                chartSubtype: desiredCharts[chartPickerIndex].chartSubtype,
+              }
+            : { chartType: "", chartSubtype: "" }
+        }
+        onClose={() => setChartPickerIndex(null)}
+        onPick={(choice: ChartTypeChoice) => {
+          if (chartPickerIndex === null) return;
+          const next = [...desiredCharts];
+          next[chartPickerIndex] = {
+            ...next[chartPickerIndex],
+            chartType: choice.chartType,
+            chartSubtype: choice.chartSubtype,
+          };
+          setDesiredCharts(next);
+          setChartPickerIndex(null);
+        }}
+      />
     </div>
   );
 }

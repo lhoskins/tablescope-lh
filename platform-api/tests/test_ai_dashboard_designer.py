@@ -5,6 +5,8 @@ import pytest
 from app.auth.jwt import create_access_token
 from app.models.file_source_meta import FileSourceMeta
 from app.routes.ai_proxy_dashboard_designer import (
+    ChartOverride,
+    _apply_chart_overrides,
     _chart_recommendations,
     _concept_supported,
     _engine_chart_recommendations,
@@ -12,6 +14,7 @@ from app.routes.ai_proxy_dashboard_designer import (
     _infer_domain,
     _missing_concepts,
     _support_status,
+    _widget_date_field,
 )
 from app.services.supabase_auth_service import SupabaseAuthService, SupabaseUser
 
@@ -361,6 +364,105 @@ def test_infer_domain_falls_back_to_generic_on_a_genuine_multi_domain_tie() -> N
         {"name": "Priority", "type": "string"},
     ]
     assert _infer_domain("Show me a dashboard", columns) == "generic"
+
+
+def test_widget_date_field_detects_a_real_month_axis() -> None:
+    """A widget whose label column holds real period-like values (e.g. a
+    FORMATDATE'd "Month" column) must get an enabled dateField so the
+    dashboard's period control can actually filter it -- query-backed
+    widgets have no other hook for that (see DashboardViewer.tsx's
+    fetchWidgetData / buildRuntimeWidgetFilters)."""
+    widget = {
+        "previewData": {
+            "columns": ["Month", "RevenueUSD"],
+            "rows": [{"Month": f"2026-{m:02d}", "RevenueUSD": 100 + m} for m in range(1, 13)],
+        }
+    }
+    assert _widget_date_field(widget, "Month") == {"enabled": True, "field": "Month"}
+
+
+def test_widget_date_field_is_none_for_a_non_period_label_column() -> None:
+    widget = {
+        "previewData": {
+            "columns": ["Customer", "RevenueUSD"],
+            "rows": [{"Customer": c, "RevenueUSD": 100} for c in ["Acme", "Globex", "Initech"]],
+        }
+    }
+    assert _widget_date_field(widget, "Customer") is None
+
+
+def test_widget_date_field_is_none_without_preview_data() -> None:
+    assert _widget_date_field({}, "Month") is None
+    assert _widget_date_field({"previewData": {"columns": [], "rows": []}}, "Month") is None
+
+
+def _combo_widget(title: str) -> dict:
+    return {
+        "title": title,
+        "status": "valid",
+        "sql": "SELECT 1",
+        "chartType": "bar_line",
+        "labelColumn": "Month",
+        "valueColumn": "RevenueUSD",
+        "previewData": {
+            "columns": ["Month", "RevenueUSD", "BacklogUSD"],
+            "rows": [
+                {"Month": f"2026-{m:02d}", "RevenueUSD": 100 + m, "BacklogUSD": 50 + m}
+                for m in range(1, 13)
+            ],
+        },
+    }
+
+
+def test_chart_overrides_match_by_title_and_force_the_chart_type() -> None:
+    suggestion = {"widgets": [_combo_widget("Monthly Revenue vs Backlog")]}
+    _apply_chart_overrides(
+        suggestion,
+        [ChartOverride(label="Monthly Revenue vs Backlog", chart_type="line", unit="thousands")],
+    )
+    widget = suggestion["widgets"][0]
+    assert widget["chartType"] == "line"
+    assert widget["_chartTypeForced"] is True
+    assert widget["_valueScale"] == "thousands"
+
+    chart_type, _label, _value, _value2 = _grounded_chart_selection(widget)
+    assert chart_type == "line"
+
+
+def test_chart_overrides_left_at_defaults_are_a_no_op() -> None:
+    suggestion = {"widgets": [_combo_widget("Monthly Revenue vs Backlog")]}
+    original = dict(suggestion["widgets"][0])
+    _apply_chart_overrides(
+        suggestion, [ChartOverride(label="Monthly Revenue vs Backlog")],
+    )
+    assert suggestion["widgets"][0] == original
+
+
+def test_chart_overrides_ignore_a_request_with_no_matching_widget_title() -> None:
+    suggestion = {"widgets": [_combo_widget("Monthly Revenue vs Backlog")]}
+    _apply_chart_overrides(
+        suggestion, [ChartOverride(label="Headcount by Department", chart_type="bar")],
+    )
+    assert "_chartTypeForced" not in suggestion["widgets"][0]
+
+
+def test_chart_overrides_match_each_request_to_a_distinct_widget() -> None:
+    """Two overrides must not both claim the same best-scoring widget."""
+    suggestion = {
+        "widgets": [
+            _combo_widget("Monthly Revenue vs Backlog"),
+            _combo_widget("Monthly Revenue Trend"),
+        ]
+    }
+    _apply_chart_overrides(
+        suggestion,
+        [
+            ChartOverride(label="Monthly Revenue vs Backlog", chart_type="line"),
+            ChartOverride(label="Monthly Revenue Trend", chart_type="area"),
+        ],
+    )
+    types = {w["title"]: w["chartType"] for w in suggestion["widgets"]}
+    assert types == {"Monthly Revenue vs Backlog": "line", "Monthly Revenue Trend": "area"}
 
 
 def test_concept_supported_still_matches_genuine_short_abbreviations() -> None:

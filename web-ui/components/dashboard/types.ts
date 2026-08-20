@@ -53,6 +53,9 @@ export type VisualizationOptions = {
   // Axis & formatting
   xAxisLabelRotate?: number;
   yAxisFormat?: "number" | "currency" | "percent" | "compact";
+  // Forces the display unit (e.g. always $ in millions) instead of the
+  // auto K/M breakpoints yAxisFormat's "currency"/"compact" already apply.
+  valueScale?: "auto" | "hundreds" | "thousands" | "millions";
   dataZoom?: boolean;
   // Line / Area
   lineStyle?: "solid" | "dashed";
