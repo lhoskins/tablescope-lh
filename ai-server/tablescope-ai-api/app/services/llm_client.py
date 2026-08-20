@@ -251,6 +251,53 @@ _TEIID_RULES = (
     "unless the user explicitly asks to combine rows from two different tables. "
     "Never place ORDER BY inside a UNION branch; in Teiid ORDER BY is only "
     "valid at the very end of the entire query.\n"
+    "17. If the user asks for a specific display format (currency/dollars, "
+    "percentage, etc.) for a value, alias that column so its name reflects "
+    "the requested format instead of adding SQL formatting functions — e.g. "
+    "alias a dollar amount as ...USD or TotalRevenueUSD, alias a percentage "
+    "as ...Percent or DefectRatePercent. The alias is used downstream to "
+    "render the value correctly.\n"
+    "18. Translate plain-language grouping phrases directly into GROUP BY: "
+    "'group by X', 'broken down by X', 'per X', and 'for each X' all mean "
+    "GROUP BY <X's column>, added to both SELECT and GROUP BY (see rule 9).\n"
+    "19. Translate plain-language value-mapping phrases into a CASE WHEN "
+    "expression: 'if <column> is/contains/equals <text> then <label>' "
+    "becomes CASE WHEN LOWER(\"Column\") = LOWER('text') THEN 'label' ... "
+    "ELSE ... END (case-insensitive per rule 13). Alias the CASE expression "
+    "with a descriptive name.\n"
+)
+
+# Default: no cross-table JOINs (many tables share column names, causing
+# ambiguity errors). Swapped for _TEIID_JOIN_EXCEPTION_RULE only when the
+# caller supplies verified relationship_hint_lines (from platform-api's
+# _relationship_hints, rendered by ai_plan_prompt._build_relationship_hint_lines).
+# Mirrors ai_shared.py's dashboard-pipeline single-table/join-exception
+# pattern, defined locally here since this service module must not import
+# the router layer.
+_TEIID_NO_JOIN_RULE = (
+    "JOIN POLICY: Query a SINGLE table per analysis. Do NOT write JOINs. "
+    '(Many tables share column names like "SupplierID" — joining causes '
+    "ambiguity errors. One table per query avoids this entirely.)\n"
+)
+
+_TEIID_JOIN_EXCEPTION_RULE = (
+    "JOIN POLICY: Query a SINGLE table per analysis, with ONE exception: a "
+    "cross-table analysis may JOIN exactly the two tables of a pair listed "
+    "in RELATIONSHIP EVIDENCE below, on exactly the listed keys. Alias both "
+    'tables and table-qualify EVERY column reference (e.g. i."DefectQty", '
+    's."Region") — many tables share column names and an unqualified column '
+    "in a join is an ambiguity error. Reference ONLY columns listed under "
+    "the table(s) you actually use.\n"
+)
+
+# Used by repair_sql when the failing query already joins two tables (a
+# caller-verified cross-table analysis): keep the repair from "fixing" the
+# join away.
+_TEIID_FIX_JOIN_RULE = (
+    "This query intentionally JOINs two tables (a verified relationship). "
+    "KEEP the same two tables and the same join keys — do NOT rewrite it as "
+    "a single-table query and do NOT add more tables. Alias both tables and "
+    "table-qualify EVERY column reference to avoid ambiguity errors.\n"
 )
 
 _SEMANTIC_RULES = (
@@ -333,12 +380,16 @@ async def generate_sql(
     source_catalog: list[Any] | None = None,
     preferred_sources: list[str] | None = None,
     relevant_columns: list[str] | None = None,
+    relationship_hint_lines: str = "",
     model: str | None = None,
     ollama_url: str | None = None,
 ) -> str:
     """Generate SQL using the code-specialized model with semantic discovery."""
     catalog = _catalog_text(allowed_tables, source_catalog)
     hint = _resolver_hint(preferred_sources, relevant_columns)
+    join_rule = (
+        _TEIID_JOIN_EXCEPTION_RULE if relationship_hint_lines else _TEIID_NO_JOIN_RULE
+    )
     system_prompt = (
         "You are Tablescope AI.\n"
         "You may only answer using the provided context package.\n"
@@ -357,9 +408,11 @@ async def generate_sql(
         "documents are guidance only — never use a reference document as a SQL "
         "data source.\n\n"
         f"{_SEMANTIC_RULES}\n"
-        f"{_TEIID_RULES}\n"
+        f"{_TEIID_RULES}"
+        f"{join_rule}\n"
         f"{hint}"
-        f"{catalog}\n\n"
+        f"{catalog}\n"
+        f"{relationship_hint_lines}\n\n"
         f"Context:\n{context}"
     )
 
@@ -383,12 +436,20 @@ async def repair_sql(
     source_catalog: list[Any] | None = None,
     preferred_sources: list[str] | None = None,
     relevant_columns: list[str] | None = None,
+    relationship_hint_lines: str = "",
     model: str | None = None,
     ollama_url: str | None = None,
 ) -> str:
     """Ask the model to fix SQL that failed validation, preserving intent."""
     catalog = _catalog_text(allowed_tables, source_catalog)
     hint = _resolver_hint(preferred_sources, relevant_columns)
+    # If the failing SQL already joins tables, a verified relationship exists
+    # (the caller only passes hints when it found one) — keep the join intact
+    # instead of "fixing" it back to single-table. Otherwise reaffirm the
+    # default no-join policy so repair can't introduce an ungrounded join.
+    join_rule = (
+        _TEIID_FIX_JOIN_RULE if relationship_hint_lines else _TEIID_NO_JOIN_RULE
+    )
     system_prompt = (
         "You are Tablescope AI repairing a SQL query that failed validation.\n"
         "Fix the SQL so it passes, while preserving the user's analytical intent.\n"
@@ -402,9 +463,11 @@ async def repair_sql(
         "- If no authorized source can satisfy the request, return exactly "
         "'NEED_CLARIFICATION'.\n"
         "Return ONLY the corrected SQL, no explanation.\n\n"
-        f"{_TEIID_RULES}\n"
+        f"{_TEIID_RULES}"
+        f"{join_rule}\n"
         f"{hint}"
-        f"{catalog}\n\n"
+        f"{catalog}\n"
+        f"{relationship_hint_lines}\n\n"
         f"Context:\n{context}"
     )
     repair_prompt = (

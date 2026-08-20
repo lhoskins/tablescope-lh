@@ -328,6 +328,7 @@ async def generate_sql(
     relevant_columns: list[str] | None = None,
     knowledge_graph_context: dict[str, Any] | None = None,
     grounding_evidence: dict[str, Any] | None = None,
+    relationship_hints: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     """Generate SQL for a natural-language question.
 
@@ -349,6 +350,7 @@ async def generate_sql(
                 "relevant_columns": relevant_columns or [],
                 "knowledge_graph_context": knowledge_graph_context or {},
                 "grounding_evidence": grounding_evidence,
+                "relationship_hints": relationship_hints or [],
             },
         )
 

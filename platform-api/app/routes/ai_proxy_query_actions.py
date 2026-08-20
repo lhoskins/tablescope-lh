@@ -16,6 +16,7 @@ from app.auth.rbac import Role, require_role
 from app.database import get_db
 from app.models.file_source_meta import FileSourceMeta
 from app.models.saved_query import SavedQuery
+from app.services.teiid_sql import rebuild_group_by_from_select
 
 from .ai_proxy_schemas import (
     AIGenerateAndSaveQueryRequest,
@@ -27,6 +28,7 @@ from .ai_proxy_shared import (
     _detect_datasource,
     _forward_to_ai,
     _kg_context,
+    _relationship_hints,
     _shorten_ai_name,
 )
 
@@ -258,16 +260,20 @@ async def ai_generate_and_save_query(
     # rather than a table (DDL) creation.
     gen_intent, base_prompt = normalize_ai_generation_intent(req.prompt)
 
-    # Resolve allowed tables from project datasources if not provided
-    allowed_tables = req.allowed_tables
-    if not allowed_tables:
-        ds_stmt = select(FileSourceMeta).where(
-            FileSourceMeta.project_id == req.project_id,
-            FileSourceMeta.tenant_id == context.tenant_id,
-            FileSourceMeta.archived.is_(False),
-        )
-        ds_result = await session.execute(ds_stmt)
-        allowed_tables = [ds.view_name for ds in ds_result.scalars()]
+    # Datasources are fetched unconditionally (not just when allowed_tables is
+    # unset) since relationship-hint discovery needs the FileSourceMeta
+    # objects, not just view names.
+    ds_stmt = select(FileSourceMeta).where(
+        FileSourceMeta.project_id == req.project_id,
+        FileSourceMeta.tenant_id == context.tenant_id,
+        FileSourceMeta.archived.is_(False),
+    )
+    ds_result = await session.execute(ds_stmt)
+    sources = list(ds_result.scalars())
+    allowed_tables = req.allowed_tables or [ds.view_name for ds in sources]
+    # Evidence-backed join candidates (same discovery engine the dashboard
+    # pipeline uses).
+    relationship_hints = _relationship_hints(sources)
 
     # ── Detect modification intent ────────────────────────────────────
     import re as _re
@@ -372,9 +378,12 @@ async def ai_generate_and_save_query(
                 "knowledge_graph_context": await _kg_context(
                     session, context, req.project_id,
                 ),
+                "relationship_hints": relationship_hints,
             }
             ai_result = await _forward_to_ai("/ai/query/generate", payload)
             generated_sql = ai_result.get("sql", "").rstrip().rstrip(";")
+            if generated_sql:
+                generated_sql = rebuild_group_by_from_select(generated_sql)
     except HTTPException as exc:
         # A 422 means the AI generated SQL that could not be validated/repaired
         # (e.g. it could not map the request to an authorized source). Surface a

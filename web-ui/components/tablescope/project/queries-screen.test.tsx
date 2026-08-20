@@ -4,11 +4,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 /**
- * "Create Query with AI" must open the preview-before-save modal instead of
- * blind-saving (the old generate-and-save-query behavior), and the manual
- * SQL Query Builder must be reachable as a clearly secondary/legacy action --
- * mirroring the AI Dashboard Designer's "generate, preview, then save"
- * pattern instead of committing a query the user never got to review.
+ * "Create Query with AI" must open the parameterized AI Query Designer
+ * dialog -- the same "describe -> preview -> save" pattern the AI Dashboard
+ * Designer uses, not a single-line prompt bar -- and the manual SQL Query
+ * Builder must remain reachable as a clearly secondary/legacy action.
  */
 
 vi.mock("next/navigation", () => ({
@@ -46,16 +45,14 @@ vi.mock("@/components/datasource/AddDatasourceModal", () => ({
   AddDatasourceModal: () => null,
 }));
 
-const generateQueryPreviewModalProps = vi.hoisted(() => ({
-  current: null as null | { open: boolean; question: string },
+const aiQueryDesignerProps = vi.hoisted(() => ({
+  current: null as null | { open: boolean },
 }));
 
-vi.mock("@/components/ai/GenerateQueryPreviewModal", () => ({
-  GenerateQueryPreviewModal: (props: { open: boolean; question: string }) => {
-    generateQueryPreviewModalProps.current = props;
-    return props.open ? (
-      <div data-testid="generate-query-preview-modal">{props.question}</div>
-    ) : null;
+vi.mock("@/components/tablescope/project/ai-query-designer", () => ({
+  AIQueryDesigner: (props: { open: boolean }) => {
+    aiQueryDesignerProps.current = props;
+    return props.open ? <div data-testid="ai-query-designer" /> : null;
   },
 }));
 
@@ -77,42 +74,20 @@ function renderScreen() {
 }
 
 describe("QueriesScreen", () => {
-  it("opens the preview-before-save modal instead of blind-saving on submit", () => {
+  it("opens the AI Query Designer dialog instead of a single-line prompt bar", () => {
     renderScreen();
 
+    expect(screen.queryByTestId("ai-query-designer")).not.toBeInTheDocument();
     expect(
-      screen.queryByTestId("generate-query-preview-modal"),
+      screen.queryByPlaceholderText("Describe the query you want to generate…"),
     ).not.toBeInTheDocument();
-
-    const input = screen.getByPlaceholderText(
-      "Describe the query you want to generate…",
-    );
-    fireEvent.change(input, {
-      target: { value: "Revenue by region last quarter" },
-    });
-    fireEvent.click(
-      screen.getByRole("button", { name: /create query with ai/i }),
-    );
-
-    expect(screen.getByTestId("generate-query-preview-modal")).toHaveTextContent(
-      "Revenue by region last quarter",
-    );
-    expect(generateQueryPreviewModalProps.current).toMatchObject({
-      open: true,
-      question: "Revenue by region last quarter",
-    });
-  });
-
-  it("does not open the modal for an empty prompt", () => {
-    renderScreen();
 
     fireEvent.click(
       screen.getByRole("button", { name: /create query with ai/i }),
     );
 
-    expect(
-      screen.queryByTestId("generate-query-preview-modal"),
-    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("ai-query-designer")).toBeInTheDocument();
+    expect(aiQueryDesignerProps.current).toMatchObject({ open: true });
   });
 
   it("keeps the manual Query Builder reachable as a secondary, legacy action", () => {

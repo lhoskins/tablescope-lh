@@ -6,6 +6,7 @@ import {
   IconSparkles,
   IconX,
   IconAlertTriangle,
+  IconArrowLeft,
   IconChevronDown,
   IconChevronRight,
   IconDeviceFloppy,
@@ -40,6 +41,7 @@ export function GenerateQueryPreviewModal({
   description,
   cardContext,
   onClose,
+  onBack,
   onSaved,
   notify,
 }: {
@@ -50,6 +52,10 @@ export function GenerateQueryPreviewModal({
   description?: string;
   cardContext?: AiCardContext;
   onClose: () => void;
+  /** Optional: renders a "Back" action instead of/alongside close, so a
+   * caller that collected structured parameters first (e.g. AIQueryDesigner)
+   * can return to that step rather than discarding them. */
+  onBack?: () => void;
   onSaved?: (queryId: number) => void;
   notify: (message: string, tone?: "success" | "error" | "info") => void;
 }) {
@@ -265,6 +271,12 @@ export function GenerateQueryPreviewModal({
         </div>
 
         <div className="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-line-tertiary pt-4">
+          {onBack && !saved && (
+            <Button variant="secondary" size="md" onClick={onBack}>
+              <IconArrowLeft size={15} />
+              Back
+            </Button>
+          )}
           {success && sql && (
             <Button
               variant="secondary"

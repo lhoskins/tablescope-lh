@@ -23,6 +23,7 @@ from .ai_proxy_shared import (
     _check_project_access,
     _forward_to_ai,
     _kg_context,
+    _relationship_hints,
 )
 
 router = APIRouter()
@@ -36,16 +37,22 @@ async def generate_sql(
     """Generate SQL from a natural language prompt."""
     await _check_project_access(session, context, req.project_id)
 
-    # Resolve allowed tables from project datasources if not provided
-    allowed_tables = req.allowed_tables
-    if not allowed_tables:
-        ds_stmt = select(FileSourceMeta).where(
-            FileSourceMeta.project_id == req.project_id,
-            FileSourceMeta.tenant_id == context.tenant_id,
-            FileSourceMeta.archived.is_(False),
-        )
-        ds_result = await session.execute(ds_stmt)
-        allowed_tables = [ds.view_name for ds in ds_result.scalars()]
+    # Datasources are fetched unconditionally (not just when allowed_tables is
+    # unset) since relationship-hint discovery needs the FileSourceMeta
+    # objects, not just view names.
+    ds_stmt = select(FileSourceMeta).where(
+        FileSourceMeta.project_id == req.project_id,
+        FileSourceMeta.tenant_id == context.tenant_id,
+        FileSourceMeta.archived.is_(False),
+    )
+    ds_result = await session.execute(ds_stmt)
+    sources = list(ds_result.scalars())
+    allowed_tables = req.allowed_tables or [ds.view_name for ds in sources]
+    # Evidence-backed join candidates (same discovery engine the dashboard
+    # pipeline uses) -- lets a query combine measures that live in separate
+    # sources instead of being restricted to one table with no way to
+    # express that.
+    relationship_hints = _relationship_hints(sources)
 
     source_catalog = await _build_source_catalog(
         session, tenant_id=context.tenant_id, project_id=req.project_id
@@ -65,6 +72,7 @@ async def generate_sql(
         "knowledge_graph_context": await _kg_context(
             session, context, req.project_id,
         ),
+        "relationship_hints": relationship_hints,
     }
     result = await _forward_to_ai("/ai/query/generate", payload)
     if isinstance(result, dict) and isinstance(result.get("sql"), str):

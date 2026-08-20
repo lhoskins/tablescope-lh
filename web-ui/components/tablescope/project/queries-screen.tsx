@@ -18,7 +18,7 @@ import {
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { AddDatasourceModal } from "@/components/datasource/AddDatasourceModal";
-import { GenerateQueryPreviewModal } from "@/components/ai/GenerateQueryPreviewModal";
+import { AIQueryDesigner } from "@/components/tablescope/project/ai-query-designer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -107,20 +107,15 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
     }
   }, []);
 
-  // ── "Create Query with AI" prompt → preview-before-save modal ───────
-  // Mirrors the AI Dashboard Designer's flow: generate, show the chart/table/
-  // SQL preview, and only persist on explicit Save -- instead of the previous
-  // blind generate-and-save-query call, which committed a query the user had
-  // no chance to review or discard.
-  const [aiPrompt, setAiPrompt] = useState("");
-  const [previewQuestion, setPreviewQuestion] = useState<string | null>(null);
+  // ── "Create Query with AI" dialog ────────────────────────────────────
+  // Mirrors the AI Dashboard Designer's flow: a parameterized dialog
+  // (specific columns/metrics, period, dimension) that generates, shows the
+  // chart/table/SQL preview, and only persists on explicit Save -- instead
+  // of the single-line prompt bar this replaced, which offered none of the
+  // dashboard designer's structured "Creation context" and only a plain
+  // free-text box.
+  const [aiDesignerOpen, setAiDesignerOpen] = useState(false);
   const { toasts, push, dismiss } = useToasts();
-
-  const handleGenerateQuery = useCallback(() => {
-    const prompt = aiPrompt.trim();
-    if (!prompt) return;
-    setPreviewQuestion(prompt);
-  }, [aiPrompt]);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -211,6 +206,10 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
               <IconCode size={15} />
               Query Builder (legacy)
             </Button>
+            <Button variant="primary" size="md" onClick={() => setAiDesignerOpen(true)}>
+              <IconSparkles size={15} />
+              Create Query with AI
+            </Button>
             <Button variant="primary" size="md" onClick={() => setShowAddTable(true)}>
               <IconPlus size={15} />
               New Table
@@ -258,33 +257,6 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
       ) : (
       <div className="space-y-4">
         {filter !== "archive" && <StatBar items={statItems} />}
-
-        {filter !== "archive" && (
-        <div className="rounded-lg border border-brand-100 bg-brand-50/40 p-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="flex flex-1 items-center gap-2 rounded-md border border-line-secondary bg-bg-primary px-2.5">
-              <IconSparkles size={15} className="shrink-0 text-brand-500" />
-              <input
-                value={aiPrompt}
-                onChange={(e) => setAiPrompt(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleGenerateQuery();
-                }}
-                placeholder="Describe the query you want to generate…"
-                className="h-9 w-full bg-transparent text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:outline-none"
-              />
-            </div>
-            <Button
-              variant="primary"
-              onClick={handleGenerateQuery}
-              disabled={!aiPrompt.trim()}
-            >
-              <IconSparkles size={14} />
-              Create Query with AI
-            </Button>
-          </div>
-        </div>
-        )}
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[220px] flex-1">
@@ -416,16 +388,11 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
         )}
       </div>
       )}
-      <GenerateQueryPreviewModal
-        open={previewQuestion !== null}
+      <AIQueryDesigner
+        open={aiDesignerOpen}
         projectId={projectId}
-        question={previewQuestion ?? ""}
-        onClose={() => setPreviewQuestion(null)}
-        onSaved={() => {
-          setPreviewQuestion(null);
-          setAiPrompt("");
-          refreshQueries();
-        }}
+        onClose={() => setAiDesignerOpen(false)}
+        onSaved={() => refreshQueries()}
         notify={push}
       />
       <ToastViewport toasts={toasts} onDismiss={dismiss} />
