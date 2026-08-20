@@ -148,6 +148,12 @@ def test_decision_chart_type_always_renderable() -> None:
         ("order_count", [3, 5], "count"),
         ("widget_score", [12.0, 8.5], "number"),
         ("ratio", [0.2, 0.5, 0.7], "percent"),
+        # camelCase/PascalCase aliases with no separator (e.g. the AI SQL
+        # generator's "RevenueUSD"-style aliasing) must still be detected.
+        ("RevenueUSD", [100, 200], "currency"),
+        ("TotalRevenueUSD", [100, 200], "currency"),
+        ("BacklogUSD", [100, 200], "currency"),
+        ("DefectRatePercent", [0.1, 0.2], "percent"),
     ],
 )
 def test_value_format_detection(name, values, expected) -> None:

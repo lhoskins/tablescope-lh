@@ -348,6 +348,21 @@ def test_infer_domain_ignores_short_junk_columns_that_coincidentally_substring_m
     assert _infer_domain("IT incident count by priority", columns) == "itsm"
 
 
+def test_infer_domain_falls_back_to_generic_on_a_genuine_multi_domain_tie() -> None:
+    """Reproduces the project-41 misclassification: itsm/finance/sales all
+    score equally (2 matched concepts each -> 4) on generic columns like
+    Region/Amount/Priority, and the prompt gives no tiebreak either. Picking
+    any one of them is an arbitrary guess driven only by _DOMAIN_CONCEPTS's
+    dict order (previously always landing on "itsm", the first entry) --
+    "generic" is the only answer the data actually supports."""
+    columns = [
+        {"name": "Region", "type": "string"},
+        {"name": "Amount", "type": "decimal"},
+        {"name": "Priority", "type": "string"},
+    ]
+    assert _infer_domain("Show me a dashboard", columns) == "generic"
+
+
 def test_concept_supported_still_matches_genuine_short_abbreviations() -> None:
     """The length floor targets uncurated column names, not the curated
     concept terms -- a real 3-letter abbreviation like "sla" must still

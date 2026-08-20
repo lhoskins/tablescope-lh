@@ -30,12 +30,20 @@ _COUNT_COL_RE = re.compile(
     r"(?i)\b(count|qty|quantity|units?|number|orders?|shipments?|items?|"
     r"records?|inspections?|defects?)\b"
 )
+# Splits camelCase/PascalCase word boundaries (RevenueUSD -> Revenue USD,
+# TotalRevenueUSD -> Total Revenue USD) so the \b-bounded regexes above can
+# match a word that's concatenated without a separator -- the AI SQL
+# generator (and plenty of real source columns) name aliases this way, e.g.
+# "RevenueUSD", and un-split camelCase never contains an internal \b for
+# "revenue" or "usd" to match against.
+_CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
 def detect_value_format(name: str, values: list[Any]) -> ValueFormat:
     """Classify a metric's display format from its name + values."""
-    # Treat snake_case as words so ``total_revenue`` matches ``revenue`` etc.
-    label = (name or "").replace("_", " ")
+    # Treat snake_case and camelCase as words so ``total_revenue`` and
+    # ``RevenueUSD`` both match ``revenue``/``usd`` etc.
+    label = _CAMEL_BOUNDARY_RE.sub(" ", (name or "").replace("_", " "))
     if _PCT_COL_RE.search(label):
         return "percent"
     if _CURRENCY_COL_RE.search(label):
