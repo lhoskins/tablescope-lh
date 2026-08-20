@@ -11,17 +11,18 @@ import {
   IconArchive,
   IconArrowBackUp,
   IconTrash,
+  IconTable,
+  IconShare,
+  IconClock,
+  IconCode,
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
-import {
-  ContextPanel,
-  ContextSection,
-} from "@/components/tablescope/context-panel";
 import { AddDatasourceModal } from "@/components/datasource/AddDatasourceModal";
-import { StatTile } from "@/components/ui/stat-tile";
+import { AIQueryDesigner } from "@/components/tablescope/project/ai-query-designer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { useToasts, ToastViewport } from "@/components/ui/toast";
 import { cn } from "@/lib/cn";
 import { apiClient } from "@/lib/api-client";
 import { timeAgo } from "@/lib/ui/format";
@@ -35,11 +36,12 @@ import {
   QueryResultView,
   QueryBuilderEdit,
   QueryBuilderCreate,
-} from "@/components/tablescope/project/detail-views";import { Filter } from "./queries-screen/filter";
+} from "@/components/tablescope/project/detail-views";
+import { StatBar, type StatItem } from "./overview-screen/stat-bar";
+import { Filter } from "./queries-screen/filter";
 import { FILTERS } from "./queries-screen/filters";
 import { avgRuntime } from "./queries-screen/avg-runtime";
 import { ArchiveCard } from "./queries-screen/archive-card";
-import { QueryPreviewPanel } from "./queries-screen/query-preview-panel";
 
 
 
@@ -105,60 +107,15 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
     }
   }, []);
 
-  // ── AI "Generate Query with AI" prompt ──────────────────────────────
-  const [aiPrompt, setAiPrompt] = useState("");
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState<string | null>(null);
-  const [aiSuccess, setAiSuccess] = useState<string | null>(null);
-  const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
-
-  const handleGenerateQuery = useCallback(async () => {
-    const prompt = aiPrompt.trim();
-    if (!prompt || aiLoading) return;
-    setAiLoading(true);
-    setAiError(null);
-    setAiSuccess(null);
-    setAiSuggestions([]);
-    try {
-      const result = await apiClient.post<{
-        name?: string;
-        status: string;
-        message?: string;
-        suggested_sources?: string[];
-        selected_sources?: { name: string; reason?: string }[];
-        repaired?: boolean;
-      }>("/api/ai/actions/generate-and-save-query", {
-        project_id: Number(projectId),
-        prompt,
-      });
-      if (result.status === "needs_clarification") {
-        // Friendly clarification — no raw validation error shown to the user.
-        setAiError(
-          result.message ??
-            "I could not match part of your request to an authorized source.",
-        );
-        setAiSuggestions(result.suggested_sources ?? []);
-        return;
-      }
-      const verb = result.status === "updated" ? "updated" : "saved";
-      const sources = result.selected_sources ?? [];
-      let note = `Query ${verb}: ${result.name ?? prompt}`;
-      if (sources.length > 0) {
-        note += ` — AI selected ${sources
-          .map((s) => s.name)
-          .join(", ")}`;
-      }
-      setAiSuccess(note);
-      setAiPrompt("");
-      queryClient.invalidateQueries({
-        queryKey: ["project", projectId, "queries"],
-      });
-    } catch (err) {
-      setAiError(err instanceof Error ? err.message : "AI query generation failed");
-    } finally {
-      setAiLoading(false);
-    }
-  }, [aiPrompt, aiLoading, projectId, queryClient]);
+  // ── "Create Query with AI" dialog ────────────────────────────────────
+  // Mirrors the AI Dashboard Designer's flow: a parameterized dialog
+  // (specific columns/metrics, period, dimension) that generates, shows the
+  // chart/table/SQL preview, and only persists on explicit Save -- instead
+  // of the single-line prompt bar this replaced, which offered none of the
+  // dashboard designer's structured "Creation context" and only a plain
+  // free-text box.
+  const [aiDesignerOpen, setAiDesignerOpen] = useState(false);
+  const { toasts, push, dismiss } = useToasts();
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -199,23 +156,67 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
   const selected =
     rows.find((q) => q.id === selectedId) ?? filtered[0] ?? rows[0] ?? null;
   const detailQuery = rows.find((q) => q.id === detailId) ?? null;
+  const listMode = !creating && !editing && !detailQuery;
 
   const aiCount = rows.filter((q) => q.ai_generated).length;
   const sharedCount = rows.filter((q) => q.is_shared).length;
   const aiPct = rows.length ? Math.round((aiCount / rows.length) * 100) : 0;
+
+  const statItems: StatItem[] = [
+    {
+      key: "total",
+      icon: IconTable,
+      iconClass: "bg-brand-50 text-brand-700",
+      value: rows.length,
+      label: "Total tables",
+    },
+    {
+      key: "ai",
+      icon: IconSparkles,
+      iconClass: "bg-ai-bg text-ai",
+      value: aiCount,
+      label: "AI-generated",
+    },
+    {
+      key: "shared",
+      icon: IconShare,
+      iconClass: "bg-success-bg text-success",
+      value: sharedCount,
+      label: "Shared",
+    },
+    {
+      key: "runtime",
+      icon: IconClock,
+      iconClass: "bg-warning-bg text-warning",
+      value: avgRuntime(rows),
+      label: "Avg run time",
+    },
+  ];
 
   return (
     <ProjectShell
       projectId={projectId}
       activeNav="project-queries"
       breadcrumbLabel="Tables"
-      actions={
-        <Button variant="primary" size="md" onClick={() => setShowAddTable(true)}>
-          <IconPlus size={15} />
-          New Table
-        </Button>
+      showProjectHeader={listMode}
+      headerActions={
+        listMode ? (
+          <>
+            <Button variant="secondary" size="md" onClick={() => setCreating(true)}>
+              <IconCode size={15} />
+              Query Builder (legacy)
+            </Button>
+            <Button variant="primary" size="md" onClick={() => setAiDesignerOpen(true)}>
+              <IconSparkles size={15} />
+              Create Query with AI
+            </Button>
+            <Button variant="primary" size="md" onClick={() => setShowAddTable(true)}>
+              <IconPlus size={15} />
+              New Table
+            </Button>
+          </>
+        ) : undefined
       }
-      contextPanel={<QueryPreviewPanel query={detailQuery ?? selected} />}
     >
       {showAddTable && (
         <AddDatasourceModal
@@ -255,70 +256,7 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
         />
       ) : (
       <div className="space-y-4">
-        {filter !== "archive" && (
-        <div className="rounded-lg border border-brand-100 bg-brand-50/40 p-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="flex flex-1 items-center gap-2 rounded-md border border-line-secondary bg-bg-primary px-2.5">
-              <IconSparkles size={15} className="shrink-0 text-brand-500" />
-              <input
-                value={aiPrompt}
-                onChange={(e) => setAiPrompt(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleGenerateQuery();
-                }}
-                placeholder="Describe the query you want to generate…"
-                className="h-9 w-full bg-transparent text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:outline-none"
-              />
-            </div>
-            <Button
-              variant="primary"
-              onClick={handleGenerateQuery}
-              disabled={!aiPrompt.trim() || aiLoading}
-            >
-              <IconSparkles size={14} />
-              {aiLoading ? "Generating…" : "Generate Query with AI"}
-            </Button>
-          </div>
-          {aiError && (
-            <p className="mt-2 text-[12px] text-danger">{aiError}</p>
-          )}
-          {aiSuggestions.length > 0 && (
-            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px] text-ink-secondary">
-              <span>Related sources:</span>
-              {aiSuggestions.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setAiPrompt((p) => `${p} using ${s}`.trim())}
-                  className="rounded-full border border-line-secondary px-2 py-0.5 font-medium text-ink-primary hover:bg-bg-secondary"
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          )}
-          {aiSuccess && (
-            <p className="mt-2 text-[12px] text-success">{aiSuccess}</p>
-          )}
-        </div>
-        )}
-
-        {filter !== "archive" && (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatTile label="Total tables" value={rows.length} />
-          <StatTile
-            label="AI-generated"
-            value={aiCount}
-            hint={`${aiPct}% of total`}
-          />
-          <StatTile
-            label="Shared"
-            value={sharedCount}
-            hint={`${rows.length - sharedCount} private`}
-          />
-          <StatTile label="Avg run time" value={avgRuntime(rows)} />
-        </div>
-        )}
+        {filter !== "archive" && <StatBar items={statItems} />}
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[220px] flex-1">
@@ -450,6 +388,14 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
         )}
       </div>
       )}
+      <AIQueryDesigner
+        open={aiDesignerOpen}
+        projectId={projectId}
+        onClose={() => setAiDesignerOpen(false)}
+        onSaved={() => refreshQueries()}
+        notify={push}
+      />
+      <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </ProjectShell>
   );
 }

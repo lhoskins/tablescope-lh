@@ -96,6 +96,23 @@ def _is_join_key(col: str) -> bool:
     )
 
 
+# Period/date-grain column names recognised as join evidence between two
+# same-grain aggregate tables (e.g. two monthly rollups: actuals and a
+# forecast). Deliberately separate from _is_join_key's entity-key patterns
+# above -- a shared reporting-period column proves the tables can be safely
+# aligned on a common time axis, not that they describe the same entity, so
+# it is treated as a distinct, lower-confidence tier rather than folded into
+# the entity-key one.
+_PERIOD_KEY_NAMES = {
+    "month", "week", "quarter", "year", "period", "date", "day",
+    "yearmonth", "reportingperiod", "reportingmonth",
+}
+
+
+def _is_period_key(col: str) -> bool:
+    return _norm(col) in _PERIOD_KEY_NAMES
+
+
 # Audit-stamp names that happen to contain period keywords but are not the
 # time-series grain we want to join on.
 _AUDIT_PERIOD_EXCLUSIONS = {"created", "modified", "lastupdated", "updated", "deleted"}
@@ -247,6 +264,10 @@ def find_relationship_candidates(
       (user-created → 0.9, AI-created → 0.85).
     - **Tier 3 — exact key-name match**: both tables expose the same join key
       (e.g. ``SupplierID``), base confidence 0.6.
+    - **Tier 3.5 — shared reporting-period column**: both tables roll up by
+      the same period label (e.g. ``month``), base confidence 0.5. Proves
+      the tables are safe to align on a common time axis, not that they
+      share an entity, so it ranks below an entity-key match.
     - **Tier 4 — differently-named join keys** whose *sampled* values overlap
       (e.g. ``SupplierCode`` vs ``VendorCode``), requiring ≥0.3 containment.
 
@@ -340,6 +361,34 @@ def find_relationship_candidates(
                         rc,
                         0.6,
                         f"exact key-name match on '{lc}'",
+                    )
+                )
+
+    # Tier 3.5 — shared reporting-period column (e.g. both tables roll up by
+    # "month"). Lower confidence than an entity-key match: a shared period
+    # alone doesn't prove the tables describe the same entity, only that
+    # they're safe to align on a common time axis -- the case Tier 3's
+    # entity-key patterns don't cover (e.g. a monthly actuals table and a
+    # monthly forecast table with no shared entity key at all).
+    by_period: dict[str, list[tuple[TableInfo, str]]] = {}
+    for t in tables:
+        for c in t.column_names:
+            if _is_period_key(c):
+                by_period.setdefault(_norm(c), []).append((t, c))
+    for occ in by_period.values():
+        for i in range(len(occ)):
+            for j in range(i + 1, len(occ)):
+                (lt, lc), (rt, rc) = occ[i], occ[j]
+                if lt.view_name == rt.view_name:
+                    continue
+                _consider(
+                    _measured(
+                        lt.view_name,
+                        lc,
+                        rt.view_name,
+                        rc,
+                        0.5,
+                        f"shared reporting-period column '{lc}'",
                     )
                 )
 

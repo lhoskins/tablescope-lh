@@ -210,7 +210,7 @@ export default function UploadPage() {
     try {
       const result = await apiClient.post<QueryResult>(
         "/api/query/datasource",
-        { tableName: ds.viewName, limit: 1000 }
+        { tableName: ds.viewName, limit: 10000 }
       );
       setQueryResult(result);
     } catch (err) {
@@ -438,6 +438,7 @@ export default function UploadPage() {
             <DataGrid
               columns={queryResult.columns}
               rows={queryResult.rows}
+              total={queryResult.total}
               columnTypes={selectedDatasource.columnTypes}
             />
           )}

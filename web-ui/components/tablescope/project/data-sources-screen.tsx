@@ -1,11 +1,18 @@
 "use client";
 
 import { useMemo, useRef, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { IconRefresh, IconSearch } from "@tabler/icons-react";
+import {
+  IconRefresh,
+  IconSearch,
+  IconDatabase,
+  IconDatabasePlus,
+  IconServer,
+  IconFileText,
+  IconApi,
+} from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
-import { ConnectorsMenu } from "@/components/datasource/ConnectorsMenu";
-import { StatTile } from "@/components/ui/stat-tile";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -24,6 +31,7 @@ import {
   type DataSource,
 } from "@/lib/ui/use-project-data";
 import { DataSourceResultView } from "@/components/tablescope/project/detail-views";
+import { StatBar, type StatItem } from "./overview-screen/stat-bar";
 import { isDatabase } from "./data-sources-screen/is-database";
 import { isSaas } from "./data-sources-screen/is-saas";
 import { SourceIcon } from "./data-sources-screen/source-icon";
@@ -35,9 +43,9 @@ import { deleteSource } from "./data-sources-screen/delete-source";
 import { FILTERS } from "./data-sources-screen/filters";
 import { ArchiveCard } from "./data-sources-screen/archive-card";
 import { DeleteSourceDialog } from "./data-sources-screen/delete-source-dialog";
-import { SourceDetailPanel } from "./data-sources-screen/source-detail-panel";
 
 export function DataSourcesScreen({ projectId }: { projectId: string }) {
+  const router = useRouter();
   const { data: allData, isLoading } = useProjectDataSources(projectId, true);
   const queryClient = useQueryClient();
   const rows = useMemo(
@@ -199,25 +207,62 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
   const fileCount = rows.filter((s) => !isDatabase(s) && !isSaas(s)).length;
   const saasCount = rows.filter(isSaas).length;
 
+  const statItems: StatItem[] = [
+    {
+      key: "total",
+      icon: IconDatabase,
+      iconClass: "bg-brand-50 text-brand-700",
+      value: rows.length,
+      label: "Total sources",
+    },
+    {
+      key: "database",
+      icon: IconServer,
+      iconClass: "bg-ai-bg text-ai",
+      value: dbCount,
+      label: "Database sources",
+    },
+    {
+      key: "file",
+      icon: IconFileText,
+      iconClass: "bg-success-bg text-success",
+      value: fileCount,
+      label: "File sources",
+    },
+    {
+      key: "saas",
+      icon: IconApi,
+      iconClass: "bg-warning-bg text-warning",
+      value: saasCount,
+      label: "SaaS sources",
+    },
+  ];
+
+  const inDetail = Boolean(detail);
+
   return (
     <ProjectShell
       projectId={projectId}
       activeNav="project-data-sources"
       breadcrumbLabel="Data Sources"
-      actions={
-        <>
-          <Button variant="secondary">
-            <IconRefresh size={14} />
-            Sync all
-          </Button>
-          <ConnectorsMenu
-            projectId={Number(projectId)}
-            label="+ Connect Database"
-            onCreated={() => refresh()}
-          />
-        </>
+      showProjectHeader={!inDetail}
+      headerActions={
+        !inDetail ? (
+          <>
+            <Button variant="secondary">
+              <IconRefresh size={14} />
+              Sync all
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => router.push(`/projects/${projectId}/data-source-builder`)}
+            >
+              <IconDatabasePlus size={14} />
+              Data Source Builder
+            </Button>
+          </>
+        ) : undefined
       }
-      contextPanel={<SourceDetailPanel source={detail ?? selected} />}
     >
       {detail ? (
         <DataSourceResultView
@@ -231,14 +276,7 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
         />
       ) : (
         <div className="space-y-4">
-          {filter !== "archive" && (
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <StatTile label="Total sources" value={rows.length} />
-              <StatTile label="Database sources" value={dbCount} />
-              <StatTile label="File sources" value={fileCount} />
-              <StatTile label="SaaS sources" value={saasCount} />
-            </div>
-          )}
+          {filter !== "archive" && <StatBar items={statItems} />}
 
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative min-w-[220px] flex-1">

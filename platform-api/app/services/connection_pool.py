@@ -65,18 +65,17 @@ class TeiidConnectionPoolManager:
     ) -> asyncpg.Pool:
         key = PoolKey(host=host, port=port, database=database, username=username)
         pool = self._pools.get(key)
-        if pool is not None:
+        if pool is not None and not pool._closed:
             return pool
         async with self._lock:
             pool = self._pools.get(key)
-            if pool is not None:
+            if pool is not None and not pool._closed:
                 return pool
             logger.info("Creating new Teiid asyncpg pool for %s@%s:%s/%s", username, host, port, database)
             # Teiid's PG wire does not support SSL; disable it to avoid a
-            # negotiation hang and cap the initial connection handshake.
-            # min_size=0 makes pool creation instant; connections are created
-            # lazily by the first pool.fetch, which happens during background
-            # warming so real user queries reuse an already-hot pool.
+            # negotiation hang.  min_size=1 pre-warms one connection so the
+            # first user query does not pay the full handshake cost.  Timeouts
+            # are generous for cold CSV scans but not unbounded.
             pool = await asyncpg.create_pool(
                 host=host,
                 port=port,
@@ -87,8 +86,8 @@ class TeiidConnectionPoolManager:
                 max_size=self._max_size,
                 max_inactive_connection_lifetime=self._max_inactive_connection_lifetime,
                 ssl=False,
-                timeout=60,
-                command_timeout=60,
+                timeout=120,
+                command_timeout=180,
                 statement_cache_size=0,
                 server_settings={"application_name": "tablescope-platform-api"},
                 reset=_teiid_reset,
@@ -117,6 +116,10 @@ class TeiidConnectionPoolManager:
                     logger.info("Evicting stale Teiid pool %s", key)
                     await pool.close()
 
+    @property
+    def max_size(self) -> int:
+        return self._max_size
+
     async def close_all(self) -> None:
         async with self._lock:
             for key, pool in list(self._pools.items()):
@@ -127,7 +130,7 @@ class TeiidConnectionPoolManager:
 
 _settings = get_settings()
 pool_manager = TeiidConnectionPoolManager(
-    min_size=0,
-    max_size=min(_settings.database_pool_max_size, 5),
+    min_size=1,
+    max_size=min(_settings.database_pool_max_size, 20),
     max_inactive_connection_lifetime=120.0,
 )

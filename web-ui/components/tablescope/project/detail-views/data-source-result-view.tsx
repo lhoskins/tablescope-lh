@@ -113,6 +113,7 @@ export function DataSourceResultView({
             rows={data?.rows ?? []}
             loading={isLoading}
             height={520}
+            total={data?.total}
           />
         )}
       </Card>

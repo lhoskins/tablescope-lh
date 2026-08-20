@@ -29,6 +29,7 @@ from . import (
     ai_proxy_ask,
     ai_proxy_ask_and_run,
     ai_proxy_dashboard,
+    ai_proxy_dashboard_designer,
     ai_proxy_dashboard_generate,
     ai_proxy_dashboard_save,
     ai_proxy_dashboard_suggest,
@@ -83,6 +84,10 @@ from .ai_proxy_ask_and_run import (
 )
 from .ai_proxy_dashboard import (
     suggest_dashboard,
+)
+from .ai_proxy_dashboard_designer import (
+    apply_dashboard_design,
+    review_dashboard_design,
 )
 from .ai_proxy_dashboard_generate import (
     ai_generate_and_save_dashboard,
@@ -193,6 +198,7 @@ router.include_router(ai_proxy_permissions.router)
 router.include_router(ai_proxy_query_actions.router)
 router.include_router(ai_proxy_ask_and_run.router)
 router.include_router(ai_proxy_dashboard_generate.router)
+router.include_router(ai_proxy_dashboard_designer.router)
 router.include_router(ai_proxy_dashboard_suggest.router)
 router.include_router(ai_proxy_dashboard_save.router)
 
@@ -201,6 +207,7 @@ _FEATURE_MODULES = (
     ai_proxy_ask_and_run,
     ai_proxy_dashboard,
     ai_proxy_dashboard_generate,
+    ai_proxy_dashboard_designer,
     ai_proxy_dashboard_save,
     ai_proxy_dashboard_suggest,
     ai_proxy_index,
@@ -233,6 +240,20 @@ class _AggregatorModule(ModuleType):
 sys.modules[__name__].__class__ = _AggregatorModule
 
 __all__ = [
+    "CHAT_ANSWER_MAX_ROWS",
+    "TIMEOUT",
+    "_CHART_TYPE_MAP",
+    "_CODE_FENCE_RE",
+    "_ENGINE_TO_PLANNER",
+    "_FAMILY_GROUPS",
+    "_GENERATION_INTENT_PATTERN",
+    "_LEADING_SQL_COMMENT_RE",
+    "_LIMIT_RE",
+    "_NARRATIVE_TYPES",
+    "_QUERY_SUMMARY_PATTERNS",
+    "_READONLY_START_RE",
+    "_SOURCE_SUFFIX_RE",
+    "_TIME_SERIES_TYPES",
     "AIAskAndRunRequest",
     "AIAskRequest",
     "AICardContext",
@@ -250,22 +271,8 @@ __all__ = [
     "AISuggestDashboardsRequest",
     "AISuggestionPayload",
     "AISuggestionWidget",
-    "CHAT_ANSWER_MAX_ROWS",
     "RoutePromptRequest",
     "RoutePromptResponse",
-    "TIMEOUT",
-    "_CHART_TYPE_MAP",
-    "_CODE_FENCE_RE",
-    "_ENGINE_TO_PLANNER",
-    "_FAMILY_GROUPS",
-    "_GENERATION_INTENT_PATTERN",
-    "_LEADING_SQL_COMMENT_RE",
-    "_LIMIT_RE",
-    "_NARRATIVE_TYPES",
-    "_QUERY_SUMMARY_PATTERNS",
-    "_READONLY_START_RE",
-    "_SOURCE_SUFFIX_RE",
-    "_TIME_SERIES_TYPES",
     "_ai_analyze_and_create_scopes",
     "_ai_generation_error",
     "_analyze_project_scopes",
@@ -336,6 +343,7 @@ __all__ = [
     "ai_save_query",
     "ai_status",
     "ai_suggest_dashboards",
+    "apply_dashboard_design",
     "ask",
     "auto_create_scopes_from_queries",
     "check_permissions",
@@ -344,6 +352,7 @@ __all__ = [
     "generate_sql",
     "index_document",
     "normalize_ai_generation_intent",
+    "review_dashboard_design",
     "route_prompt",
     "router",
     "suggest_dashboard",

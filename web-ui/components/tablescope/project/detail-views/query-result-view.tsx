@@ -55,7 +55,7 @@ export function QueryResultView({
         tableName: safeTableName(query.left_datasource),
         sql: query.sql_text,
         project_id: Number(projectId),
-        limit: 500,
+        limit: 10000,
       }),
     enabled: Boolean(projectId),
     retry: false,
@@ -102,6 +102,7 @@ export function QueryResultView({
             rows={data?.rows ?? []}
             loading={isLoading}
             height={520}
+            total={data?.total}
             queryId={query.id}
             queryName={query.name}
             projectId={Number(projectId)}

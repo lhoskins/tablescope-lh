@@ -52,6 +52,7 @@ export function TanStackDataGrid({
   rows: inputRows,
   loading = false,
   height = 460,
+  total,
   queryId,
   queryName = "Results",
   availableQueries = [],
@@ -464,7 +465,7 @@ export function TanStackDataGrid({
           )}
         </div>
         <span className="ml-auto text-xs text-slate-400">
-          {table.getFilteredRowModel().rows.length} row{table.getFilteredRowModel().rows.length !== 1 ? "s" : ""}
+          {total ?? table.getFilteredRowModel().rows.length} row{(total ?? table.getFilteredRowModel().rows.length) !== 1 ? "s" : ""}
         </span>
       </div>
 

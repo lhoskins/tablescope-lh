@@ -1,8 +1,13 @@
 "use client";
 
 import { useMemo } from "react";
+import {
+  IconFileText,
+  IconBrain,
+  IconArrowsExchange,
+  IconSparkles,
+} from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
-import { StatTile } from "@/components/ui/stat-tile";
 import { DocumentsTab } from "@/components/documents/DocumentsTab";
 import { getUserMeta } from "@/lib/auth";
 import {
@@ -10,6 +15,7 @@ import {
   relationshipCount,
   extractionCount,
 } from "@/lib/ui/use-project-data";
+import { StatBar, type StatItem } from "./overview-screen/stat-bar";
 
 const INDEXED = new Set(["ready", "indexed", "completed", "complete", "profiled"]);
 const PENDING = new Set([
@@ -35,33 +41,49 @@ export function DocumentsScreen({
   const indexed = rows.filter((a) =>
     INDEXED.has(a.ai_status.toLowerCase()),
   ).length;
-  const pending = rows.filter((a) =>
-    PENDING.has(a.ai_status.toLowerCase()),
-  ).length;
   const relations = rows.reduce((a, d) => a + (relationshipCount(d) ?? 0), 0);
   const extractions = rows.reduce((a, d) => a + (extractionCount(d) ?? 0), 0);
+
+  const statItems: StatItem[] = [
+    {
+      key: "total",
+      icon: IconFileText,
+      iconClass: "bg-brand-50 text-brand-700",
+      value: rows.length,
+      label: "Total documents",
+    },
+    {
+      key: "indexed",
+      icon: IconBrain,
+      iconClass: "bg-ai-bg text-ai",
+      value: indexed,
+      label: "AI indexed",
+    },
+    {
+      key: "relationships",
+      icon: IconArrowsExchange,
+      iconClass: "bg-success-bg text-success",
+      value: relations,
+      label: "Relationships",
+    },
+    {
+      key: "extractions",
+      icon: IconSparkles,
+      iconClass: "bg-warning-bg text-warning",
+      value: extractions,
+      label: "AI extractions",
+    },
+  ];
 
   return (
     <ProjectShell
       projectId={projectId}
       activeNav="project-documents"
       breadcrumbLabel="Documents"
+      showProjectHeader
     >
       <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatTile label="Total documents" value={rows.length} />
-          <StatTile
-            label="AI indexed"
-            value={indexed}
-            hint={`${pending} pending`}
-          />
-          <StatTile label="Relationships" value={relations} hint="detected" />
-          <StatTile
-            label="AI extractions"
-            value={extractions}
-            hint="clauses, KPIs, dates"
-          />
-        </div>
+        <StatBar items={statItems} />
 
         <DocumentsTab
           projectId={Number(projectId)}

@@ -234,13 +234,16 @@ export function previewCreatedSource(body: {
   });
 }
 
-/** Run an explicit SQL statement against a project's VDB (no added LIMIT). */
+/** Run an explicit SQL statement against a project's VDB with optional LIMIT/OFFSET. */
 export function runDatasourceSql(body: {
   sql: string;
   project_id?: number;
+  limit?: number;
+  offset?: number;
 }): Promise<{
   columns: string[];
   rows: Record<string, unknown>[];
+  total?: number;
   sql?: string;
   suggestedVisualization?: {
     type: string;
@@ -254,6 +257,8 @@ export function runDatasourceSql(body: {
   return apiClient.post("/api/query/datasource", {
     sql: body.sql,
     project_id: body.project_id,
+    limit: body.limit ?? 100,
+    offset: body.offset ?? 0,
   });
 }
 

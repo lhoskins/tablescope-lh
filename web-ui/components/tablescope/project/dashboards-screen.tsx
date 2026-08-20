@@ -1,17 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { IconSparkles, IconPlus, IconLayoutDashboard, IconTrash } from "@tabler/icons-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  IconChartBar,
+  IconFolders,
+  IconLayoutDashboard,
+  IconPlus,
+  IconSparkles,
+} from "@tabler/icons-react";
 import { apiClient } from "@/lib/api-client";
 import { ProjectShell } from "@/components/tablescope/project-shell";
-import { StatTile } from "@/components/ui/stat-tile";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { cn } from "@/lib/cn";
-import { timeAgo } from "@/lib/ui/format";
-import { accentFor } from "@/lib/ui/color";
+import { StatBar } from "@/components/tablescope/project/overview-screen/stat-bar";
 import {
   useProjectDashboards,
   useProjectQueries,
@@ -19,34 +20,20 @@ import {
   widgetCount,
   type Dashboard,
 } from "@/lib/ui/use-project-data";
+import { useCurrentUser } from "@/lib/ui/use-shell-data";
 import { DashboardDetailView } from "@/components/tablescope/project/detail-views";
-import { AIDashboardSuggestionsModal } from "@/components/tablescope/project/ai-dashboard-suggestions-modal";
+import { AIDashboardDesigner } from "@/components/tablescope/project/ai-dashboard-designer";
+import { PRESET_LABELS } from "@/components/tablescope/project/itsm-dashboards/ItsmDashboardContent";
+import { DashboardOverview } from "@/components/tablescope/project/dashboard-templates/dashboard-overview";
+import { DashboardTemplateDialog } from "@/components/tablescope/project/dashboard-templates/template-dialog";
+import {
+  groupDashboards,
+  virtualItsmDashboardConfig,
+} from "@/components/tablescope/project/dashboard-templates/groups";
 import { useToasts, ToastViewport } from "@/components/ui/toast";
 import { createHomePin } from "@/lib/api/home-pins";
 import type { WidgetConfig } from "@/components/dashboard/types";
-
-function isPublished(d: Dashboard): boolean {
-  return d.status.toLowerCase() === "published";
-}
-
-function Thumb({ dashboard }: { dashboard: Dashboard }) {
-  const accent = accentFor(String(dashboard.id));
-  const heights = [40, 64, 52, 72, 48, 80, 56, 68];
-  return (
-    <div className="flex h-32 items-end gap-1.5 rounded-md bg-bg-secondary p-4">
-      {heights.map((h, i) => (
-        <div
-          key={i}
-          className="flex-1 rounded-sm"
-          style={{
-            height: `${h}%`,
-            background: i % 2 === 0 ? accent : `${accent}55`,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
+import type { DashboardGroup, DashboardGroupRecord } from "@/components/tablescope/project/dashboard-templates/types";
 
 export function DashboardsScreen({
   projectId,
@@ -58,13 +45,40 @@ export function DashboardsScreen({
   const { data, isLoading } = useProjectDashboards(projectId);
   const { data: queries } = useProjectQueries(projectId);
   const { data: sources } = useProjectDataSources(projectId);
+  const { data: currentUser } = useCurrentUser();
   const queryClient = useQueryClient();
-  const rows = useMemo(() => data ?? [], [data]);
+  const realRows = useMemo(() => data ?? [], [data]);
+  const itsmPresets = useMemo<Dashboard[]>(() => {
+    if (!currentUser?.tenant.servicenowItsmDashboardsV2Enabled) return [];
+    const now = new Date().toISOString();
+    return Object.entries(PRESET_LABELS).map(([key, label], i) => ({
+      id: -(i + 1),
+      project_id: Number(projectId),
+      tenant_id: 0,
+      owner_id: null,
+      name: label,
+      description: "Live operational metrics, trends and supporting drilldown detail.",
+      status: "published",
+      config: virtualItsmDashboardConfig(key),
+      ai_generated: true,
+      view_count: 0,
+      created_at: now,
+      updated_at: now,
+    }));
+  }, [currentUser, projectId]);
+  const rows = useMemo(() => [...itsmPresets, ...realRows], [itsmPresets, realRows]);
+  const { data: persistedGroups } = useQuery<DashboardGroupRecord[]>({ queryKey: ["project", projectId, "dashboard-groups"], queryFn: () => apiClient.get(`/api/projects/${projectId}/dashboard-groups`), enabled: Boolean(projectId) });
+  const groups = useMemo(() => groupDashboards(rows, persistedGroups ?? []), [persistedGroups, rows]);
   const [viewingId, setViewingId] = useState<number | null>(
     dashboardId ? Number(dashboardId) : null,
   );
   const viewing = rows.find((d) => d.id === viewingId) ?? null;
-  const [aiOpen, setAiOpen] = useState(false);
+  const [designer, setDesigner] = useState<{
+    open: boolean;
+    dashboardGroupId?: number;
+    dashboardGroupName?: string;
+  }>({ open: false });
+  const [templateOpen, setTemplateOpen] = useState(false);
   const { toasts, push, dismiss } = useToasts();
 
   // Id of a freshly-created dashboard that has NOT yet been explicitly saved.
@@ -82,21 +96,13 @@ export function DashboardsScreen({
       }),
   });
 
-  const createMutation = useMutation({
-    mutationFn: () =>
-      apiClient.post<Dashboard>(`/api/projects/${projectId}/dashboards`, {
-        name: `Dashboard ${rows.length + 1}`,
-        description: "",
-        config: { widgets: [], globalFilters: [] },
-      }),
-    onSuccess: async (newDash) => {
-      draftIdRef.current = newDash.id;
-      await queryClient.invalidateQueries({
-        queryKey: ["project", projectId, "dashboards"],
-      });
-      setViewingId(newDash.id);
-    },
-  });
+  const createGroupMutation = useMutation({ mutationFn: (name: string) => apiClient.post(`/api/projects/${projectId}/dashboard-groups`, { name, icon: "activity", collapsed_default: true }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["project", projectId, "dashboard-groups"] }) });
+  const renameGroupMutation = useMutation({ mutationFn: ({ group, name }: { group: DashboardGroup; name: string }) => apiClient.put(`/api/projects/${projectId}/dashboard-groups/${group.persistentId}`, { name }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["project", projectId, "dashboard-groups"] }) });
+  const addDashboardToGroup = useCallback(async (group: DashboardGroup) => {
+    let groupId = group.persistentId;
+    if (!groupId) groupId = (await apiClient.post<{ id: number }>(`/api/projects/${projectId}/dashboard-groups`, { name: group.name, icon: group.icon, template_id: group.templateId, collapsed_default: true })).id;
+    setDesigner({ open: true, dashboardGroupId: groupId, dashboardGroupName: group.name });
+  }, [projectId]);
 
   // A draft becomes "kept" the moment the user persists any change in the editor.
   const handlePersisted = useCallback(() => {
@@ -148,6 +154,10 @@ export function DashboardsScreen({
 
   const handleDeleteDashboard = useCallback(
     (d: Dashboard) => {
+      if (d.id < 0) {
+        push("ServiceNow preset dashboards cannot be deleted", "info");
+        return;
+      }
       if (
         typeof window !== "undefined" &&
         !window.confirm(`Delete dashboard "${d.name}"? This cannot be undone.`)
@@ -157,7 +167,7 @@ export function DashboardsScreen({
       if (draftIdRef.current === d.id) draftIdRef.current = null;
       deleteMutation.mutate(d.id);
     },
-    [deleteMutation],
+    [deleteMutation, push],
   );
 
   // Auto-delete a pristine draft on tab close / refresh / navigating away.
@@ -177,31 +187,66 @@ export function DashboardsScreen({
     };
   }, [projectId]);
 
-  const published = rows.filter(isPublished).length;
-  const aiCount = rows.filter((d) => d.ai_generated).length;
-  const totalViews = rows.reduce((a, d) => a + (d.view_count ?? 0), 0);
-  const totalWidgets = rows.reduce((a, d) => a + widgetCount(d.config), 0);
+  const viewingGroup = viewing
+    ? groups.find((group) => group.dashboards.some((dashboard) => dashboard.id === viewing.id))
+    : undefined;
+  const existingTemplateIds = useMemo(
+    () => new Set(groups.map((group) => group.templateId).filter((id): id is string => Boolean(id))),
+    [groups],
+  );
+  const statItems = useMemo(
+    () => [
+      {
+        key: "dashboards",
+        icon: IconLayoutDashboard,
+        iconClass: "bg-brand-50 text-brand-700",
+        value: rows.length,
+        label: "Total dashboards",
+      },
+      {
+        key: "groups",
+        icon: IconFolders,
+        iconClass: "bg-ai-bg text-ai",
+        value: groups.length,
+        label: "Groups",
+      },
+      {
+        key: "ai-generated",
+        icon: IconSparkles,
+        iconClass: "bg-warning-bg text-warning",
+        value: rows.filter((dashboard) => dashboard.ai_generated).length,
+        label: "AI-generated",
+      },
+      {
+        key: "widgets",
+        icon: IconChartBar,
+        iconClass: "bg-success-bg text-success",
+        value: rows.reduce((total, dashboard) => total + widgetCount(dashboard.config), 0),
+        label: "Widgets",
+      },
+    ],
+    [groups, rows],
+  );
 
   return (
     <ProjectShell
       projectId={projectId}
       activeNav="project-dashboards"
       breadcrumbLabel="Dashboards"
-      actions={
-        <>
-          <Button variant="secondary" onClick={() => setAiOpen(true)}>
-            <IconSparkles size={14} />
-            Generate with AI
-          </Button>
-          <Button
-            variant="primary"
-            onClick={() => createMutation.mutate()}
-            disabled={createMutation.isPending}
-          >
-            <IconPlus size={14} />
-            {createMutation.isPending ? "Creating…" : "New dashboard"}
-          </Button>
-        </>
+      showProjectHeader={!viewing}
+      headerActions={
+        !viewing ? (
+          <>
+            <Button variant="secondary" onClick={() => setDesigner({ open: true })}>
+              <IconSparkles size={14} />
+              Create with AI
+            </Button>
+            <Button variant="primary" onClick={() => setTemplateOpen(true)}>
+              <IconPlus size={14} />
+              Add dashboard template
+            </Button>
+          </>
+        ) : null
       }
     >
       {viewing ? (
@@ -213,135 +258,59 @@ export function DashboardsScreen({
           onBack={handleCloseViewer}
           onPersisted={handlePersisted}
           onPinWidget={handlePinWidget}
+          dashboardGroupName={viewingGroup?.name}
+          dashboardGroup={viewingGroup?.dashboards}
+          onSelectDashboard={setViewingId}
         />
       ) : (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatTile
-            label="Total dashboards"
-            value={rows.length}
-            hint={`${published} published`}
+        <>
+          <StatBar items={statItems} />
+          <DashboardOverview
+            groups={groups}
+            loading={isLoading}
+            onOpenDashboard={setViewingId}
+            onAddTemplate={() => setTemplateOpen(true)}
+            onNewDashboard={() => setDesigner({ open: true, dashboardGroupName: "Operational Dashboards" })}
+            onDeleteDashboard={handleDeleteDashboard}
+            onCreateGroup={(name) => createGroupMutation.mutate(name)}
+            onRenameGroup={(group, name) => renameGroupMutation.mutate({ group, name })}
+            onAddDashboardToGroup={(group) => { void addDashboardToGroup(group); }}
           />
-          <StatTile
-            label="AI-generated"
-            value={aiCount}
-            hint={`${rows.length - aiCount} manual`}
-          />
-          <StatTile label="Total views" value={totalViews} />
-          <StatTile
-            label="Widgets total"
-            value={totalWidgets}
-            hint="across all dashboards"
-          />
-        </div>
-
-        {isLoading ? (
-          <div className="py-16 text-center text-small text-ink-tertiary">
-            Loading dashboards…
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {rows.map((d) => {
-              const pub = isPublished(d);
-              return (
-                <Card
-                  key={d.id}
-                  onClick={() => setViewingId(d.id)}
-                  className="flex cursor-pointer flex-col overflow-hidden transition-colors hover:border-line-secondary"
-                >
-                  <div className="p-3">
-                    <Thumb dashboard={d} />
-                  </div>
-                  <div className="flex-1 px-4 pb-3">
-                    <div className="text-h3 text-ink-primary">{d.name}</div>
-                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                      <Badge tone={pub ? "success" : "outline"}>
-                        {pub ? "Published" : "Draft"}
-                      </Badge>
-                      <Badge tone={d.ai_generated ? "ai" : "neutral"}>
-                        {d.ai_generated ? "AI" : "Manual"}
-                      </Badge>
-                      <span className="text-small text-ink-tertiary">
-                        {d.view_count} views
-                      </span>
-                      <span className="text-small text-ink-tertiary">
-                        {widgetCount(d.config)} widgets
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between border-t border-line-tertiary px-4 py-2.5">
-                    <span className="text-small text-ink-tertiary">
-                      Updated {timeAgo(d.updated_at)}
-                    </span>
-                    <div className="flex items-center gap-3 text-[12px] font-medium text-brand-700">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setViewingId(d.id);
-                        }}
-                        className="hover:underline"
-                      >
-                        {pub ? "Share" : "Publish"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setViewingId(d.id);
-                        }}
-                        className="hover:underline"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        title="Delete dashboard"
-                        aria-label={`Delete dashboard ${d.name}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteDashboard(d);
-                        }}
-                        className="text-ink-tertiary hover:text-red-600"
-                      >
-                        <IconTrash size={15} />
-                      </button>
-                    </div>
-                  </div>
-                </Card>
-              );
-            })}
-
-            <button
-              type="button"
-              onClick={() => createMutation.mutate()}
-              disabled={createMutation.isPending}
-              className={cn(
-                "flex min-h-[220px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line-secondary bg-bg-primary text-center hover:border-brand-500 hover:bg-brand-50/40 disabled:opacity-60",
-              )}
-            >
-              <IconLayoutDashboard size={22} className="text-ink-tertiary" />
-              <span className="text-h3 text-ink-secondary">
-                {createMutation.isPending ? "Creating…" : "New dashboard"}
-              </span>
-              <span className="max-w-[200px] text-small text-ink-tertiary">
-                Build manually or let AI generate from your queries
-              </span>
-            </button>
-          </div>
-        )}
-      </div>
+        </>
       )}
-      <AIDashboardSuggestionsModal
-        open={aiOpen}
+      <AIDashboardDesigner
+        open={designer.open}
         projectId={projectId}
-        onClose={() => setAiOpen(false)}
-        onSaved={(id) => {
-          setAiOpen(false);
-          queryClient.invalidateQueries({
-            queryKey: ["project", projectId, "dashboards"],
-          });
+        mode="create"
+        dashboardGroupId={designer.dashboardGroupId}
+        dashboardGroupName={designer.dashboardGroupName}
+        onClose={() => setDesigner({ open: false })}
+        onApplied={(id) => {
+          setDesigner({ open: false });
+          void Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["project", projectId, "dashboards"] }),
+            queryClient.invalidateQueries({ queryKey: ["project", projectId, "dashboard-groups"] }),
+          ]);
           setViewingId(id);
+        }}
+        notify={push}
+      />
+      <DashboardTemplateDialog
+        open={templateOpen}
+        projectId={projectId}
+        savedQueries={queries ?? []}
+        existingTemplateIds={existingTemplateIds}
+        onClose={() => setTemplateOpen(false)}
+        onCreated={async (ids) => {
+          setTemplateOpen(false);
+          await queryClient.invalidateQueries({ queryKey: ["project", projectId, "dashboards"] });
+          await queryClient.invalidateQueries({ queryKey: ["project", projectId, "dashboard-groups"] });
+          if (ids[0]) setViewingId(ids[0]);
+        }}
+        onOpenExisting={(templateId) => {
+          const group = groups.find((item) => item.templateId === templateId);
+          setTemplateOpen(false);
+          if (group?.dashboards[0]) setViewingId(group.dashboards[0].id);
         }}
         notify={push}
       />

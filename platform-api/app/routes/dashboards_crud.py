@@ -19,6 +19,10 @@ from app.auth.rbac import Role, require_role
 from app.database import get_db
 from app.models.dashboard import Dashboard
 from app.models.project import Project
+from app.services.operational_insight_dashboards import (
+    operational_insight_config,
+    resolve_dashboard_group,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects/{project_id}/dashboards", tags=["dashboards"])
@@ -82,6 +86,15 @@ async def create_dashboard(
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> DashboardRead:
     project = await _require_project_access(project_id, session, context)
+    requested_group_id = body.config.get("dashboardGroupId")
+    group = await resolve_dashboard_group(
+        session,
+        tenant_id=context.tenant_id,
+        project_id=project.id,
+        requested_group_id=requested_group_id
+        if isinstance(requested_group_id, int)
+        else None,
+    )
     dashboard = Dashboard(
         project_id=project.id,
         owner_id=context.user_id,
@@ -89,7 +102,9 @@ async def create_dashboard(
         name=body.name,
         description=body.description,
         status=body.status,
-        config=body.config,
+        config=operational_insight_config(
+            body.config, group=group, dashboard_name=body.name
+        ),
         ai_generated=body.ai_generated,
     )
     session.add(dashboard)
@@ -147,6 +162,11 @@ async def update_dashboard(
     if body.description is not None:
         dashboard.description = body.description
     if body.config is not None:
+        if body.config.get("presentation") != "operational_insight":
+            raise HTTPException(
+                status_code=422,
+                detail="Dashboards must use the operational_insight presentation.",
+            )
         dashboard.config = body.config
     if body.status is not None:
         dashboard.status = body.status

@@ -24,6 +24,7 @@ from app.services.context_builder import ContextBuildError
 from app.services.kg_context import format_knowledge_graph_context
 from app.services.sql_validator import SQLValidationError, validate_sql
 
+from .ai_plan_prompt import _build_relationship_hint_lines
 from .ai_shared import _extract_sql
 
 logger = logging.getLogger(__name__)
@@ -273,6 +274,7 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
 
     catalog = req.source_catalog or None
     table_columns = _catalog_table_columns(catalog)
+    relationship_hint_lines = _build_relationship_hint_lines(req.relationship_hints)
 
     def _clarify(reason: str) -> HTTPException:
         suggestions = _suggest_sources(req.prompt, allowed_tables)
@@ -303,6 +305,7 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
         source_catalog=catalog,
         preferred_sources=req.preferred_sources,
         relevant_columns=req.relevant_columns,
+        relationship_hint_lines=relationship_hint_lines,
         model=req.model,
         ollama_url=req.ollama_url,
     )
@@ -341,6 +344,7 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
                 source_catalog=catalog,
                 preferred_sources=req.preferred_sources,
                 relevant_columns=req.relevant_columns,
+                relationship_hint_lines=relationship_hint_lines,
                 model=req.model,
                 ollama_url=req.ollama_url,
             )

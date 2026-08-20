@@ -1,0 +1,140 @@
+.dashboardContainer {
+  container-type: inline-size;
+}
+
+.kpiGrid {
+  display: grid;
+  gap: 0.625rem;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
+
+.cardCompact {
+  grid-column: span 3;
+}
+
+.cardStandard {
+  grid-column: span 4;
+}
+
+.cardWide {
+  grid-column: span 6;
+}
+
+@container (max-width: 940px) {
+  .cardCompact {
+    grid-column: span 4;
+  }
+
+  .cardStandard,
+  .cardWide {
+    grid-column: span 6;
+  }
+}
+
+@container (max-width: 660px) {
+  .cardCompact,
+  .cardStandard,
+  .cardWide {
+    grid-column: span 6;
+  }
+}
+
+@container (max-width: 420px) {
+  .cardCompact,
+  .cardStandard,
+  .cardWide {
+    grid-column: span 12;
+  }
+}
+
+.chartGrid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.chartHalf {
+  grid-column: span 6;
+}
+
+.chartFull {
+  grid-column: span 12;
+}
+
+.insightBrief {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.6fr) minmax(0, 2.4fr);
+  align-items: center;
+  gap: 1rem;
+  border-top: 1px solid var(--color-line-tertiary, #e2e8f0);
+  border-bottom: 1px solid var(--color-line-tertiary, #e2e8f0);
+  padding: 0.875rem 0.25rem;
+}
+
+.insightBriefGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.insightMainGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.85fr);
+  gap: 0.75rem;
+}
+
+.insightSideStack {
+  display: grid;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.insightBottomGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+@container (max-width: 760px) {
+  .chartGrid {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+
+  .chartHalf,
+  .chartFull {
+    grid-column: span 12;
+  }
+
+  .insightBrief,
+  .insightMainGrid,
+  .insightBottomGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .insightBriefGrid {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+}
+
+.drilldownPanel {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 50;
+  width: min(60vw, 900px);
+  min-width: 420px;
+  transform: translateX(-100%);
+  transition: transform 300ms ease-in-out;
+}
+
+.drilldownPanel.open {
+  transform: translateX(0);
+}
+
+@media (max-width: 640px) {
+  .drilldownPanel {
+    width: 100%;
+    min-width: 0;
+  }
+}

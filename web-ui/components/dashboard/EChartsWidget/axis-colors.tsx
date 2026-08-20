@@ -63,10 +63,9 @@ import { LegacyGridContainLabel } from "echarts/features";
 import { CanvasRenderer } from "echarts/renderers";
 
 
+import { operationalThemeColors } from "../operational-insight-theme";
+
 export function axisColors(isDark: boolean) {
-  return {
-    text: isDark ? "#cbd5e1" : "#475569",
-    line: isDark ? "#334155" : "#e2e8f0",
-    grid: isDark ? "#1e293b" : "#f1f5f9",
-  };
+  const colors = operationalThemeColors(isDark);
+  return { text: colors.text, line: colors.axis, grid: colors.grid };
 }

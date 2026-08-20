@@ -14,7 +14,7 @@ import {
   IconBinaryTree,
   type Icon,
 } from "@tabler/icons-react";
-import type { CurrentUser, NavKey } from "@/lib/ui/types";
+import type { CurrentUser, NavKey, TenantSummary } from "@/lib/ui/types";
 import {
   canManageDataSourceAssignments,
   canViewSettings,
@@ -66,9 +66,10 @@ export function homeNavGroups(user?: CurrentUser): NavGroup[] {
 export function projectNavGroups(
   projectId: string,
   user?: CurrentUser,
+  _tenant?: TenantSummary,
 ): NavGroup[] {
   const base = `/projects/${projectId}`;
-  return [
+  const groups: NavGroup[] = [
     {
       heading: "Project",
       items: [
@@ -122,6 +123,8 @@ export function projectNavGroups(
       ],
     },
   ];
+
+  return groups;
 }
 
 export const projectIntelligenceNavItems = (

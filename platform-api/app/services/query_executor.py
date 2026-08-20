@@ -43,6 +43,7 @@ class QueryResult:
     drilldown_used: bool
     target_table: str | None = None
     target_column: str | None = None
+    total: int | None = None
 
 
 def _validate_identifier(name: str, *, kind: str) -> str:
@@ -98,11 +99,11 @@ class TeiidQueryExecutor:
                 drill_target_column = _validate_identifier(scope.target_column, kind="target column")
 
         if drill_target_table is not None and drill_target_column is not None:
-            sql = f'SELECT * FROM "{drill_target_table}" WHERE "{drill_target_column}" = $1 LIMIT $2'
-            params: tuple[Any, ...] = (value, limit)
+            sql = f'SELECT * FROM "{drill_target_table}" WHERE "{drill_target_column}" = $1 LIMIT {limit}'
+            params: tuple[Any, ...] = (value,)
         else:
-            sql = f'SELECT * FROM "{table_name}" LIMIT $1'
-            params = (limit,)
+            sql = f'SELECT * FROM "{table_name}" LIMIT {limit}'
+            params = ()
 
         # A tenant bound to a dedicated data plane is routed to its own Teiid
         # container; otherwise we use the VDB row's host/port (shared global).
@@ -116,6 +117,18 @@ class TeiidQueryExecutor:
 
         async with pool.acquire() as conn:
             records: list[asyncpg.Record] = await conn.fetch(sql, *params)
+            if drill_target_table is not None and drill_target_column is not None:
+                count_sql = f'SELECT COUNT(*) AS total FROM "{drill_target_table}" WHERE "{drill_target_column}" = $1'
+                count_params: tuple[Any, ...] = (value,)
+            else:
+                count_sql = f'SELECT COUNT(*) AS total FROM "{table_name}"'
+                count_params = ()
+            try:
+                count_records = await conn.fetch(count_sql, *count_params)
+                total = int(count_records[0]["total"]) if count_records else 0
+            except Exception as exc:
+                logger.warning("Count query failed: %s", exc)
+                total = None
 
         columns: list[str] = list(records[0].keys()) if records else []
         rows = [dict(record) for record in records]
@@ -126,4 +139,5 @@ class TeiidQueryExecutor:
             drilldown_used=drill_target_table is not None,
             target_table=drill_target_table,
             target_column=drill_target_column,
+            total=total,
         )

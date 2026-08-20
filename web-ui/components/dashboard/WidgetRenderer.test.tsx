@@ -70,6 +70,23 @@ describe("WidgetRenderer", () => {
     expect(screen.getByText("1,234")).toBeTruthy();
   });
 
+  it("renders the real prior-period delta with KPI polarity", () => {
+    const widget = makeWidget({
+      type: "kpi",
+      aggregation: "avg",
+      visualizationOptions: { favorableDirection: "lower" },
+    });
+    render(
+      <WidgetRenderer
+        widget={widget}
+        operational
+        data={[{ Value: 23.3, previousValue: 25, deltaPercent: -6.8 }]}
+      />,
+    );
+    expect(screen.getByText(/↓ 6.8%/)).toHaveClass("text-emerald-600");
+    expect(screen.queryByText(/8.2%/)).toBeNull();
+  });
+
   it("renders every chart type through ECharts", async () => {
     const types: Array<WidgetConfig["type"]> = ["line", "bar", "area", "pie", "combo", "scatter", "radar", "radial_bar", "treemap", "funnel", "sankey"];
     for (const type of types) {

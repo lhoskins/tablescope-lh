@@ -139,12 +139,24 @@ async def _run_sql(
             is_connection_timeout = isinstance(
                 exc, TimeoutError | asyncio.TimeoutError | ConnectionError | OSError
             )
+            lowered_msg = err_msg.lower()
+            # "Capabilities for X were not available" (TEIID30498/30492/30496) is
+            # Teiid's per-source translator metadata not being loaded yet -- the
+            # exact cold-VDB condition vdb_warming.py exists to avoid, surfaced
+            # instead of prevented when a query lands before warming finishes.
+            # It clears on its own once the source is queried once, so it is
+            # retried here the same as a stale session / connection timeout
+            # rather than failing outright.
+            is_cold_capabilities = "capabilities for" in lowered_msg and (
+                "were not available" in lowered_msg or "not available" in lowered_msg
+            )
             should_retry = (
                 attempt == 0
                 and (
                     "TEIID4004" in err_msg
                     or is_connection_timeout
-                    or "timeout" in err_msg.lower()
+                    or "timeout" in lowered_msg
+                    or is_cold_capabilities
                 )
             )
             if should_retry:
@@ -157,6 +169,11 @@ async def _run_sql(
                     database=database,
                     username=teiid_username,
                 )
+                if is_cold_capabilities:
+                    # Give translator metadata loading, which is still in
+                    # flight, a moment to finish rather than immediately
+                    # re-hitting the same not-yet-ready state.
+                    await asyncio.sleep(2)
                 continue
             logger.error("Query against database %s failed: %s", database, exc)
             raise HTTPException(status_code=502, detail=f"Query failed: {exc}") from exc
@@ -184,12 +201,41 @@ async def _run_sql(
     return {"columns": columns, "rows": rows}
 
 
-# Regex to add CAST(... AS double) inside SUM/AVG/MIN/MAX so aggregations work
-# on CSV columns that Teiid imports as string type. COUNT is excluded (works on
-# any type). Matches e.g. SUM("revenue") or AVG(col) but NOT already-cast
-# expressions like SUM(CAST(...)).
+# Regex to add CAST(... AS double) inside SUM/AVG so aggregations work on CSV
+# columns that Teiid imports as string type. Matches e.g. SUM("revenue") or
+# AVG(col) but NOT already-cast expressions like SUM(CAST(...)).
+#
+# MIN/MAX are deliberately excluded: unlike SUM/AVG, which are mathematically
+# meaningless on a string and MUST be cast to work at all, MIN/MAX are valid
+# on any orderable type -- a string/date column sorts fine as-is in the
+# common case (consistently formatted dates, zero-padded numbers). Casting
+# them unconditionally traded a narrow correctness win (an inconsistently
+# formatted numeric-as-string column) for a hard failure on every date/text
+# column: MIN(r."Month") -> MIN(CAST(r."Month" AS double)) ->
+# TEIID30328 "Unable to evaluate convert(...)". COUNT is excluded too (works
+# on any type, never needs a cast).
+#
+# The quoted-column alternative accepts an optional qualifying prefix --
+# either an unquoted alias (r."RevenueUSD") or a QUOTED table name
+# ("sales_revenue_monthly_CSV"."RevenueUSD") -- as well as a bare quoted
+# column ("RevenueUSD"). Two distinct qualified forms used to fall through
+# uncast entirely, each only caught once reproduced live:
+#   - unquoted-alias prefix (r."RevenueUSD"): the unquoted alternative's
+#     character class allows a dotted path like `r.` but not the quote that
+#     follows it, so the whole call failed to match.
+#   - quoted-table-name prefix ("sales_revenue_monthly_CSV"."RevenueUSD"):
+#     normalize_teiid_identifiers (which runs before this, in _prepare_sql)
+#     quotes real table names, and the original fix only ever accepted an
+#     UNQUOTED prefix -- so a query the model qualified with the full table
+#     name, rather than an alias, still fell through uncast after
+#     normalization even though the alias-qualified form worked.
+# Both are rejected by Teiid with TEIID30492 "aggregate function SUM cannot
+# be used with non-numeric expressions" once a query is written to qualify
+# every column, as multi-table joins must.
 _AGG_CAST_RE = re.compile(
-    r'\b(SUM|AVG|MIN|MAX)\(\s*(?!CAST\b)(\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_$.]*)\s*\)',
+    r'\b(SUM|AVG)\(\s*(?!CAST\b)'
+    r'((?:(?:[A-Za-z_][A-Za-z0-9_$]*|\"[^\"]+\")\.)?\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_$.]*)'
+    r'\s*\)',
     re.IGNORECASE,
 )
 
@@ -246,7 +292,7 @@ def _cast_timestampdiff(sql: str) -> str:
 
 
 def _auto_cast_aggregates(sql: str) -> str:
-    """Wrap SUM/AVG/MIN/MAX column arguments with CAST(col AS double).
+    """Wrap SUM/AVG column arguments with CAST(col AS double).
 
     Teiid imports CSV columns as string, causing numeric aggregations to fail.
     This transparently casts the argument for the user. TIMESTAMPDIFF results
@@ -277,6 +323,18 @@ async def _prepare_sql(
     return sql
 
 
+_LIMIT_RE = re.compile(r"\blimit\s+\d+\s*$", re.IGNORECASE)
+
+
+def _apply_pagination(sql: str, limit: int | None, offset: int) -> str:
+    if limit is None:
+        return sql
+    trimmed = sql.strip().rstrip(";").rstrip()
+    if _LIMIT_RE.search(trimmed):
+        return trimmed
+    return f"{trimmed} LIMIT {limit} OFFSET {offset}"
+
+
 async def _execute_sql_with_repair(
     *,
     raw_sql: str,
@@ -290,12 +348,15 @@ async def _execute_sql_with_repair(
     column_types: dict[str, str],
     column_samples: dict[str, str],
     max_attempts: int = 3,
-) -> tuple[dict[str, Any] | None, str]:
+    limit: int | None = None,
+    offset: int = 0,
+) -> tuple[dict[str, Any] | None, str, str]:
     """Run ``raw_sql`` after normalization, calling ``fix-sql`` on failure.
 
-    Returns ``(result, final_sql)``. ``result`` is ``None`` only when every
-    repair attempt fails, in which case ``final_sql`` is the last attempted
-    SQL and the caller should surface the error.
+    Returns ``(result, final_sql, bounded_sql)``. ``result`` is ``None`` only
+    when every repair attempt fails, in which case ``final_sql`` is the last
+    attempted SQL and the caller should surface the error. ``bounded_sql``
+    includes any requested LIMIT/OFFSET.
     """
 
     def _is_source_or_schema_error(err: str) -> bool:
@@ -327,16 +388,17 @@ async def _execute_sql_with_repair(
         column_types=column_types,
         column_samples=column_samples,
     )
+    bounded_sql = _apply_pagination(final_sql, limit, offset)
     last_error = ""
     for attempt in range(max_attempts):
         try:
             result = await _run_sql(
                 database=database,
-                sql=final_sql,
+                sql=bounded_sql,
                 teiid_host=endpoint.pg_host,
                 teiid_port=endpoint.pg_port,
             )
-            return result, final_sql
+            return result, final_sql, bounded_sql
         except HTTPException as exc:
             last_error = str(exc.detail)
             if _is_source_or_schema_error(last_error) or attempt >= max_attempts - 1:
@@ -358,5 +420,6 @@ async def _execute_sql_with_repair(
                 column_types=column_types,
                 column_samples=column_samples,
             )
+            bounded_sql = _apply_pagination(final_sql, limit, offset)
 
-    return None, final_sql
+    return None, final_sql, bounded_sql

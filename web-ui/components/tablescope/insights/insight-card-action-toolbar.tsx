@@ -374,7 +374,7 @@ export function InsightCardActionToolbar({
               className={cn(
                 "flex flex-wrap items-center justify-end gap-1",
                 overlay &&
-                  "absolute right-2 top-10 z-10 rounded-md border border-line-tertiary bg-white/95 p-1 shadow-sm",
+                  "absolute bottom-2 right-2 z-10 rounded-md border border-line-tertiary bg-white/95 p-1 shadow-sm",
               )}
               data-export-hide
             >

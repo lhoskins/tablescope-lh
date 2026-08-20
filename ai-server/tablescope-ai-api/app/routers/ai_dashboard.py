@@ -22,7 +22,13 @@ from app.services.kg_context import format_knowledge_graph_context
 from app.services.prompt_loader import load_prompt_reference
 from app.services.sql_validator import SQLValidationError, validate_sql
 
+from .ai_plan_prompt import _build_relationship_hint_lines, _fit_plan_prompt
+from .ai_plan_sql import _ensure_group_by
 from .ai_shared import (
+    _TEIID_JOIN_EXCEPTION_RULE,
+    _TEIID_RULES_COMMON,
+    _TEIID_RULES_HEADER,
+    _TEIID_SINGLE_TABLE_RULE,
     _TEIID_SQL_RULES,
     _clean_sql,
     _parse_json_response,
@@ -47,6 +53,30 @@ _DASHBOARD_INSIGHT_SYSTEM_PROMPT = (
     "documents. If the context cannot support a proposed insight, leave it out. "
     "Prefer fewer strong, non-empty, decision-grade widgets over many weak ones."
 )
+
+
+def _dashboard_relationship_floor_line(has_relationship_evidence: bool) -> str:
+    """A dashboard-prompt-appropriate counterpart to the plan prompt's floor.
+
+    ai_plan_prompt._build_relationship_floor_line's wording ("the single-table
+    relationship analyses described below", "no other section of this prompt
+    (documents, knowledge-graph hypotheses, depth guidance)") refers to
+    /ai/intelligence/plan's specific "analyses by category" structure, which
+    this widget/grid prompt does not have. Reusing it verbatim here dangled a
+    reference to a section that does not exist in this prompt -- confusing
+    boilerplate a smaller model can misread, at worst degrading unrelated
+    single-table output. With no evidence there is nothing to floor, so this
+    returns "" rather than injecting text that fits a different prompt shape.
+    """
+    if not has_relationship_evidence:
+        return ""
+    return (
+        "The RELATIONSHIP EVIDENCE list above is non-empty: include at least "
+        "one widget built as an EXPLICIT JOIN across those verified keys (see "
+        "the join exception above) whenever the data supports a genuine "
+        "cross-table insight -- do not restrict every widget to a single "
+        "table just because most of them are.\n"
+    )
 
 
 @router.post("/dashboard/suggest", response_model=SuggestDashboardResponse)
@@ -125,16 +155,41 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
     kg_block = format_knowledge_graph_context(req.knowledge_graph_context)
     kg_prompt_block = f"{kg_block}\n\n" if kg_block else ""
 
+    # With relationship evidence in play, the flat "Do NOT write JOINs" rule
+    # would contradict (and, sitting later in the prompt, override) the
+    # cross-table exception -- swap in the exception-aware variant, exactly
+    # as /ai/intelligence/plan already does. Without evidence this is
+    # byte-identical to the original single-table rules.
+    relationship_lines = _build_relationship_hint_lines(req.relationship_hints)
+    teiid_rules = (
+        _TEIID_RULES_HEADER + _TEIID_JOIN_EXCEPTION_RULE + _TEIID_RULES_COMMON
+        if relationship_lines
+        else _TEIID_SQL_RULES
+    )
+    relationship_floor = _dashboard_relationship_floor_line(bool(relationship_lines))
+
     prompt = (
+        # best_practices_block first: it is the single largest block (the
+        # full dashboard_best_practices.md reference, ~19k chars/~5.5k
+        # tokens -- over half of _fit_plan_prompt's entire trim budget) and
+        # the LEAST request-specific -- static guidance, identical on every
+        # call. _fit_plan_prompt trims from the front, so whatever sits
+        # first is sacrificed first. Putting it ahead of context_text means
+        # an oversized prompt trims generic policy text before it ever
+        # touches the project's actual schema -- previously reversed: the
+        # per-project schema (which columns this SPECIFIC dashboard's SQL
+        # needs) was first in line to be cut while the same boilerplate
+        # every request shares was protected near the tail.
+        f"{best_practices_block}"
         f"{context_text}\n\n"
         f"{kg_prompt_block}"
-        f"{best_practices_block}"
         f"Allowed tables (use ONLY these exact names): {', '.join(allowed_tables)}\n\n"
         "CRITICAL: every widget's SQL must reference ONLY the allowed tables "
         "above. Never invent or assume any other table (e.g. Sales, Product, "
         "Customers).\n\n"
-        f"{_TEIID_SQL_RULES}\n"
-        f"{user_instruction}\n"
+        f"{teiid_rules}\n"
+        f"{relationship_lines}"
+        f"{relationship_floor}\n"
         "Think like a senior business analyst and KPI strategist. Do NOT start "
         "by making charts. First decide what a well-run company in this domain "
         "should monitor, where the risk or opportunity is, and which insights "
@@ -168,11 +223,17 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
         "SQL rules: read-only, never SELECT *, give every selected expression a "
         "stable alias, and make label_column / value_column / value_column_2 / "
         "series_column / target_column EXACTLY match aliases in the SELECT list. "
-        "Query a single allowed table per widget (no JOINs).\n\n"
+        + (
+            "Query a single allowed table per widget, with the documented "
+            "join exception above.\n\n"
+            if relationship_lines
+            else "Query a single allowed table per widget (no JOINs).\n\n"
+        ) +
         "Layout: 12-column grid. Put the highest-priority executive KPIs in the "
         "top row, place related charts near each other, give trend/table/heatmap/"
         "waterfall charts more width (gridW 8-12), and create a clear top-left to "
         "bottom-right reading path. Aim for 4-8 strong widgets.\n\n"
+        f"{user_instruction}\n"
         "Return ONLY a JSON object:\n"
         "{\n"
         '  "title": "specific, descriptive dashboard name (never generic like AI Dashboard)",\n'
@@ -209,11 +270,39 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
         "prose, no markdown, no code fences. Begin with { and end with }."
     )
 
+    # Trim the prompt from the front while preserving the output-format
+    # instructions at the tail, and reserve real output budget explicitly.
+    # A large project (many saved queries/dashboards/scopes/datasources) can
+    # otherwise fill vLLM's whole context window with prompt, leaving a
+    # reasoning model just enough room to think and none to answer -- a
+    # confirmed live failure mode (0 widgets, every time, on a large project).
+    #
+    # This endpoint's per-widget schema is far richer than suggest-multi's
+    # (~20 fields: reference_lines, validation_expectations, grid layout,
+    # etc. vs. 6), so even one plan's worth of 4-8 widgets can need more than
+    # 2048 tokens -- and this is the endpoint the final "Create dashboard"
+    # step actually calls to build the saved dashboard, so a truncated
+    # response here silently drops widgets (or leaves one mid-generation,
+    # e.g. a JOIN cut off before its ON clause) exactly like the confirmed
+    # suggest-multi truncation, just for the saved dashboard instead of the
+    # review preview.
+    logger.info(
+        "dashboard suggest prompt len=%d (pre-fit) tenant=%s project=%s",
+        len(prompt), req.tenant_id, req.project_id,
+    )
+    prompt = _fit_plan_prompt(
+        prompt, _DASHBOARD_INSIGHT_SYSTEM_PROMPT, max_tokens=3072
+    )
+    logger.info(
+        "dashboard suggest prompt len=%d (post-fit) tenant=%s project=%s",
+        len(prompt), req.tenant_id, req.project_id,
+    )
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt=_DASHBOARD_INSIGHT_SYSTEM_PROMPT,
         model=req.model or settings.sql_model,
         temperature=0.3,
+        max_tokens=3072,
         # Larger window so the injected dashboard_best_practices reference fits
         # alongside the project context without truncation.
         num_ctx=24576,
@@ -240,7 +329,7 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
         for w in s.get("widgets", []):
             sql = w.get("sql")
             if sql:
-                w["sql"] = _clean_sql(sql)
+                w["sql"] = _ensure_group_by(_clean_sql(sql))
                 try:
                     validate_sql(w["sql"], allowed_tables)
                 except SQLValidationError as e:
@@ -327,14 +416,28 @@ async def suggest_dashboards_multi(
     kg_block = format_knowledge_graph_context(req.knowledge_graph_context)
     kg_prompt_block = f"{kg_block}\n\n" if kg_block else ""
 
+    # Same exception-aware swap /ai/intelligence/plan and /dashboard/suggest
+    # use: without relationship evidence this is byte-identical to the
+    # original single-table rule, so plans without a discovered join are
+    # unaffected.
+    relationship_lines = _build_relationship_hint_lines(req.relationship_hints)
+    table_rule = _TEIID_RULES_HEADER + (
+        _TEIID_JOIN_EXCEPTION_RULE if relationship_lines else _TEIID_SINGLE_TABLE_RULE
+    )
+    relationship_floor = _dashboard_relationship_floor_line(bool(relationship_lines))
+
     prompt = (
+        # See suggest_dashboard's identical reordering: best_practices_block
+        # is the largest block (~19k chars) and the least request-specific
+        # (static, identical every call), so it goes first -- _fit_plan_
+        # prompt trims from the front, and the project's actual schema in
+        # context_text needs to survive that far more than boilerplate does.
+        f"{best_practices_block}"
         f"{context_text}\n\n"
         f"{kg_prompt_block}"
-        f"{best_practices_block}"
         f"Allowed tables (use ONLY these exact names): {', '.join(allowed_tables)}\n\n"
         f"{audience_line}"
         f"{kpi_line}"
-        f"{user_instruction}\n"
         f"Propose {desired} DISTINCT, non-overlapping dashboard PLANS a senior "
         "analyst would build for this project. Each plan must target a different "
         "business theme, audience, or decision (e.g. executive overview, supplier "
@@ -349,6 +452,7 @@ async def suggest_dashboards_multi(
         "real KPI references.\n"
         "- Reference Library documents are authoritative guidance, NOT data "
         "sources: never list a reference document as a data source.\n"
+        f"{table_rule}"
         "- 3-6 widgets per plan. Each chart/table/KPI widget MUST include a "
         "complete, runnable SQL query grounded in the allowed tables/columns "
         "above so the dashboard can render real data. Use exact table and column "
@@ -358,6 +462,9 @@ async def suggest_dashboards_multi(
         "value_column (numeric/y axis) from the SELECT list.\n"
         "- A narrative/risk/gap widget (chart_type 'narrative_insight') has an "
         "empty sql; use these sparingly and prefer real data widgets.\n\n"
+        f"{relationship_lines}"
+        f"{relationship_floor}\n"
+        f"{user_instruction}\n"
         f"Return ONLY a JSON object with at least {desired} suggestions:\n"
         "{\n"
         '  "suggestions": [ {\n'
@@ -378,11 +485,37 @@ async def suggest_dashboards_multi(
         "prose, no markdown, no code fences. Begin with { and end with }."
     )
 
+    # See suggest_dashboard's identical fit call: a large project can fill
+    # vLLM's whole context window with prompt, leaving a reasoning model no
+    # room to answer -- a confirmed live failure mode on this endpoint.
+    #
+    # max_tokens is double suggest_dashboard's: this endpoint emits up to
+    # `desired` (>= 3) full plans in one JSON response, not one -- 2048
+    # matched suggest_dashboard's single-plan budget but was confirmed live
+    # to truncate a multi-widget request here (5 named charts came back as
+    # 2 widgets even once the prompt-trimming fix landed and context
+    # trimming was ruled out; a 1-widget isolated request of the same shape
+    # succeeded fully). _repair_truncated_json silently salvages whatever
+    # completed before the cutoff, so a too-small budget here looks
+    # identical to bad grounding rather than what it actually is: the
+    # response ran out of room mid-plan.
+    logger.info(
+        "dashboard suggest-multi prompt len=%d (pre-fit) tenant=%s project=%s",
+        len(prompt), req.tenant_id, req.project_id,
+    )
+    prompt = _fit_plan_prompt(
+        prompt, _DASHBOARD_INSIGHT_SYSTEM_PROMPT, max_tokens=4096
+    )
+    logger.info(
+        "dashboard suggest-multi prompt len=%d (post-fit) tenant=%s project=%s",
+        len(prompt), req.tenant_id, req.project_id,
+    )
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt=_DASHBOARD_INSIGHT_SYSTEM_PROMPT,
         model=req.model or settings.sql_model,
         temperature=0.4,
+        max_tokens=4096,
         num_ctx=24576,
         response_format="json",
         ollama_url=req.ollama_url,
@@ -412,7 +545,7 @@ async def suggest_dashboards_multi(
                 # Clean + validate against the allowed tables. Drop widgets whose
                 # SQL references tables outside the project (hallucinated/reference
                 # docs); narrative widgets (empty sql) are always kept.
-                sql = _clean_sql(sql)
+                sql = _ensure_group_by(_clean_sql(sql))
                 try:
                     validate_sql(sql, allowed_tables)
                 except SQLValidationError as e:

@@ -47,7 +47,7 @@ export type VisualizationOptions = {
   showLabels?: boolean;
   showGrid?: boolean;
   tinyMode?: boolean;
-  colorScheme?: "tablescope" | "ocean" | "forest" | "warm" | "monochrome";
+  colorScheme?: "operational_insight" | "tablescope" | "ocean" | "forest" | "warm" | "monochrome";
   legendPosition?: "top" | "bottom" | "left" | "right" | "none";
   showTooltip?: boolean;
   // Axis & formatting
@@ -95,6 +95,8 @@ export type VisualizationOptions = {
   signedPercentAxis?: boolean;
   percentChangeTooltip?: boolean;
   comparisonLabel?: string;
+  /** Defines whether an increase or decrease is a favorable KPI outcome. */
+  favorableDirection?: "higher" | "lower" | "neutral";
   // Radar / Radial bar
   domainMin?: number;
   domainMax?: number;
@@ -203,6 +205,7 @@ export type WidgetConfig = {
   type: WidgetType;
   chartSubtype?: ChartSubtype;
   title: string;
+  templateMetricKey?: string;
   dataSource: WidgetDataSource;
   // Axis & Aggregation
   xColumn: string;
@@ -251,6 +254,14 @@ export type DashboardFilter = {
 export type DashboardConfig = {
   widgets: WidgetConfig[];
   globalFilters?: DashboardFilter[];
+  /** Shared visual language used by template-created dashboards. */
+  presentation?: "operational_insight";
+  /** Template collection, group, icon and parameter bindings. */
+  dashboardTemplate?: Record<string, unknown>;
+  /** Reusable AI-managed narrative widgets rendered above the chart grid. */
+  operationalWidgets?: Array<Record<string, unknown>>;
+  templateBindingId?: number;
+  dashboardGroupId?: number;
 };
 
 export type Dashboard = {

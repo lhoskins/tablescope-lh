@@ -21,6 +21,7 @@ interface CurrentUserResponse {
   company_logo_url: string | null;
   voice_input_enabled: boolean;
   chat_attachments_enabled: boolean;
+  servicenow_itsm_dashboards_v2_enabled: boolean;
   permissions: string[] | null;
 }
 
@@ -89,6 +90,7 @@ export function useCurrentUser() {
           logoUrl: absoluteUrl(me.company_logo_url),
           voiceInputEnabled: me.voice_input_enabled,
           chatAttachmentsEnabled: me.chat_attachments_enabled,
+          servicenowItsmDashboardsV2Enabled: me.servicenow_itsm_dashboards_v2_enabled,
         },
       };
     },

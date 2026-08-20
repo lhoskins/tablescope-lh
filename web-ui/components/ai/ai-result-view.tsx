@@ -25,6 +25,10 @@ function toNumber(value: unknown): number | null {
   return null;
 }
 
+export function isNumeric(value: unknown): boolean {
+  return toNumber(value) !== null;
+}
+
 /** Build a renderable chart from result rows + the suggested visualization. */
 export function buildChart(
   columns: string[],
@@ -94,50 +98,173 @@ export function ResultChart({
   );
 }
 
-export function ResultTable({
+export function rankVisualizations(
+  columns: string[],
+  rows: Record<string, unknown>[],
+  defaultViz?: SuggestedVisualization,
+): { viz: SuggestedVisualization; label: string }[] {
+  if (!columns.length || !rows.length) {
+    return [{ viz: { type: "table" }, label: "Table" }];
+  }
+  const numericCols = columns.filter(
+    (c) =>
+      rows.filter((r) => isNumeric(r[c])).length >= Math.max(1, rows.length / 2),
+  );
+  const valueCol = numericCols[0];
+  const labelCol = columns.find((c) => c !== valueCol) ?? columns[0];
+  const candidates: { viz: SuggestedVisualization; label: string }[] = [
+    { viz: { type: "table" }, label: "Table" },
+  ];
+  if (rows.length === 1 && valueCol) {
+    candidates.push({
+      viz: { type: "kpi", metricField: valueCol },
+      label: "KPI",
+    });
+  }
+  if (valueCol && columns.length >= 2) {
+    const base = { xField: labelCol, yField: valueCol };
+    candidates.push({ viz: { type: "bar", ...base }, label: "Bar" });
+    candidates.push({ viz: { type: "line", ...base }, label: "Line" });
+    candidates.push({ viz: { type: "pie", ...base }, label: "Pie" });
+  }
+  if (defaultViz) {
+    const existing = candidates.find((c) => c.viz.type === defaultViz.type);
+    if (existing) {
+      candidates.splice(candidates.indexOf(existing), 1);
+      candidates.unshift(existing);
+    } else {
+      candidates.unshift({
+        viz: defaultViz,
+        label: defaultViz.type[0].toUpperCase() + defaultViz.type.slice(1),
+      });
+    }
+  }
+  return candidates;
+}
+
+export function ChartOptions({
   columns,
   rows,
+  value,
+  onChange,
 }: {
   columns: string[];
   rows: Record<string, unknown>[];
+  value: SuggestedVisualization;
+  onChange: (viz: SuggestedVisualization) => void;
 }) {
-  if (!columns.length || !rows.length) {
-    return (
-      <p className="py-6 text-center text-[13px] text-ink-tertiary">
-        The query ran but returned no rows.
-      </p>
-    );
-  }
+  const candidates = rankVisualizations(columns, rows, value);
   return (
-    <div className="max-h-[320px] overflow-auto rounded-md border border-line-tertiary">
-      <table className="w-full border-collapse text-[12px]">
-        <thead className="sticky top-0 bg-bg-secondary">
-          <tr>
-            {columns.map((c) => (
-              <th
-                key={c}
-                className="border-b border-line-tertiary px-2 py-1.5 text-left font-medium text-ink-secondary"
-              >
-                {c}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.slice(0, 100).map((row, ri) => (
-            <tr key={ri}>
+    <label className="flex items-center gap-2 text-[12px] text-ink-secondary">
+      Chart options:
+      <select
+        value={value.type}
+        onChange={(event) => {
+          const selected = candidates.find((c) => c.viz.type === event.target.value);
+          if (selected) onChange(selected.viz);
+        }}
+        className="h-7 rounded-md border border-line-secondary bg-bg-primary px-2 text-xs text-ink-primary focus:border-brand-500 focus:outline-none"
+      >
+        {candidates.map((candidate) => (
+          <option key={candidate.viz.type} value={candidate.viz.type}>
+            {candidate.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+export function ResultTable({
+  columns,
+  rows,
+  total,
+  page = 0,
+  pageSize = 100,
+  onPageChange,
+  loading,
+}: {
+  columns: string[];
+  rows: Record<string, unknown>[];
+  total?: number;
+  page?: number;
+  pageSize?: number;
+  onPageChange?: (page: number) => void;
+  loading?: boolean;
+}) {
+  if (!columns.length) return null;
+  const rowTotal = total ?? rows.length;
+  const hasRows = rowTotal > 0;
+  const pageCount = Math.max(1, Math.ceil(rowTotal / pageSize));
+  const start = page * pageSize + 1;
+  const end = Math.min((page + 1) * pageSize, rowTotal);
+  const displayRows = onPageChange ? rows : rows.slice(page * pageSize, (page + 1) * pageSize);
+
+  return (
+    <div className="rounded-md border border-line-tertiary">
+      <div className="max-h-[320px] overflow-auto">
+        <table className="w-full border-collapse text-[12px]">
+          <thead className="sticky top-0 bg-bg-secondary">
+            <tr>
               {columns.map((c) => (
-                <td
+                <th
                   key={c}
-                  className="border-b border-line-tertiary/60 px-2 py-1.5 text-ink-primary"
+                  className="border-b border-line-tertiary px-2 py-1.5 text-left font-medium text-ink-secondary"
                 >
-                  {row[c] == null ? "" : String(row[c])}
-                </td>
+                  {c}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {displayRows.map((row, ri) => (
+              <tr key={ri}>
+                {columns.map((c) => (
+                  <td
+                    key={c}
+                    className="border-b border-line-tertiary/60 px-2 py-1.5 text-ink-primary"
+                  >
+                    {row[c] == null ? "" : String(row[c])}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!hasRows && !loading && (
+        <p className="py-6 text-center text-[13px] text-ink-tertiary">
+          The query ran but returned no rows.
+        </p>
+      )}
+      {hasRows && onPageChange && (
+        <div className="flex items-center justify-between gap-2 border-t border-line-tertiary px-3 py-2 text-[12px] text-ink-secondary">
+          <span>
+            {start}-{end} of {rowTotal}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={page <= 0 || loading}
+              onClick={() => onPageChange(page - 1)}
+              className="rounded-md border border-line-secondary px-2 py-1 text-xs disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <span>
+              Page {page + 1} of {pageCount}
+            </span>
+            <button
+              type="button"
+              disabled={page >= pageCount - 1 || loading}
+              onClick={() => onPageChange(page + 1)}
+              className="rounded-md border border-line-secondary px-2 py-1 text-xs disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

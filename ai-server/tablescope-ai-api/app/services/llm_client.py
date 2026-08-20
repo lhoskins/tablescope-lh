@@ -59,10 +59,38 @@ async def _generate_openai(
             f"{target_url}/chat/completions",
             json=payload,
         )
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError:
+            # raise_for_status() alone discards the response body, so a vLLM
+            # rejection (e.g. requested max_tokens + prompt tokens exceeding
+            # max_model_len) surfaced as a bare "400 Bad Request" with no
+            # explanation anywhere in the logs. Log the body before
+            # re-raising so the cause is visible without reproducing the
+            # call by hand against the model server.
+            logger.error(
+                "vLLM target %s rejected the request (%s): %s",
+                target_url, resp.status_code, resp.text[:1000],
+            )
+            raise
         data = resp.json()
         message = data["choices"][0]["message"]
-        content = message.get("content") or message.get("reasoning") or ""
+        content = message.get("content") or ""
+        if not content and message.get("reasoning"):
+            # A reasoning model (e.g. muse-glimmer) returns "reasoning" and
+            # "content" as separate fields. When content comes back empty the
+            # model spent its completion on the reasoning channel and never
+            # emitted an answer -- falling back to the reasoning trace here
+            # used to hand a paraphrase of the prompt to callers expecting
+            # JSON, guaranteeing a downstream parse failure that looked like
+            # malformed output rather than what it actually was: no output.
+            # Log it for diagnosis and return empty so that failure is honest.
+            logger.warning(
+                "vLLM target %s returned no content, only reasoning (%d chars); "
+                "treating as an empty completion",
+                target_url,
+                len(str(message.get("reasoning") or "")),
+            )
         text = str(content)
         # Muse Glimmer emits channel-scoped messages (to=self reasoning,
         # assistant to=user final answer). When the vLLM parser does not split
@@ -134,6 +162,21 @@ async def generate(
     target_url = (ollama_url or settings.ollama_url).rstrip("/")
 
     if _is_openai_target(target_url):
+        # vLLM/OpenAI-compatible targets have no per-request context-window
+        # override -- max_model_len is fixed by the server at startup, unlike
+        # Ollama's num_ctx -- so num_ctx has no meaningful translation here
+        # and is intentionally left unused for this path.
+        #
+        # A prior version of this function derived an explicit max_tokens
+        # from num_ctx (halved and capped at 4096) to try to guarantee
+        # reasoning models a completion budget. That is unsafe: ai-server has
+        # no tokenizer, so it cannot know the actual prompt token count, and
+        # vLLM rejects prompt_tokens + max_tokens > max_model_len with a 400
+        # rather than truncating -- turning a large prompt's soft failure
+        # (empty content, 0 widgets) into a hard 500 on every call. Passing
+        # max_tokens through unset (the caller's default) lets vLLM size the
+        # completion itself from the real prompt it just tokenized, which is
+        # strictly safer than any client-side guess.
         return await _generate_openai(
             prompt=prompt,
             system_prompt=system_prompt,
@@ -208,6 +251,53 @@ _TEIID_RULES = (
     "unless the user explicitly asks to combine rows from two different tables. "
     "Never place ORDER BY inside a UNION branch; in Teiid ORDER BY is only "
     "valid at the very end of the entire query.\n"
+    "17. If the user asks for a specific display format (currency/dollars, "
+    "percentage, etc.) for a value, alias that column so its name reflects "
+    "the requested format instead of adding SQL formatting functions — e.g. "
+    "alias a dollar amount as ...USD or TotalRevenueUSD, alias a percentage "
+    "as ...Percent or DefectRatePercent. The alias is used downstream to "
+    "render the value correctly.\n"
+    "18. Translate plain-language grouping phrases directly into GROUP BY: "
+    "'group by X', 'broken down by X', 'per X', and 'for each X' all mean "
+    "GROUP BY <X's column>, added to both SELECT and GROUP BY (see rule 9).\n"
+    "19. Translate plain-language value-mapping phrases into a CASE WHEN "
+    "expression: 'if <column> is/contains/equals <text> then <label>' "
+    "becomes CASE WHEN LOWER(\"Column\") = LOWER('text') THEN 'label' ... "
+    "ELSE ... END (case-insensitive per rule 13). Alias the CASE expression "
+    "with a descriptive name.\n"
+)
+
+# Default: no cross-table JOINs (many tables share column names, causing
+# ambiguity errors). Swapped for _TEIID_JOIN_EXCEPTION_RULE only when the
+# caller supplies verified relationship_hint_lines (from platform-api's
+# _relationship_hints, rendered by ai_plan_prompt._build_relationship_hint_lines).
+# Mirrors ai_shared.py's dashboard-pipeline single-table/join-exception
+# pattern, defined locally here since this service module must not import
+# the router layer.
+_TEIID_NO_JOIN_RULE = (
+    "JOIN POLICY: Query a SINGLE table per analysis. Do NOT write JOINs. "
+    '(Many tables share column names like "SupplierID" — joining causes '
+    "ambiguity errors. One table per query avoids this entirely.)\n"
+)
+
+_TEIID_JOIN_EXCEPTION_RULE = (
+    "JOIN POLICY: Query a SINGLE table per analysis, with ONE exception: a "
+    "cross-table analysis may JOIN exactly the two tables of a pair listed "
+    "in RELATIONSHIP EVIDENCE below, on exactly the listed keys. Alias both "
+    'tables and table-qualify EVERY column reference (e.g. i."DefectQty", '
+    's."Region") — many tables share column names and an unqualified column '
+    "in a join is an ambiguity error. Reference ONLY columns listed under "
+    "the table(s) you actually use.\n"
+)
+
+# Used by repair_sql when the failing query already joins two tables (a
+# caller-verified cross-table analysis): keep the repair from "fixing" the
+# join away.
+_TEIID_FIX_JOIN_RULE = (
+    "This query intentionally JOINs two tables (a verified relationship). "
+    "KEEP the same two tables and the same join keys — do NOT rewrite it as "
+    "a single-table query and do NOT add more tables. Alias both tables and "
+    "table-qualify EVERY column reference to avoid ambiguity errors.\n"
 )
 
 _SEMANTIC_RULES = (
@@ -290,12 +380,16 @@ async def generate_sql(
     source_catalog: list[Any] | None = None,
     preferred_sources: list[str] | None = None,
     relevant_columns: list[str] | None = None,
+    relationship_hint_lines: str = "",
     model: str | None = None,
     ollama_url: str | None = None,
 ) -> str:
     """Generate SQL using the code-specialized model with semantic discovery."""
     catalog = _catalog_text(allowed_tables, source_catalog)
     hint = _resolver_hint(preferred_sources, relevant_columns)
+    join_rule = (
+        _TEIID_JOIN_EXCEPTION_RULE if relationship_hint_lines else _TEIID_NO_JOIN_RULE
+    )
     system_prompt = (
         "You are Tablescope AI.\n"
         "You may only answer using the provided context package.\n"
@@ -314,9 +408,11 @@ async def generate_sql(
         "documents are guidance only — never use a reference document as a SQL "
         "data source.\n\n"
         f"{_SEMANTIC_RULES}\n"
-        f"{_TEIID_RULES}\n"
+        f"{_TEIID_RULES}"
+        f"{join_rule}\n"
         f"{hint}"
-        f"{catalog}\n\n"
+        f"{catalog}\n"
+        f"{relationship_hint_lines}\n\n"
         f"Context:\n{context}"
     )
 
@@ -340,12 +436,20 @@ async def repair_sql(
     source_catalog: list[Any] | None = None,
     preferred_sources: list[str] | None = None,
     relevant_columns: list[str] | None = None,
+    relationship_hint_lines: str = "",
     model: str | None = None,
     ollama_url: str | None = None,
 ) -> str:
     """Ask the model to fix SQL that failed validation, preserving intent."""
     catalog = _catalog_text(allowed_tables, source_catalog)
     hint = _resolver_hint(preferred_sources, relevant_columns)
+    # If the failing SQL already joins tables, a verified relationship exists
+    # (the caller only passes hints when it found one) — keep the join intact
+    # instead of "fixing" it back to single-table. Otherwise reaffirm the
+    # default no-join policy so repair can't introduce an ungrounded join.
+    join_rule = (
+        _TEIID_FIX_JOIN_RULE if relationship_hint_lines else _TEIID_NO_JOIN_RULE
+    )
     system_prompt = (
         "You are Tablescope AI repairing a SQL query that failed validation.\n"
         "Fix the SQL so it passes, while preserving the user's analytical intent.\n"
@@ -359,9 +463,11 @@ async def repair_sql(
         "- If no authorized source can satisfy the request, return exactly "
         "'NEED_CLARIFICATION'.\n"
         "Return ONLY the corrected SQL, no explanation.\n\n"
-        f"{_TEIID_RULES}\n"
+        f"{_TEIID_RULES}"
+        f"{join_rule}\n"
         f"{hint}"
-        f"{catalog}\n\n"
+        f"{catalog}\n"
+        f"{relationship_hint_lines}\n\n"
         f"Context:\n{context}"
     )
     repair_prompt = (

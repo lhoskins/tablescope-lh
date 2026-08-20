@@ -46,6 +46,7 @@ from .ai_proxy_shared import (
     _check_project_access,
     _detect_datasource,
     _kg_context,
+    _relationship_hints,
     _shorten_ai_name,
 )
 
@@ -460,7 +461,13 @@ async def _generate_sql_for_question(
         FileSourceMeta.archived.is_(False),
     )
     ds_result = await session.execute(ds_stmt)
-    allowed_tables = [ds.view_name for ds in ds_result.scalars()]
+    sources = list(ds_result.scalars())
+    allowed_tables = [ds.view_name for ds in sources]
+    # Evidence-backed join candidates (same discovery engine the dashboard
+    # pipeline uses) -- lets a query combine measures that live in separate
+    # sources (e.g. actuals vs. a forecast table) instead of being
+    # restricted to one table with no way to express that.
+    relationship_hints = _relationship_hints(sources)
 
     source_catalog = await _build_source_catalog(
         session, tenant_id=context.tenant_id, project_id=project_id
@@ -477,6 +484,7 @@ async def _generate_sql_for_question(
             relevant_columns=relevant_columns or [],
             knowledge_graph_context=await _kg_context(session, context, project_id),
             grounding_evidence=grounding_evidence,
+            relationship_hints=relationship_hints,
         )
     except ai.AIUnavailableError as exc:
         raise HTTPException(

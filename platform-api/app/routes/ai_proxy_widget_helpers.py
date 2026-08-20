@@ -71,6 +71,7 @@ _CHART_TYPE_MAP: dict[str, tuple[str, str]] = {
     "bullet": ("bar", "horizontal_bar"),
     "line": ("line", ""),
     "dual_line": ("line", "biaxial_line"),
+    "combo": ("combo", "bar_line"),
     "area": ("area", ""),
     "pie": ("pie", ""),
     "donut": ("pie", "donut"),

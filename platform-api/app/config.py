@@ -165,6 +165,11 @@ class Settings(BaseSettings):
     # Business Context (Goal Setting) workspace feature flags.
     business_context_v2_enabled: bool = True
     business_context_kpi_matching_enabled: bool = True
+
+    # --- ServiceNow ITSM dashboards v2 ---
+    # Global master switch. Roll out per tenant after the preset dashboards pass
+    # regression and visual review.
+    servicenow_itsm_dashboards_v2_enabled: bool = False
     # Max projects analysed concurrently by the Home intelligence SSE stream.
     # Bounds AI/Ollama load so a large project count doesn't flood the server
     # and silently time out into empty "0 insights" results.

@@ -97,7 +97,9 @@ export function AppShell({
               className={
                 centered
                   ? "mx-auto w-full min-w-0 max-w-content px-5 py-6"
-                  : "min-w-0 px-5 py-5"
+                  : scrollable
+                    ? "min-w-0 px-5 py-5"
+                    : "flex h-full min-h-0 min-w-0 flex-col px-5 py-5"
               }
             >
               {topBarRight && (

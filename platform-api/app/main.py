@@ -36,6 +36,7 @@ from app.routes import (
     conversational_analytics_conversations as conversational_analytics_conversations_routes,
 )
 from app.routes import conversational_analytics_turns as conversational_analytics_turns_routes
+from app.routes import dashboard_templates as dashboard_templates_routes
 from app.routes import dashboards_crud as dashboards_crud_routes
 from app.routes import dashboards_widget_query as dashboards_widget_query_routes
 from app.routes import data_source_assignments as data_source_assignments_routes
@@ -66,6 +67,7 @@ from app.routes import insight_chart_selection as insight_chart_selection_routes
 from app.routes import insight_feedback_crud as insight_feedback_crud_routes
 from app.routes import insight_feedback_review as insight_feedback_review_routes
 from app.routes import internal_file_proxy as internal_file_proxy_routes
+from app.routes import itsm_dashboards as itsm_dashboards_routes
 from app.routes import knowledge_graph as knowledge_graph_routes
 from app.routes import llm_framework_artifacts as llm_framework_artifacts_routes
 from app.routes import llm_framework_catalog as llm_framework_catalog_routes
@@ -118,6 +120,7 @@ from app.routes import users as users_routes
 from app.services.connection_pool import pool_manager
 from app.services.llm_framework import ensure_primary_runtime_target_registered
 from app.services.project_context import ProjectContextConcurrencyError
+from app.services.vdb_warming import warm_vdb
 
 logger = logging.getLogger(__name__)
 
@@ -256,12 +259,108 @@ async def _warm_all_vdbs_on_startup() -> None:
         ]
         logger.info("Pre-warming %d active VDB pools", len(vdbs))
 
-        # Pre-warming every VDB's pg_catalog was serializing connections to the
-        # single Teiid PG port and making user queries time out. Pools are now
-        # warmed lazily on first use by pool_manager; skip the startup storm.
-        logger.info("Skipping VDB pool pre-warm; %d pools will warm lazily", len(vdbs))
+        # Pre-warm is best-effort background work; it must never block
+        # application startup. Warm each VDB's pg_catalog with a cheap
+        # SELECT 1. We intentionally skip per-view warming: touching every
+        # MyCompany view (especially remote CSV-backed ones) fetches files and
+        # can overwhelm the single Teiid container without improving steady-state
+        # query performance.
+        semaphore = asyncio.Semaphore(1)
+
+        async def _warm_one(v: dict) -> None:
+            async with semaphore:
+                await warm_vdb(
+                    v["vdb_id"],
+                    vdb_host=v["host"],
+                    vdb_port=v["port"],
+                    connect_timeout=60.0,
+                    timeout=60.0,
+                    warm_views=False,
+                    max_concurrent_views=1,
+                    max_attempts=3,
+                    retry_delay=5.0,
+                )
+
+        async def _background_warm() -> None:
+            await asyncio.gather(
+                *[_warm_one(v) for v in vdbs],
+                return_exceptions=True,
+            )
+            logger.info("VDB pool pre-warm complete")
+
+        # Best-effort background warm; fire-and-forget is intentional here.
+        asyncio.create_task(_background_warm())  # noqa: RUF006
     except Exception as exc:
         logger.warning("VDB pool pre-warm failed: %s", exc)
+
+
+async def _warm_itsm_dashboards_on_startup(warm_vdbs_task: asyncio.Task) -> None:
+    """Pre-compute ITSM dashboard caches after VDB pools are warm.
+
+    Keeps the cache hot by re-warming on a schedule; the Teiid result-set
+    cache hint means subsequent warm cycles are cheap once the first pass is
+    complete. We limit concurrency to avoid swamping the single Teiid node.
+    """
+    await asyncio.sleep(30)  # Let other startup work finish first
+    await warm_vdbs_task
+
+    from sqlalchemy import select
+
+    from app.database import SessionLocal
+    from app.models.project import Project
+    from app.models.tenant import Tenant
+    from app.services.itsm_metrics import list_dashboards, warm_itsm_dashboards_for_project
+
+    try:
+        async with SessionLocal() as session:
+            rows = (
+                await session.execute(
+                    select(Project.id, Project.tenant_id, Project.owner_id)
+                    .join(Tenant, Project.tenant_id == Tenant.id)
+                    .where(
+                        Tenant.servicenow_itsm_dashboards_v2_enabled.is_(True),
+                        Project.owner_id.isnot(None),
+                    )
+                )
+            ).all()
+        projects = list(rows)
+    except Exception as exc:
+        logger.warning("Could not enumerate ITSM projects for warm: %s", exc)
+        return
+
+    if not projects:
+        logger.info("No ITSM-enabled projects to warm")
+        return
+
+    presets = list(list_dashboards())
+    warm_interval = 240  # seconds
+    semaphore = asyncio.Semaphore(1)
+
+    async def _warm_one(project_id: int, tenant_id: int, user_id: int) -> None:
+        async with semaphore:
+            try:
+                async with SessionLocal() as session:
+                    await warm_itsm_dashboards_for_project(
+                        session=session,
+                        project_id=project_id,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        presets=presets,
+                    )
+            except Exception as exc:
+                logger.warning("ITSM dashboard warm failed for project %s: %s", project_id, exc)
+
+    async def _warm_all() -> None:
+        while True:
+            logger.info("Warming ITSM dashboards for %d projects", len(projects))
+            await asyncio.gather(
+                *[_warm_one(p, t, u) for p, t, u in projects],
+                return_exceptions=True,
+            )
+            logger.info("ITSM dashboard warm complete; next warm in %ss", warm_interval)
+            await asyncio.sleep(warm_interval)
+
+    await _warm_all()
 
 
 async def _check_kg_snapshot_pipeline_version_on_startup() -> None:
@@ -398,6 +497,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         _check_kg_snapshot_pipeline_version_on_startup()
     )
     warm_vdbs_task = asyncio.create_task(_warm_after_reconcile())
+    warm_itsm_task = asyncio.create_task(_warm_itsm_dashboards_on_startup(warm_vdbs_task))
     try:
         yield
     finally:
@@ -406,6 +506,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         seed_task.cancel()
         kg_pipeline_check_task.cancel()
         warm_vdbs_task.cancel()
+        warm_itsm_task.cancel()
         await pool_manager.close_all()
         logger.info("Platform API shutdown complete")
 
@@ -521,6 +622,8 @@ def create_app() -> FastAPI:
     app.include_router(file_imports_routes.hosts_router, prefix=api_prefix)
     app.include_router(dashboards_crud_routes.router, prefix=api_prefix)
     app.include_router(dashboards_widget_query_routes.router, prefix=api_prefix)
+    app.include_router(dashboard_templates_routes.router, prefix=api_prefix)
+    app.include_router(itsm_dashboards_routes.router, prefix=api_prefix)
     app.include_router(ai_proxy_routes.router, prefix=api_prefix)
     app.include_router(ai_speech_routes.router, prefix=api_prefix)
     app.include_router(ai_governance_routes.router, prefix=api_prefix)

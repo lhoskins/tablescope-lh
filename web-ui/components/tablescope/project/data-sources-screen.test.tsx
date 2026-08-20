@@ -9,6 +9,12 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => "/projects/42/data-sources",
+}));
+
 import { DataSourcesScreen } from "./data-sources-screen";
 import { useProjectDataSources } from "@/lib/ui/use-project-data";
 import type { DataSource } from "@/lib/ui/use-project-data";

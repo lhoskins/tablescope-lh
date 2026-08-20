@@ -33,4 +33,5 @@ import {
 export type QueryResult = {
   columns: string[];
   rows: Record<string, unknown>[];
+  total?: number;
 };

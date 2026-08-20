@@ -175,6 +175,7 @@ async def refresh_project_insight(
     until the rebuild completes.
     """
     project = await _require_project_access(project_id, session, context)
+
     now_iso = datetime.now(UTC).isoformat()
 
     snap = await _get_snapshot(session, context, project_id)

@@ -136,7 +136,7 @@ def _make_runner(
 
     async def runner(sql: str) -> dict[str, Any]:
         ctx_data = await _ensure_ctx()
-        result, _ = await _execute_sql_with_repair(
+        result, _, _ = await _execute_sql_with_repair(
             raw_sql=sql,
             tenant_id=context.tenant_id,
             user_id=context.user_id,

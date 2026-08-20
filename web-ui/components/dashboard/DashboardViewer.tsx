@@ -36,29 +36,95 @@ import type {
 } from "./types";
 import type { QueryScope, QueryScopeFilterResponse } from "@/types/query-scope";
 import { WidgetRenderer } from "./WidgetRenderer";
-import { WidgetConfigPanel } from "./WidgetConfigPanel";
+import { OperationalInsightGrid } from "./OperationalInsightGrid";
+import { WidgetChartOptionsDialog } from "./WidgetChartOptionsDialog";
 import { FilterBar } from "./FilterBar";
 import { DateRangeControl } from "./DateRangeControl";
 import { DrilldownPanel, type DrilldownState } from "./DrilldownPanel";
-import { buildRuntimeWidgetFilters } from "@/lib/dashboard/runtimeFilters";import { SavedQuery } from "./DashboardViewer/saved-query";
+import { buildRuntimeWidgetFilters } from "@/lib/dashboard/runtimeFilters";
+import { SavedQuery } from "./DashboardViewer/saved-query";
 import { Props } from "./DashboardViewer/props";
+import { resolveDatePreset, type DatePresetId } from "@/lib/dashboard/dateRange";
+import type { DashboardTemplateMetadata } from "@/components/tablescope/project/dashboard-templates/types";
+import { DimensionLabelEditor } from "@/components/tablescope/project/dashboard-templates/dimension-label-editor";
+import {
+  AIDashboardDesigner,
+  type DashboardDesignerMode,
+} from "@/components/tablescope/project/ai-dashboard-designer";
+import { ToastViewport, useToasts } from "@/components/ui/toast";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
+function templateMetadata(dashboard: Dashboard): DashboardTemplateMetadata | undefined {
+  const value = dashboard.config?.dashboardTemplate;
+  return value && typeof value === "object" ? (value as unknown as DashboardTemplateMetadata) : undefined;
+}
+
+function normalizedPeriod(period?: string): DatePresetId | undefined {
+  const mapping: Record<string, DatePresetId> = {
+    "30_days": "last_30_days",
+    "60_days": "last_60_days",
+    "90_days": "last_90_days",
+    "6_months": "last_6_months",
+    "1_year": "last_1_year",
+    "2_years": "last_2_years",
+  };
+  return period ? (mapping[period] ?? period) as DatePresetId : undefined;
+}
+
+function bindingPeriod(period: DatePresetId | undefined, fallback = "30_days"): string {
+  const mapping: Partial<Record<DatePresetId, string>> = { last_30_days: "30_days", last_60_days: "60_days", last_90_days: "90_days", last_6_months: "6_months", last_1_year: "1_year", last_2_years: "2_years" };
+  return (period && mapping[period]) || fallback;
+}
+interface TemplateHydration { metrics: Record<string, { value: unknown; previousValue: unknown; deltaPercent: number | null }>; batches: Array<{ metricKeys: string[]; lineage: { kind?: string }; rows: Array<Record<string, unknown>> }>; }
 
 
 export function DashboardViewer({ dashboard, projectId, savedQueries, datasources, onBack, onPersisted, onPinWidget }: Props) {
   const queryClient = useQueryClient();
+  const { toasts, push, dismiss } = useToasts();
   const widgets = useMemo(() => dashboard.config?.widgets ?? [], [dashboard.config?.widgets]);
   const globalFilters = useMemo(() => dashboard.config?.globalFilters ?? [], [dashboard.config?.globalFilters]);
+  const operational = dashboard.config?.presentation === "operational_insight";
+  const operationalWidgets = dashboard.config?.operationalWidgets ?? [];
+  // AI-Designer-created dashboards always carry a decorative "manual"
+  // dimension template with zero bound values (nothing for the picker to
+  // filter by) — hide it rather than show a dropdown that only ever reads
+  // "All {label}". A real template-bound dimension (values present, or
+  // driven by a query) still shows the picker as before.
+  const template = templateMetadata(dashboard);
+  const hasBoundDimension =
+    template?.parameters?.valueSource === "query" ||
+    (template?.parameters?.manualValues?.length ?? 0) > 0;
+  const initialPeriod = normalizedPeriod(template?.parameters.defaultPeriod);
+  const initialResolvedPeriod = initialPeriod ? resolveDatePreset(initialPeriod) : null;
   const { width: containerWidth, containerRef, mounted } = useContainerWidth({
     initialWidth: 1280,
   });
 
   const [widgetData, setWidgetData] = useState<Record<string, Array<Record<string, unknown>>>>({});
-  const [showConfigPanel, setShowConfigPanel] = useState(false);
+  // Read (not reactive-depended-on) by columnNamesForWidget below, so that
+  // callback doesn't have to list `widgetData` as a dependency -- doing so
+  // created a fetch loop (see the comment there).
+  const widgetDataRef = useRef(widgetData);
+  useEffect(() => {
+    widgetDataRef.current = widgetData;
+  }, [widgetData]);
+  const [designerMode, setDesignerMode] = useState<DashboardDesignerMode | null>(null);
   const [dashboardStatus, setDashboardStatus] = useState(dashboard.status);
 
   // Ephemeral interaction state (not persisted): date range + cross-filters.
-  const [runtime, setRuntime] = useState<DashboardRuntimeState>({ dateRange: null, crossFilters: [] });
+  const [runtime, setRuntime] = useState<DashboardRuntimeState>({
+    dateRange: initialPeriod && initialResolvedPeriod
+      ? { preset: initialPeriod, ...initialResolvedPeriod }
+      : null,
+    crossFilters: [],
+  });
+  const [templateOptions, setTemplateOptions] = useState<string[]>(
+    template?.parameters.valueSource === "manual" ? template.parameters.manualValues ?? [] : [],
+  );
+  const [templateField, setTemplateField] = useState(template?.parameters.dimensionLabel ?? "");
+  const [templateValue, setTemplateValue] = useState("");
+  const [dimensionLabel, setDimensionLabel] = useState(template?.parameters.dimensionLabel ?? "Dimension");
+  const [templateOptionsLoading, setTemplateOptionsLoading] = useState(false);
   const [drilldown, setDrilldown] = useState<DrilldownState>({
     open: false, loading: false, error: null, title: "", targetQueryName: null, columns: [], rows: [],
   });
@@ -78,6 +144,13 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   });
   const [editingWidget, setEditingWidget] = useState<WidgetConfig | null>(null);
 
+  const saveDimensionLabel = useCallback(async (nextLabel: string) => {
+    if (!template) return;
+    const nextTemplate = { ...template, parameters: { ...template.parameters, dimensionLabel: nextLabel } };
+    await apiClient.put(`/api/projects/${projectId}/dashboards/${dashboard.id}`, { config: { ...dashboard.config, dashboardTemplate: nextTemplate } });
+    setDimensionLabel(nextLabel); onPersisted?.();
+  }, [dashboard.config, dashboard.id, onPersisted, projectId, template]);
+
   // Collect query IDs referenced by widgets that aren't in the provided savedQueries
   const missingQueryIds = useMemo(() => {
     const ids: number[] = [];
@@ -92,12 +165,17 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   }, [widgets, savedQueries]);
 
   // Fetch missing queries (e.g. AI-generated ones not yet in parent's cache)
-  const { data: fetchedQueries = [] } = useQuery({
+  const { data: fetchedQueriesRaw } = useQuery({
     queryKey: ["missing-queries", projectId, missingQueryIds],
     queryFn: () =>
       apiClient.get<SavedQuery[]>(`/api/projects/${projectId}/queries`),
     enabled: missingQueryIds.length > 0,
   });
+  // A `= []` destructuring default re-allocates a new array every render
+  // while `data` stays undefined (query disabled/pending) -- that instability
+  // was the third contributor to the render loop fixed above, cascading
+  // through allQueries -> fetchWidgetData -> the widget-data fetch effect.
+  const fetchedQueries = useMemo(() => fetchedQueriesRaw ?? [], [fetchedQueriesRaw]);
 
   // Merged list of all queries available to widgets
   const allQueries = useMemo(() => {
@@ -106,6 +184,53 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
     fetchedQueries.forEach((q: SavedQuery) => map.set(q.id, q));
     return Array.from(map.values());
   }, [savedQueries, fetchedQueries]);
+
+  useEffect(() => {
+    const parameters = template?.parameters;
+    if (!parameters || parameters.valueSource !== "query" || !parameters.queryId) return;
+    const query = allQueries.find((item) => item.id === parameters.queryId);
+    if (!query?.sql_text) return;
+    let active = true;
+    setTemplateOptionsLoading(true);
+    const tableMatch = query.sql_text.match(/FROM\s+"?([A-Za-z0-9_]+)"?/i);
+    apiClient.post<{ columns: string[]; rows: Record<string, unknown>[] }>(
+      "/api/query/datasource",
+      {
+        tableName: tableMatch ? tableMatch[1] : "dual",
+        sql: query.sql_text,
+        limit: 500,
+        project_id: projectId,
+      },
+    ).then((response) => {
+      if (!active) return;
+      const field = response.columns?.[0] ?? parameters.dimensionLabel;
+      const values = [...new Set((response.rows ?? []).map((row) => row[field]).filter((value) => value != null).map(String))];
+      setTemplateField(field);
+      setTemplateOptions(values);
+    }).catch(() => {
+      if (active) setTemplateOptions([]);
+    }).finally(() => {
+      if (active) setTemplateOptionsLoading(false);
+    });
+    return () => { active = false; };
+  }, [allQueries, projectId, template]);
+
+  const changeTemplateValue = useCallback((value: string) => {
+    setTemplateValue(value);
+    setRuntime((previous) => ({
+      ...previous,
+      crossFilters: [
+        ...previous.crossFilters.filter((filter) => filter.id !== "template-dimension"),
+        ...(value ? [{
+          id: "template-dimension",
+          sourceWidgetId: "dashboard-template",
+          sourceField: templateField,
+          value,
+          label: `${dimensionLabel || templateField}: ${value}`,
+        }] : []),
+      ],
+    }));
+  }, [dimensionLabel, templateField]);
 
   const viewNames = useMemo(() => {
     const names = new Set<string>();
@@ -130,13 +255,23 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
     })),
   });
 
+  // `useQueries` returns a new array reference every render regardless of
+  // whether any query's data actually changed, so memoizing directly on
+  // `schemaQueries` re-derives `viewColumns` (and everything downstream --
+  // columnNamesForWidget, fetchWidgetData, the widget-data fetch effect)
+  // every render, which re-triggers that effect every render: the same
+  // render-loop class as the widgetData issue fixed above, via a second,
+  // independent path. `dataUpdatedAt` is a stable primitive per query that
+  // only changes when that query's data actually updates.
+  const schemaDataUpdatedAt = schemaQueries.map((q) => q.dataUpdatedAt).join(",");
   const viewColumns = useMemo(() => {
     const map: Record<string, ColumnInfo[]> = {};
     viewNames.forEach((vn, i) => {
       map[vn] = schemaQueries[i]?.data?.columns ?? [];
     });
     return map;
-  }, [viewNames, schemaQueries]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewNames, schemaDataUpdatedAt]);
 
   const allColumns: ColumnInfo[] = useMemo(() => {
     const map = new Map<string, ColumnInfo>();
@@ -147,15 +282,22 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   }, [viewColumns]);
 
   // Known column names for a widget (used for runtime filter compatibility).
+  // Deliberately reads widgetData via the ref above, not as a hook
+  // dependency: this callback feeds into fetchWidgetData below, whose own
+  // effect is what writes widgetData. Depending on the state it writes
+  // created a render loop -- fetch -> setWidgetData -> this callback's
+  // identity changes -> fetchWidgetData's identity changes -> its effect
+  // re-fires -> fetch again, forever. The ref breaks that cycle while still
+  // reading the latest loaded rows when needed.
   const columnNamesForWidget = useCallback((w: WidgetConfig): string[] => {
     if (w.dataSource?.kind === "datasource" && w.dataSource.viewName) {
       const cols = viewColumns[w.dataSource.viewName];
       if (cols && cols.length > 0) return cols.map((c) => c.name);
     }
-    const loaded = widgetData[w.id];
+    const loaded = widgetDataRef.current[w.id];
     if (loaded && loaded.length > 0) return Object.keys(loaded[0]);
     return [];
-  }, [viewColumns, widgetData]);
+  }, [viewColumns]);
 
   const updateMutation = useMutation({
     mutationFn: (body: { config: DashboardConfig }) =>
@@ -240,42 +382,74 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   useEffect(() => {
     const loadAll = async () => {
       const entries = await Promise.all(
-        widgets.map(async (w) => {
+        widgets.filter((w) => !w.templateMetricKey || !template?.bindingId).map(async (w) => {
           const rows = await fetchWidgetData(w);
           return [w.id, rows] as const;
         }),
       );
       const results: Record<string, Array<Record<string, unknown>>> = {};
       for (const [id, rows] of entries) results[id] = rows;
-      setWidgetData(results);
+      setWidgetData((previous) => ({ ...previous, ...results }));
     };
     if (widgets.length > 0) loadAll();
-  }, [widgets, fetchWidgetData]);
+  }, [widgets, fetchWidgetData, template?.bindingId]);
 
-  const handleSaveWidget = (widget: WidgetConfig) => {
-    let updatedWidgets: WidgetConfig[];
-    if (editingWidget) {
-      updatedWidgets = widgets.map((w) => (w.id === editingWidget.id ? { ...widget, position: w.position, gridX: w.gridX, gridY: w.gridY, gridW: widget.gridW ?? w.gridW, gridH: widget.gridH ?? w.gridH } : w));
-    } else {
-      updatedWidgets = [...widgets, { ...widget, position: widgets.length }];
-    }
-    updateMutation.mutate({ config: { widgets: updatedWidgets, globalFilters } });
-    setShowConfigPanel(false);
-    setEditingWidget(null);
-  };
-
-  const handleDeleteWidget = (id: string) => {
-    const updatedWidgets = widgets.filter((w) => w.id !== id);
-    updateMutation.mutate({ config: { widgets: updatedWidgets, globalFilters } });
-  };
+  useEffect(() => {
+    if (!template?.bindingId) return;
+    let active = true;
+    const period = bindingPeriod(runtime.dateRange?.preset as DatePresetId | undefined, template.parameters.defaultPeriod);
+    const selected = templateValue ? `&dimension=${encodeURIComponent(templateValue)}` : "";
+    apiClient.get<TemplateHydration>(`/api/projects/${projectId}/dashboard-template-bindings/${template.bindingId}/hydrate?period=${period}${selected}`).then((hydration) => {
+      if (!active) return;
+      setWidgetData((previous) => {
+        const next = { ...previous };
+        widgets.forEach((widget) => {
+          const key = widget.templateMetricKey; if (!key) return;
+          const metric = hydration.metrics[key];
+          if (widget.type === "kpi") next[widget.id] = [{ [widget.yColumn || "value"]: metric?.value ?? null, previousValue: metric?.previousValue ?? null, deltaPercent: metric?.deltaPercent ?? null }];
+          else { const batch = hydration.batches.find((item) => item.lineage.kind === "dimension" && item.metricKeys.includes(key)); if (batch) next[widget.id] = batch.rows.map((row) => ({ [widget.xColumn || "dimension"]: row.dimension, [widget.yColumn || key]: row[key] })); }
+        });
+        return next;
+      });
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [projectId, runtime.dateRange?.preset, template, templateValue, widgets]);
 
   const handleEditWidget = (w: WidgetConfig) => {
     setEditingWidget(w);
-    setShowConfigPanel(true);
+    setDesignerMode("edit_insight");
   };
 
+  const [chartOptionsWidget, setChartOptionsWidget] = useState<WidgetConfig | null>(null);
+
+  const handleApplyChartOptions = useCallback(
+    (chartType: string, chartSubtype: string | undefined) => {
+      if (!chartOptionsWidget) return;
+      const updatedWidgets = widgets.map((w) =>
+        w.id === chartOptionsWidget.id
+          ? {
+              ...w,
+              type: chartType as WidgetConfig["type"],
+              chartSubtype: chartSubtype as WidgetConfig["chartSubtype"],
+            }
+          : w,
+      );
+      updateMutation.mutate({ config: { ...dashboard.config, widgets: updatedWidgets, globalFilters } });
+    },
+    [chartOptionsWidget, dashboard.config, globalFilters, updateMutation, widgets],
+  );
+
+  const [widgetPendingDelete, setWidgetPendingDelete] = useState<WidgetConfig | null>(null);
+
+  const confirmDeleteWidget = useCallback(() => {
+    if (!widgetPendingDelete) return;
+    const updatedWidgets = widgets.filter((w) => w.id !== widgetPendingDelete.id);
+    updateMutation.mutate({ config: { ...dashboard.config, widgets: updatedWidgets, globalFilters } });
+    setWidgetPendingDelete(null);
+  }, [dashboard.config, globalFilters, updateMutation, widgetPendingDelete, widgets]);
+
   const handleFiltersChange = (newFilters: DashboardFilter[]) => {
-    updateMutation.mutate({ config: { widgets, globalFilters: newFilters } });
+    updateMutation.mutate({ config: { ...dashboard.config, widgets, globalFilters: newFilters } });
   };
 
   // ── Runtime interactions: cross-filter + drilldown ────────────────
@@ -397,8 +571,8 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
       if (!l) return w;
       return { ...w, gridX: l.x, gridY: l.y, gridW: l.w, gridH: l.h };
     });
-    updateMutation.mutate({ config: { widgets: updatedWidgets, globalFilters } });
-  }, [widgets, globalFilters, updateMutation]);
+    updateMutation.mutate({ config: { ...dashboard.config, widgets: updatedWidgets, globalFilters } });
+  }, [dashboard.config, widgets, globalFilters, updateMutation]);
 
   const handleDragStop: EventCallback = useCallback(
     (layout) => persistLayout(layout as unknown as Layout),
@@ -411,28 +585,31 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   );
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* ── Looker-style dark toolbar ────────────────────────────── */}
-      <div className="rounded-t-xl bg-slate-800 px-5 py-3">
+    <div className={operational ? "bg-bg-primary text-ink-primary" : "min-h-screen bg-gray-50"}>
+      <div className={operational ? "px-2 py-1" : "rounded-t-xl bg-slate-800 px-5 py-3"}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <button onClick={onBack} className="flex items-center gap-1 text-[11px] font-medium text-slate-400 hover:text-white transition-colors">
+            <button onClick={onBack} className={`flex items-center gap-1 text-[11px] font-medium transition-colors ${operational ? "text-brand-700 hover:text-brand-800" : "text-slate-400 hover:text-white"}`}>
               <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
               Dashboards
             </button>
-            <div className="h-4 w-px bg-slate-600" />
-            <h2 className="text-sm font-bold text-white">{dashboard.name}</h2>
-            {dashboardStatus !== "published" && (
-              <span className="rounded-full bg-amber-900/50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-300">
+            <div className={`h-4 w-px ${operational ? "bg-line-secondary" : "bg-slate-600"}`} />
+            <h2 className={`text-sm font-bold ${operational ? "text-ink-primary" : "text-white"}`}>{dashboard.name}</h2>
+            {dashboardStatus === "published" && operational ? (
+              <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[9px] font-semibold text-blue-600">Live</span>
+            ) : dashboardStatus !== "published" ? (
+              <span className={operational ? "rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-700" : "rounded-full bg-amber-900/50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-300"}>
                 {dashboardStatus}
               </span>
-            )}
+            ) : null}
             <button
               onClick={() => toggleStatusMutation.mutate()}
               disabled={toggleStatusMutation.isPending}
               className={`rounded-md px-2.5 py-1 text-[10px] font-bold transition-colors ${
                 dashboardStatus === "published"
-                  ? "border border-slate-600 text-slate-300 hover:bg-slate-700"
+                  ? operational
+                    ? "border border-line-secondary text-ink-secondary hover:bg-bg-secondary"
+                    : "border border-slate-600 text-slate-300 hover:bg-slate-700"
                   : "bg-emerald-600 text-white hover:bg-emerald-700"
               } disabled:opacity-50`}
             >
@@ -444,10 +621,10 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
             </button>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-slate-500">
-              {widgets.length} widget{widgets.length !== 1 ? "s" : ""}
+            <span className={`text-[10px] ${operational ? "text-ink-tertiary" : "text-slate-500"}`}>
+              {widgets.length} {operational ? `insight${widgets.length !== 1 ? "s" : ""}` : `widget${widgets.length !== 1 ? "s" : ""}`}
             </span>
-            <div className="h-4 w-px bg-slate-600" />
+            <div className={`h-4 w-px ${operational ? "bg-line-secondary" : "bg-slate-600"}`} />
             <button
               onClick={() => {
                 const loadAll = async () => {
@@ -457,25 +634,46 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
                 };
                 loadAll();
               }}
-              className="flex items-center gap-1 rounded-md border border-slate-600 px-2.5 py-1 text-[10px] font-medium text-slate-300 hover:bg-slate-700 transition-colors"
+              className={`flex items-center gap-1 rounded-md border px-2.5 py-1 text-[10px] font-medium transition-colors ${operational ? "border-line-secondary text-ink-secondary hover:bg-bg-secondary" : "border-slate-600 text-slate-300 hover:bg-slate-700"}`}
             >
               <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
               Refresh
             </button>
             <button
-              onClick={() => { setEditingWidget(null); setShowConfigPanel(true); }}
-              className="flex items-center gap-1 rounded-md bg-blue-500 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-blue-600 transition-colors"
+              onClick={() => { setEditingWidget(null); setDesignerMode("edit_dashboard"); }}
+              className="flex items-center gap-1 rounded-md border border-line-secondary px-2.5 py-1 text-[10px] font-medium text-ink-secondary transition-colors hover:bg-bg-secondary"
+            >
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+              Edit dashboard
+            </button>
+            <button
+              onClick={() => { setEditingWidget(null); setDesignerMode("add_insight"); }}
+              className="flex items-center gap-1 rounded-md bg-brand-600 px-2.5 py-1 text-[10px] font-bold text-white transition-colors hover:bg-brand-700"
             >
               <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-              Add Widget
+              Add insight
             </button>
           </div>
         </div>
       </div>
 
       {/* ── Filter Bar ───────────────────────────────────────────── */}
-      <div className="border-b border-slate-200 bg-white px-5 py-2">
+      <div className={operational ? "mt-2 border-y border-line-tertiary bg-bg-primary px-2 py-2" : "border-b border-slate-200 bg-white px-5 py-2"}>
         <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+          {template?.parameters && hasBoundDimension && (
+            <label className="flex items-center gap-1.5 text-[11px] font-medium text-ink-secondary">
+              <DimensionLabelEditor label={dimensionLabel} onSave={saveDimensionLabel} />
+              <select
+                value={templateValue}
+                onChange={(event) => changeTemplateValue(event.target.value)}
+                disabled={templateOptionsLoading}
+                className="rounded-md border border-line-secondary bg-bg-primary px-2 py-1 text-[11px] text-ink-primary"
+              >
+                <option value="">All {dimensionLabel}</option>
+                {templateOptions.map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+            </label>
+          )}
           <DateRangeControl value={runtime.dateRange} onChange={setDateRange} />
           {runtime.crossFilters.length > 0 && <div className="h-4 w-px bg-slate-200" />}
           {runtime.crossFilters.map((cf) => (
@@ -495,28 +693,25 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
         <FilterBar filters={globalFilters} columns={allColumns} onChange={handleFiltersChange} />
       </div>
 
-      {/* ── Widget Config Panel (slide-down) ──────────────────────── */}
-      {showConfigPanel && (
-        <div className="mx-4 mt-4">
-          <WidgetConfigPanel
-            projectId={projectId}
-            savedQueries={savedQueries}
-            datasources={datasources}
-            editingWidget={editingWidget}
-            onSave={handleSaveWidget}
-            onCancel={() => { setShowConfigPanel(false); setEditingWidget(null); }}
-          />
-        </div>
-      )}
-
       {/* ── Widget Grid ──────────────────────────────────────────── */}
-      <div className="px-4 py-4">
-        {widgets.length === 0 && !showConfigPanel ? (
-          <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-white py-20">
+      <div className={operational ? "py-3" : "px-4 py-4"}>
+        {widgets.length === 0 ? (
+          <div className={operational ? "flex flex-col items-center justify-center rounded-xl border border-dashed border-line-secondary bg-bg-primary py-20" : "flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-white py-20"}>
             <svg className="mb-3 h-12 w-12 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
-            <p className="text-sm font-semibold text-slate-600">No widgets yet</p>
-            <p className="mt-1 text-xs text-slate-400">Click &quot;+ Add Widget&quot; to start building your dashboard</p>
+            <p className="text-sm font-semibold text-slate-600">{operational ? "Describe the operational decisions you want to support" : "No widgets yet"}</p>
+            <p className="mt-1 text-xs text-slate-400">{operational ? "AI will select, validate and wire the appropriate KPI cards and charts." : "Click + Add Widget to start building your dashboard"}</p>
+            {operational && <button type="button" onClick={() => setDesignerMode("edit_dashboard")} className="mt-3 rounded-md bg-brand-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-brand-700">Design with AI</button>}
           </div>
+        ) : operational && operationalWidgets.length > 0 ? (
+          <OperationalInsightGrid
+            widgets={widgets}
+            widgetData={widgetData}
+            operationalWidgets={operationalWidgets}
+            onEditWidget={handleEditWidget}
+            onElementClick={handleElementClick}
+            onChartOptions={setChartOptionsWidget}
+            onDeleteWidget={setWidgetPendingDelete}
+          />
         ) : widgets.length > 0 ? (
           <div ref={containerRef} className="w-full">
             {mounted && (
@@ -536,15 +731,15 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
               >
             {widgets.map((w) => (
               <div key={w.id}>
-                <div className="h-full rounded-lg border border-slate-200 bg-white shadow-sm hover:shadow-md transition-shadow overflow-hidden">
+                <div className={`h-full overflow-hidden border bg-white transition-shadow ${operational ? "rounded-xl border-line-tertiary shadow-none hover:border-brand-200" : "rounded-lg border-slate-200 shadow-sm hover:shadow-md"}`}>
                   {/* Widget header — drag handle + metadata badges */}
-                  <div className="widget-drag-handle flex items-center justify-between border-b border-slate-100 bg-white px-3 py-2 cursor-grab active:cursor-grabbing">
+                  <div className={`widget-drag-handle flex cursor-grab items-center justify-between bg-white px-3 active:cursor-grabbing ${operational ? "pb-1 pt-3" : "border-b border-slate-100 py-2"}`}>
                     <div className="flex flex-col gap-0.5 min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <svg className="h-3 w-3 flex-shrink-0 text-slate-300" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="5" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="12" cy="19" r="2"/></svg>
-                        <h4 className="truncate text-xs font-bold text-slate-800">{w.title || "Untitled"}</h4>
+                        {!operational && <svg className="h-3 w-3 flex-shrink-0 text-slate-300" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="5" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="12" cy="19" r="2"/></svg>}
+                        <h4 className={operational ? "truncate text-sm font-semibold text-ink-primary" : "truncate text-xs font-bold text-slate-800"}>{w.title || "Untitled"}</h4>
                       </div>
-                      {w.aggregation && w.yColumn && (
+                      {!operational && w.aggregation && w.yColumn && (
                         <div className="flex flex-wrap items-center gap-1 pl-5">
                           <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[8px] font-bold uppercase text-blue-600">
                             {w.aggregation}({w.yColumn})
@@ -573,7 +768,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
                         </div>
                       )}
                     </div>
-                    <div className="flex gap-0.5 flex-shrink-0 ml-2">
+                    <div className={`ml-2 flex flex-shrink-0 gap-0.5 ${operational ? "opacity-60 transition-opacity hover:opacity-100" : ""}`}>
                       {onPinWidget && (
                         <button
                           onClick={() => onPinWidget(w, widgetData[w.id] ?? [], dashboard.id)}
@@ -583,19 +778,20 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
                           <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" /></svg>
                         </button>
                       )}
-                      <button onClick={() => handleEditWidget(w)} title="Edit" className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors">
+                      <button onClick={() => handleEditWidget(w)} title={operational ? "Modify with AI" : "Edit"} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors">
                         <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                       </button>
-                      <button onClick={() => handleDeleteWidget(w.id)} title="Delete" className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                      <button onClick={() => setWidgetPendingDelete(w)} title="Delete widget" className="rounded p-1 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600">
                         <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                       </button>
                     </div>
                   </div>
                   {/* Chart */}
-                  <div className="p-3 overflow-hidden" style={{ height: "calc(100% - 52px)" }}>
+                  <div className={operational ? "overflow-hidden px-3 pb-3 pt-1" : "overflow-hidden p-3"} style={{ height: operational ? "calc(100% - 38px)" : "calc(100% - 52px)" }}>
                     <WidgetRenderer
                       widget={w}
                       data={widgetData[w.id] ?? []}
+                      operational={operational}
                       onElementClick={(ev) => handleElementClick(w, ev)}
                     />
                   </div>
@@ -609,6 +805,43 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
       </div>
 
       <DrilldownPanel state={drilldown} onClose={() => setDrilldown((d) => ({ ...d, open: false }))} />
+      <AIDashboardDesigner
+        open={designerMode !== null}
+        projectId={String(projectId)}
+        mode={designerMode ?? "add_insight"}
+        dashboardId={dashboard.id}
+        targetInsightId={designerMode === "edit_insight" ? editingWidget?.id : undefined}
+        dashboardGroupId={template?.dashboardGroupId}
+        dashboardGroupName={template?.groupName}
+        initialPrompt={designerMode === "edit_insight" && editingWidget ? `Change “${editingWidget.title}” to show ` : ""}
+        onClose={() => { setDesignerMode(null); setEditingWidget(null); }}
+        onApplied={() => {
+          setDesignerMode(null);
+          setEditingWidget(null);
+          onPersisted?.();
+          void queryClient.invalidateQueries({ queryKey: ["project", String(projectId), "dashboards"] });
+        }}
+        notify={push}
+      />
+      {chartOptionsWidget && (
+        <WidgetChartOptionsDialog
+          widget={chartOptionsWidget}
+          rows={widgetData[chartOptionsWidget.id] ?? []}
+          projectId={projectId}
+          open={chartOptionsWidget !== null}
+          onClose={() => setChartOptionsWidget(null)}
+          onApply={handleApplyChartOptions}
+        />
+      )}
+      <ConfirmDialog
+        open={widgetPendingDelete !== null}
+        title="Delete this widget?"
+        message={`Remove "${widgetPendingDelete?.title || "this widget"}" from the dashboard? This cannot be undone.`}
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteWidget}
+        onCancel={() => setWidgetPendingDelete(null)}
+      />
+      <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </div>
   );
 }
