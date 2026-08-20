@@ -201,6 +201,51 @@ def test_build_chart_single_row_excludes_period_dimension() -> None:
     assert labels == {"DefectRate"}
 
 
+def test_build_chart_grounds_a_mislabeled_two_measure_time_series_as_combo() -> None:
+    """The planner's chart_type is only a hint and can be wrong: it may call
+    a two-measure time series "line" instead of "dual_line". Without
+    consulting the confidence-ranked engine, _build_chart used to gate the
+    two-value path strictly on chart_type in _TWO_VALUE_TYPES, silently
+    dropping the second measure and rendering a single line -- while
+    _grounded_chart_selection (ai_proxy_dashboard_designer.py), which asks
+    the same engine unconditionally at apply/create time, correctly built a
+    combo from the identical data. That mismatch is exactly what a user hit:
+    the review/preview step showed a plain line, the created dashboard
+    showed the correct bar+line combo."""
+    result = {
+        "columns": ["Month", "RevenueUSD", "BacklogUSD"],
+        "rows": [
+            {"Month": f"2026-{m:02d}-01", "RevenueUSD": 6000000 + m * 1000, "BacklogUSD": 2000000 + m * 500}
+            for m in range(1, 13)
+        ],
+    }
+    chart = hi._build_chart("line", "Monthly Revenue vs Backlog", result, "Month", "RevenueUSD")
+    assert chart is not None
+    assert chart["type"] == "combo"
+    assert chart["subtype"] == "bar_line"
+    assert chart["roles"]["y"] == "RevenueUSD"
+    assert chart["roles"]["y2"] == "BacklogUSD"
+
+
+def test_build_chart_leaves_a_single_measure_bar_alone() -> None:
+    """The engine consultation only kicks in for chart_type values outside
+    _TWO_VALUE_TYPES, and only overrides them when the engine's own decision
+    is COMBO. A single-measure, non-time categorical result has no combo
+    shape to detect (no second numeric column, no time axis), so the "bar"
+    hint must render as a plain bar exactly as before."""
+    result = {
+        "columns": ["Supplier", "Spend"],
+        "rows": [
+            {"Supplier": "Acme", "Spend": 1200},
+            {"Supplier": "Globex", "Spend": 800},
+            {"Supplier": "Initech", "Spend": 950},
+        ],
+    }
+    chart = hi._build_chart("bar", "Spend by supplier", result, "Supplier", "Spend")
+    assert chart is not None
+    assert chart["type"] == "bar"
+
+
 def test_dimension_columns_detects_time_labels() -> None:
     cols = ["Period", "Month", "OnTimeRate", "SupplierID"]
     skip = hi._dimension_columns(cols, "SupplierID")
