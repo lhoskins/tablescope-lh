@@ -107,6 +107,49 @@ export function ItsmChart({ chart, onElementClick, className }: ItsmChartProps) 
           label: { show: true, position: "right", fontSize: 10, color: "#475569" },
         })),
       };
+    } else if (chart.chartType === "combo" && chart.series.length >= 2) {
+      // Two-metric comparison (e.g. actual vs backlog over time): first
+      // series as bars, second as an overlaid line -- mirrors
+      // EChartsWidget's buildComboOption so an AI-Designer combo widget
+      // looks the same whether it renders through the generic dashboard
+      // grid or this operational-insight one.
+      option = {
+        tooltip: { trigger: "axis" },
+        legend: { top: 0, right: 4 },
+        grid: { left: 10, right: 16, bottom: 12, top: 34, containLabel: true },
+        xAxis: {
+          type: "category",
+          boundaryGap: true,
+          data: categories,
+          axisTick: { show: false },
+          axisLabel: { interval: Math.max(0, Math.ceil(categories.length / 7) - 1), fontSize: 10 },
+        },
+        yAxis: {
+          type: "value",
+          name: chart.yAxisLabel ?? undefined,
+          nameGap: 12,
+          splitLine: { lineStyle: { color: "#e8edf3" } },
+        },
+        series: [
+          {
+            type: "bar",
+            name: chart.series[0].name,
+            data: chart.series[0].y,
+            barMaxWidth: 24,
+            itemStyle: { color: OPERATIONAL_INSIGHT_THEME.palette[0], borderRadius: [4, 4, 0, 0] },
+          },
+          {
+            type: "line",
+            name: chart.series[1].name,
+            data: chart.series[1].y,
+            smooth: true,
+            symbolSize: 6,
+            connectNulls: false,
+            lineStyle: { width: 2, color: OPERATIONAL_INSIGHT_THEME.palette[1 % OPERATIONAL_INSIGHT_THEME.palette.length] },
+            itemStyle: { color: OPERATIONAL_INSIGHT_THEME.palette[1 % OPERATIONAL_INSIGHT_THEME.palette.length] },
+          },
+        ],
+      };
     } else {
       option = {
         tooltip: { trigger: "axis" },

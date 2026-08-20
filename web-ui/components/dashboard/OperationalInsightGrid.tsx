@@ -115,11 +115,13 @@ export function toOperationalChartData(
   const chartType =
     widget.type === "bar"
       ? "skinny_bar"
-      : widget.type === "pie"
-        ? "pie"
-        : widget.type === "heatmap"
-          ? "heatmap"
-          : "line";
+      : widget.type === "combo"
+        ? "combo"
+        : widget.type === "pie"
+          ? "pie"
+          : widget.type === "heatmap"
+            ? "heatmap"
+            : "line";
 
   return {
     chartKey: widget.id,

@@ -33,6 +33,11 @@ describe("toOperationalChartData", () => {
     expect(chart.series[0]).toEqual({ name: "Actual Revenue", x: ["2026-01", "2026-02"], y: [100000, 110000] });
     expect(chart.series[1]).toEqual({ name: "Forecast Revenue", x: ["2026-01", "2026-02"], y: [98000, 105000] });
     expect(chart.categories).toEqual(["2026-01", "2026-02"]);
+    // A combo widget must keep its "combo" chartType through to ItsmChart --
+    // falling through to the default "line" mapping renders BOTH series as
+    // lines (losing the bar/line distinction the preview step already
+    // grounded) even though the series data itself is built correctly.
+    expect(chart.chartType).toBe("combo");
   });
 
   it("falls back to a single series when a combo widget has no y2Column", () => {
