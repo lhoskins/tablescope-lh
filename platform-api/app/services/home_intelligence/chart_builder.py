@@ -6,6 +6,7 @@ from app.services.visualization_engine import (
     _Shape as Shape,
 )
 from app.services.visualization_engine import (
+    ChartType,
     derive_shape,
     rank_visualizations,
     select_visualization,
@@ -138,9 +139,24 @@ def _build_chart(
     # Two-metric charts (dual_line / scatter / bubble) need a second numeric
     # column; build that shape when one is available, else fall through to the
     # single-value handling below so the card still renders.
-    if chart_type in _TWO_VALUE_TYPES:
+    #
+    # The planner's chart_type is only a hint, and it can be wrong: the LLM
+    # may call a two-measure time series "line" instead of "dual_line". When
+    # the hint isn't already a two-value family, ask the same confidence-
+    # ranked engine _grounded_chart_selection (ai_proxy_dashboard_designer.py)
+    # already consults unconditionally at apply time whether the executed
+    # shape is actually a combo -- without this, a widget mislabeled "line"
+    # rendered as a single measure here (dropping the second one entirely)
+    # while apply-time grounding correctly built a combo from the same data,
+    # so the preview and the created dashboard disagreed on the same widget.
+    effective_type = chart_type
+    if chart_type not in _TWO_VALUE_TYPES:
+        engine_decision = select_visualization(columns, rows, intent_hint=chart_type)
+        if engine_decision.chart_type == ChartType.COMBO:
+            effective_type = "dual_line"
+    if effective_type in _TWO_VALUE_TYPES:
         two = _two_value_chart(
-            chart_type, title, columns, rows, label_hint, value_hint, value_hint_2
+            effective_type, title, columns, rows, label_hint, value_hint, value_hint_2
         )
         if two is not None:
             return two
