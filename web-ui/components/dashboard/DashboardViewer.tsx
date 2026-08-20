@@ -379,6 +379,12 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
     return [];
   }, [allQueries, projectId, globalFiltersForApi, runtime, columnNamesForWidget]);
 
+  const refreshAllWidgets = useCallback(async () => {
+    const results: Record<string, Array<Record<string, unknown>>> = {};
+    for (const w of widgets) results[w.id] = await fetchWidgetData(w);
+    setWidgetData(results);
+  }, [widgets, fetchWidgetData]);
+
   useEffect(() => {
     const loadAll = async () => {
       const entries = await Promise.all(
@@ -584,114 +590,188 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
     [persistLayout],
   );
 
+  // Cross-filter chips + "Clear all", shared by both header styles below.
+  const runtimeFilterChips = (runtime.crossFilters.length > 0 || runtime.dateRange) && (
+    <div className="flex flex-wrap items-center gap-2">
+      {runtime.crossFilters.map((cf) => (
+        <div key={cf.id} className="flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700">
+          <span>{cf.label}</span>
+          <button onClick={() => removeCrossFilter(cf.id)} className="text-blue-400 hover:text-blue-700" title="Remove filter">
+            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      ))}
+      <button onClick={clearRuntimeFilters} className="text-[11px] font-medium text-ink-tertiary hover:text-red-500">
+        Clear all
+      </button>
+    </div>
+  );
+
   return (
     <div className={operational ? "bg-bg-primary text-ink-primary" : "min-h-screen bg-gray-50"}>
-      <div className={operational ? "px-2 py-1" : "rounded-t-xl bg-slate-800 px-5 py-3"}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button onClick={onBack} className={`flex items-center gap-1 text-[11px] font-medium transition-colors ${operational ? "text-brand-700 hover:text-brand-800" : "text-slate-400 hover:text-white"}`}>
-              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-              Dashboards
-            </button>
-            <div className={`h-4 w-px ${operational ? "bg-line-secondary" : "bg-slate-600"}`} />
-            <h2 className={`text-sm font-bold ${operational ? "text-ink-primary" : "text-white"}`}>{dashboard.name}</h2>
-            {dashboardStatus === "published" && operational ? (
-              <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[9px] font-semibold text-blue-600">Live</span>
-            ) : dashboardStatus !== "published" ? (
-              <span className={operational ? "rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-700" : "rounded-full bg-amber-900/50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-300"}>
-                {dashboardStatus}
-              </span>
-            ) : null}
-            <button
-              onClick={() => toggleStatusMutation.mutate()}
-              disabled={toggleStatusMutation.isPending}
-              className={`rounded-md px-2.5 py-1 text-[10px] font-bold transition-colors ${
-                dashboardStatus === "published"
-                  ? operational
-                    ? "border border-line-secondary text-ink-secondary hover:bg-bg-secondary"
-                    : "border border-slate-600 text-slate-300 hover:bg-slate-700"
-                  : "bg-emerald-600 text-white hover:bg-emerald-700"
-              } disabled:opacity-50`}
-            >
-              {toggleStatusMutation.isPending
-                ? "Updating..."
-                : dashboardStatus === "published"
-                  ? "Unpublish"
-                  : "Publish"}
-            </button>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className={`text-[10px] ${operational ? "text-ink-tertiary" : "text-slate-500"}`}>
-              {widgets.length} {operational ? `insight${widgets.length !== 1 ? "s" : ""}` : `widget${widgets.length !== 1 ? "s" : ""}`}
-            </span>
-            <div className={`h-4 w-px ${operational ? "bg-line-secondary" : "bg-slate-600"}`} />
-            <button
-              onClick={() => {
-                const loadAll = async () => {
-                  const results: Record<string, Array<Record<string, unknown>>> = {};
-                  for (const w of widgets) results[w.id] = await fetchWidgetData(w);
-                  setWidgetData(results);
-                };
-                loadAll();
-              }}
-              className={`flex items-center gap-1 rounded-md border px-2.5 py-1 text-[10px] font-medium transition-colors ${operational ? "border-line-secondary text-ink-secondary hover:bg-bg-secondary" : "border-slate-600 text-slate-300 hover:bg-slate-700"}`}
-            >
-              <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-              Refresh
-            </button>
-            <button
-              onClick={() => { setEditingWidget(null); setDesignerMode("edit_dashboard"); }}
-              className="flex items-center gap-1 rounded-md border border-line-secondary px-2.5 py-1 text-[10px] font-medium text-ink-secondary transition-colors hover:bg-bg-secondary"
-            >
-              <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-              Edit dashboard
-            </button>
-            <button
-              onClick={() => { setEditingWidget(null); setDesignerMode("add_insight"); }}
-              className="flex items-center gap-1 rounded-md bg-brand-600 px-2.5 py-1 text-[10px] font-bold text-white transition-colors hover:bg-brand-700"
-            >
-              <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-              Add insight
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Filter Bar ───────────────────────────────────────────── */}
-      <div className={operational ? "mt-2 border-y border-line-tertiary bg-bg-primary px-2 py-2" : "border-b border-slate-200 bg-white px-5 py-2"}>
-        <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
-          {template?.parameters && hasBoundDimension && (
-            <label className="flex items-center gap-1.5 text-[11px] font-medium text-ink-secondary">
-              <DimensionLabelEditor label={dimensionLabel} onSave={saveDimensionLabel} />
-              <select
-                value={templateValue}
-                onChange={(event) => changeTemplateValue(event.target.value)}
-                disabled={templateOptionsLoading}
-                className="rounded-md border border-line-secondary bg-bg-primary px-2 py-1 text-[11px] text-ink-primary"
+      {operational ? (
+        // ── ITSM-style header ───────────────────────────────────────
+        // AI-generated dashboards are live the moment they're created (no
+        // draft/publish gate), so this header only ever shows "Live" — it
+        // mirrors ItsmInsightsDashboardContent.tsx's title+badge+subtitle
+        // left side and compact-dropdown right side, wired to this
+        // dashboard's own generic filters/period/AI-designer actions
+        // instead of the ITSM presets' fixed Site/Region data.
+        <div className="px-2 py-2">
+          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+            <div className="flex items-start gap-2">
+              <button
+                type="button"
+                onClick={onBack}
+                aria-label="Back to dashboards"
+                className="mt-1 rounded-md p-1 text-ink-tertiary hover:bg-brand-50/60 hover:text-ink-primary"
               >
-                <option value="">All {dimensionLabel}</option>
-                {templateOptions.map((value) => <option key={value} value={value}>{value}</option>)}
-              </select>
-            </label>
-          )}
-          <DateRangeControl value={runtime.dateRange} onChange={setDateRange} />
-          {runtime.crossFilters.length > 0 && <div className="h-4 w-px bg-slate-200" />}
-          {runtime.crossFilters.map((cf) => (
-            <div key={cf.id} className="flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700">
-              <span>{cf.label}</span>
-              <button onClick={() => removeCrossFilter(cf.id)} className="text-blue-400 hover:text-blue-700" title="Remove filter">
-                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+              </button>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-h2 text-ink-primary">{dashboard.name}</h1>
+                  <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600">Live</span>
+                </div>
+                <p className="text-xs text-ink-tertiary">
+                  {dashboard.description ? `${dashboard.description} · ` : ""}
+                  {widgets.length} insight{widgets.length !== 1 ? "s" : ""}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {template?.parameters && hasBoundDimension && (
+                <label className="flex h-8 items-center gap-1.5 rounded-md border border-line-secondary bg-bg-primary px-2 text-xs">
+                  <DimensionLabelEditor label={dimensionLabel} onSave={saveDimensionLabel} />
+                  <select
+                    value={templateValue}
+                    onChange={(event) => changeTemplateValue(event.target.value)}
+                    disabled={templateOptionsLoading}
+                    className="h-full border-0 bg-transparent pr-1 text-xs text-ink-primary focus:outline-none"
+                  >
+                    <option value="">All {dimensionLabel}</option>
+                    {templateOptions.map((value) => <option key={value} value={value}>{value}</option>)}
+                  </select>
+                </label>
+              )}
+              <DateRangeControl value={runtime.dateRange} onChange={setDateRange} />
+              <button
+                onClick={() => { setEditingWidget(null); setDesignerMode("edit_dashboard"); }}
+                className="flex h-8 items-center gap-1 rounded-md border border-line-secondary px-2.5 text-xs font-medium text-ink-secondary transition-colors hover:bg-bg-secondary"
+              >
+                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                Edit dashboard
+              </button>
+              <button
+                onClick={refreshAllWidgets}
+                className="flex h-8 items-center gap-1 rounded-md border border-line-secondary px-2.5 text-xs font-medium text-ink-secondary transition-colors hover:bg-bg-secondary"
+              >
+                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                Refresh
+              </button>
+              <button
+                onClick={() => { setEditingWidget(null); setDesignerMode("add_insight"); }}
+                className="flex h-8 items-center gap-1 rounded-md bg-brand-600 px-2.5 text-xs font-bold text-white transition-colors hover:bg-brand-700"
+              >
+                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                Add insight
               </button>
             </div>
-          ))}
-          {(runtime.crossFilters.length > 0 || runtime.dateRange) && (
-            <button onClick={clearRuntimeFilters} className="text-[11px] font-medium text-slate-400 hover:text-red-500">
-              Clear all
-            </button>
+          </div>
+
+          {runtimeFilterChips && <div className="mt-2">{runtimeFilterChips}</div>}
+          {allColumns.length > 0 && (
+            <div className="mt-2 border-t border-line-tertiary pt-2">
+              <FilterBar filters={globalFilters} columns={allColumns} onChange={handleFiltersChange} />
+            </div>
           )}
         </div>
-        <FilterBar filters={globalFilters} columns={allColumns} onChange={handleFiltersChange} />
-      </div>
+      ) : (
+        <>
+          <div className="rounded-t-xl bg-slate-800 px-5 py-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <button onClick={onBack} className="flex items-center gap-1 text-[11px] font-medium text-slate-400 transition-colors hover:text-white">
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                  Dashboards
+                </button>
+                <div className="h-4 w-px bg-slate-600" />
+                <h2 className="text-sm font-bold text-white">{dashboard.name}</h2>
+                {dashboardStatus !== "published" && (
+                  <span className="rounded-full bg-amber-900/50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-300">
+                    {dashboardStatus}
+                  </span>
+                )}
+                <button
+                  onClick={() => toggleStatusMutation.mutate()}
+                  disabled={toggleStatusMutation.isPending}
+                  className={`rounded-md px-2.5 py-1 text-[10px] font-bold transition-colors ${
+                    dashboardStatus === "published"
+                      ? "border border-slate-600 text-slate-300 hover:bg-slate-700"
+                      : "bg-emerald-600 text-white hover:bg-emerald-700"
+                  } disabled:opacity-50`}
+                >
+                  {toggleStatusMutation.isPending
+                    ? "Updating..."
+                    : dashboardStatus === "published"
+                      ? "Unpublish"
+                      : "Publish"}
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-slate-500">
+                  {widgets.length} widget{widgets.length !== 1 ? "s" : ""}
+                </span>
+                <div className="h-4 w-px bg-slate-600" />
+                <button
+                  onClick={refreshAllWidgets}
+                  className="flex items-center gap-1 rounded-md border border-slate-600 px-2.5 py-1 text-[10px] font-medium text-slate-300 transition-colors hover:bg-slate-700"
+                >
+                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                  Refresh
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Filter Bar ───────────────────────────────────────────── */}
+          <div className="border-b border-slate-200 bg-white px-5 py-2">
+            <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+              {template?.parameters && hasBoundDimension && (
+                <label className="flex items-center gap-1.5 text-[11px] font-medium text-ink-secondary">
+                  <DimensionLabelEditor label={dimensionLabel} onSave={saveDimensionLabel} />
+                  <select
+                    value={templateValue}
+                    onChange={(event) => changeTemplateValue(event.target.value)}
+                    disabled={templateOptionsLoading}
+                    className="rounded-md border border-line-secondary bg-bg-primary px-2 py-1 text-[11px] text-ink-primary"
+                  >
+                    <option value="">All {dimensionLabel}</option>
+                    {templateOptions.map((value) => <option key={value} value={value}>{value}</option>)}
+                  </select>
+                </label>
+              )}
+              <DateRangeControl value={runtime.dateRange} onChange={setDateRange} />
+              {runtime.crossFilters.length > 0 && <div className="h-4 w-px bg-slate-200" />}
+              {runtime.crossFilters.map((cf) => (
+                <div key={cf.id} className="flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700">
+                  <span>{cf.label}</span>
+                  <button onClick={() => removeCrossFilter(cf.id)} className="text-blue-400 hover:text-blue-700" title="Remove filter">
+                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                </div>
+              ))}
+              {(runtime.crossFilters.length > 0 || runtime.dateRange) && (
+                <button onClick={clearRuntimeFilters} className="text-[11px] font-medium text-slate-400 hover:text-red-500">
+                  Clear all
+                </button>
+              )}
+            </div>
+            <FilterBar filters={globalFilters} columns={allColumns} onChange={handleFiltersChange} />
+          </div>
+        </>
+      )}
 
       {/* ── Widget Grid ──────────────────────────────────────────── */}
       <div className={operational ? "py-3" : "px-4 py-4"}>

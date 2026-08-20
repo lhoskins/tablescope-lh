@@ -819,7 +819,9 @@ async def apply_dashboard_design(
             tenant_id=context.tenant_id,
             name=dashboard_name,
             description=str(suggestion.get("description") or suggestion.get("businessPurpose") or ""),
-            status="draft",
+            # AI-generated (operational_insight) dashboards go live immediately --
+            # the ITSM-style header they render with has no draft/publish concept.
+            status="published",
             config=config,
             ai_generated=True,
         )

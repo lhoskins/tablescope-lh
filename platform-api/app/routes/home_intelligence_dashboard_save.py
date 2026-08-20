@@ -133,7 +133,9 @@ async def home_save_dashboard(
         tenant_id=context.tenant_id,
         name=dashboard_name,
         description="",
-        status="draft",
+        # AI-generated (operational_insight) dashboards go live immediately --
+        # the ITSM-style header they render with has no draft/publish concept.
+        status="published",
         config=operational_insight_config(
             {
                 "widgets": widgets_config,
@@ -283,7 +285,9 @@ async def save_card_to_dashboard(
             tenant_id=context.tenant_id,
             name=req.dashboard_name.strip(),
             description="",
-            status="draft",
+            # AI-generated (operational_insight) dashboards go live immediately --
+            # the ITSM-style header they render with has no draft/publish concept.
+            status="published",
             config=operational_insight_config(
                 {
                     "widgets": [widget_config],
