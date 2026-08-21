@@ -1000,7 +1000,7 @@ async def compute_dashboard(
     # Bound concurrency so we do not exhaust the Teiid connection pool.  Each
     # metric may run current and previous queries concurrently, so cap at 3
     # (up to 6 connections) to leave headroom for other requests.
-    max_concurrent_metrics = min(3, max(1, pool_manager.max_size // 2))
+    max_concurrent_metrics = min(6, max(1, pool_manager.max_size // 2))
     metric_sem = asyncio.Semaphore(max_concurrent_metrics)
 
     async def _compute_metric(metric: MetricDefinition) -> MetricValue | BaseException:
@@ -1102,7 +1102,7 @@ ORDER BY 2""",
                 unit="count",
             )
 
-        chart_sem = asyncio.Semaphore(min(2, max(1, pool_manager.max_size // 4)))
+        chart_sem = asyncio.Semaphore(min(4, max(1, pool_manager.max_size // 4)))
 
         async def _build_chart_guarded(dashboard: str, chart_metric: MetricDefinition) -> ChartResult | BaseException:
             async with chart_sem:

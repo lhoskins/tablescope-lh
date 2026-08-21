@@ -45,7 +45,7 @@ class TeiidConnectionPoolManager:
         self,
         *,
         min_size: int = 1,
-        max_size: int = 10,
+        max_size: int = 20,
         max_inactive_connection_lifetime: float = 120.0,
     ) -> None:
         self._min_size = min_size
