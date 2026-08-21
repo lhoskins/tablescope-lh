@@ -50,23 +50,30 @@ export function buildChart(
 
   const xField = viz.xField ?? columns[0];
   const yField = viz.yField ?? columns[1] ?? columns[0];
+  const y2Field = viz.y2Field;
   let series = rows
-    .map((r) => ({
-      label: String(r[xField] ?? ""),
-      value: toNumber(r[yField]) ?? 0,
-    }))
+    .map((r) => {
+      const point: { label: string; value: number; value2?: number } = {
+        label: String(r[xField] ?? ""),
+        value: toNumber(r[yField]) ?? 0,
+      };
+      if (y2Field) {
+        point.value2 = toNumber(r[y2Field]) ?? 0;
+      }
+      return point;
+    })
     .filter((s) => s.label !== "");
   if (!series.length) return null;
 
-  // Keep the family the engine chose. Collapsing everything to pie/line/bar
-  // here silently undid the shared ask pipeline's chart-fit ranking — a scatter
-  // or heatmap answer came back as a bar. The renderer (EChartsWidget, via
-  // WidgetRenderer) draws every family in the vocabulary, so pass it through.
-  const type = viz.type as InsightChart["type"];
+  // Use the dashboard''s shared WidgetRenderer. When a second measure is present,
+  // that renderer only wires the second y-axis under the combo family.
+  let type = viz.type as InsightChart["type"];
+  let subtype = viz.chartStyle || undefined;
+  if (y2Field && type !== "combo") {
+    type = "combo";
+    if (!subtype) subtype = "bar_line";
+  }
 
-  // Bars with many categories are ranked by the measure and capped to the top N
-  // (the engine's decision) so the chart shows the leaders instead of an
-  // unreadable wall of ticks; the full result stays in the table below.
   if (type === "bar") {
     const cap = viz.topN ?? 25;
     if (series.length > cap) {
@@ -76,10 +83,19 @@ export function buildChart(
     series = series.slice(0, 25);
   }
 
-  const subtype = viz.chartStyle || undefined;
-  return { type, subtype, data: { series }, seriesLabels: { value: yField } };
+  const result: InsightChart = {
+    type,
+    subtype,
+    data: { series },
+    seriesLabels: { value: yField },
+    roles: { x: xField, y: yField },
+  };
+  if (y2Field) {
+    result.seriesLabels!.value2 = y2Field;
+    result.roles!.y2 = y2Field;
+  }
+  return result;
 }
-
 export function ResultChart({
   columns,
   rows,
