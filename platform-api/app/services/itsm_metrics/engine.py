@@ -340,7 +340,7 @@ def _build_metric_sql(
         target_col = _quote_identifier(metric.numerator) if metric.numerator else "sys_id"
         select = "COUNT(*)" if metric.aggregation == "count" else f"{metric.aggregation.upper()}({target_col})"
         if metric.aggregation == "distinct":
-            select = f"COUNT(DISTINCT {target_col})"
+            select = "COUNT(sys_id)" if target_col == "sys_id" else f"COUNT(DISTINCT {target_col})"
         if metric.aggregation == "sum":
             select = f"SUM(CAST({target_col} AS double))"
         where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
@@ -356,7 +356,7 @@ def _build_metric_sql(
         # Reconstruct the historical snapshot from opened/resolved timestamps.
         # Filtering on today's state would wrongly remove incidents that were
         # open at month-end and resolved later.
-        select = "COUNT(DISTINCT sys_id)"
+        select = "COUNT(sys_id)"
         where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
         return f"{CACHE_HINT}\nSELECT {select} AS metric_value FROM {table} {where}"
 

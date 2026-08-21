@@ -118,7 +118,7 @@ async def compute_metric_drilldown(
     if is_duration:
         raw_value = f"AVG(CAST({_quote_identifier(metric.numerator or '')} AS double))"
     else:
-        raw_value = "COUNT(DISTINCT sys_id)"
+        raw_value = "COUNT(sys_id)"
     contributor_sql = f"""{CACHE_HINT}
 SELECT CAST({_quote_identifier(dimension)} AS string) AS name, {raw_value} AS {_quote_identifier('value')}
 FROM {table}
