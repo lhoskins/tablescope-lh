@@ -613,7 +613,7 @@ def _build_chart_sql(
         x_expr = group_col
         order_by = "2 DESC"
     return f"""{CACHE_HINT}
-SELECT {x_expr} AS x, COUNT(DISTINCT sys_id) AS y
+SELECT {x_expr} AS x, COUNT(*) AS y
 FROM {table} {where}
 GROUP BY 1
 ORDER BY {order_by}"""
@@ -680,31 +680,35 @@ async def _build_insight_charts(
     if dashboard_key == "incident_insights":
         opened_bucket = _bucket_expression("opened_at", period_key)
         resolved_bucket = _bucket_expression("resolved_at", period_key)
-        opened_sql = f"""SELECT {opened_bucket} AS x, COUNT(DISTINCT sys_id) AS y
+        opened_sql = f"""{CACHE_HINT}
+SELECT {opened_bucket} AS x, COUNT(*) AS y
 FROM "01_incidents_CSV"
 WHERE unix_timestamp(CAST(opened_at AS timestamp)) >= {start}
   AND unix_timestamp(CAST(opened_at AS timestamp)) <= {end}
   AND {site_filter}
 GROUP BY 1 ORDER BY 1"""
-        resolved_sql = f"""SELECT {resolved_bucket} AS x, COUNT(DISTINCT sys_id) AS y
+        resolved_sql = f"""{CACHE_HINT}
+SELECT {resolved_bucket} AS x, COUNT(*) AS y
 FROM "01_incidents_CSV"
 WHERE unix_timestamp(CAST(resolved_at AS timestamp)) >= {start}
   AND unix_timestamp(CAST(resolved_at AS timestamp)) <= {end}
   AND {site_filter}
 GROUP BY 1 ORDER BY 1"""
-        age_sql = f"""SELECT CASE
+        age_sql = f"""{CACHE_HINT}
+SELECT CASE
   WHEN ({end} - unix_timestamp(CAST(opened_at AS timestamp))) / 86400.0 <= 1 THEN '0-1 day'
   WHEN ({end} - unix_timestamp(CAST(opened_at AS timestamp))) / 86400.0 <= 5 THEN '2-5 days'
   WHEN ({end} - unix_timestamp(CAST(opened_at AS timestamp))) / 86400.0 <= 30 THEN '6-30 days'
   WHEN ({end} - unix_timestamp(CAST(opened_at AS timestamp))) / 86400.0 <= 90 THEN '31-90 days'
   ELSE '90+ days' END AS x,
-  COUNT(DISTINCT sys_id) AS y
+  COUNT(*) AS y
 FROM "01_incidents_CSV"
 WHERE unix_timestamp(CAST(opened_at AS timestamp)) <= {end}
   AND (resolved_at IS NULL OR unix_timestamp(CAST(resolved_at AS timestamp)) > {end})
   AND {site_filter}
 GROUP BY 1"""
-        sla_site_sql = f"""SELECT CAST({site_group_col} AS string) AS x, COUNT(DISTINCT sys_id) AS y
+        sla_site_sql = f"""{CACHE_HINT}
+SELECT CAST({site_group_col} AS string) AS x, COUNT(*) AS y
 FROM "02_task_slas_CSV"
 WHERE task_type = 'Incident' AND "metric" = 'Resolution'
   AND CAST(has_breached AS boolean) = true
@@ -712,14 +716,16 @@ WHERE task_type = 'Incident' AND "metric" = 'Resolution'
   AND unix_timestamp(CAST(end_time AS timestamp)) <= {end}
   AND {site_filter}
 GROUP BY 1 ORDER BY 2 DESC LIMIT 8"""
-        heat_sql = f"""SELECT CAST(priority AS string) AS priority, CAST(state AS string) AS state,
-  COUNT(DISTINCT sys_id) AS y
+        heat_sql = f"""{CACHE_HINT}
+SELECT CAST(priority AS string) AS priority, CAST(state AS string) AS state,
+  COUNT(*) AS y
 FROM "01_incidents_CSV"
 WHERE unix_timestamp(CAST(opened_at AS timestamp)) <= {end}
   AND (resolved_at IS NULL OR unix_timestamp(CAST(resolved_at AS timestamp)) > {end})
   AND {site_filter}
 GROUP BY 1, 2"""
-        category_sql = f"""SELECT CAST(category AS string) AS x, COUNT(DISTINCT sys_id) AS y
+        category_sql = f"""{CACHE_HINT}
+SELECT CAST(category AS string) AS x, COUNT(*) AS y
 FROM "01_incidents_CSV"
 WHERE unix_timestamp(CAST(opened_at AS timestamp)) >= {start}
   AND unix_timestamp(CAST(opened_at AS timestamp)) <= {end}
@@ -828,48 +834,54 @@ GROUP BY 1 ORDER BY 2 DESC LIMIT 7"""
 
     requested_bucket = _bucket_expression("requested_date", period_key)
     completed_bucket = _bucket_expression("closed_at", period_key)
-    requested_sql = f"""SELECT {requested_bucket} AS x, COUNT(DISTINCT sys_id) AS y
+    requested_sql = f"""{CACHE_HINT}
+SELECT {requested_bucket} AS x, COUNT(*) AS y
 FROM "07_requests_CSV"
 WHERE unix_timestamp(CAST(requested_date AS timestamp)) >= {start}
   AND unix_timestamp(CAST(requested_date AS timestamp)) <= {end}
   AND {site_filter}
 GROUP BY 1 ORDER BY 1"""
-    completed_sql = f"""SELECT {completed_bucket} AS x, COUNT(DISTINCT sys_id) AS y
+    completed_sql = f"""{CACHE_HINT}
+SELECT {completed_bucket} AS x, COUNT(*) AS y
 FROM "07_requests_CSV"
 WHERE unix_timestamp(CAST(closed_at AS timestamp)) >= {start}
   AND unix_timestamp(CAST(closed_at AS timestamp)) <= {end}
   AND {site_filter}
 GROUP BY 1 ORDER BY 1"""
-    request_age_sql = f"""SELECT CASE
+    request_age_sql = f"""{CACHE_HINT}
+SELECT CASE
   WHEN ({end} - unix_timestamp(CAST(requested_date AS timestamp))) / 86400.0 <= 1 THEN '0-1 day'
   WHEN ({end} - unix_timestamp(CAST(requested_date AS timestamp))) / 86400.0 <= 5 THEN '2-5 days'
   WHEN ({end} - unix_timestamp(CAST(requested_date AS timestamp))) / 86400.0 <= 14 THEN '6-14 days'
   WHEN ({end} - unix_timestamp(CAST(requested_date AS timestamp))) / 86400.0 <= 30 THEN '15-30 days'
   ELSE '31+ days' END AS x,
-  COUNT(DISTINCT sys_id) AS y
+  COUNT(*) AS y
 FROM "07_requests_CSV"
 WHERE unix_timestamp(CAST(requested_date AS timestamp)) <= {end}
   AND (closed_at IS NULL OR unix_timestamp(CAST(closed_at AS timestamp)) > {end})
   AND {site_filter}
 GROUP BY 1"""
-    friction_sql = f"""SELECT CASE
+    friction_sql = f"""{CACHE_HINT}
+SELECT CASE
   WHEN approval IS NULL OR approval NOT IN ('Approved', 'Not Required') THEN 'Pending approval'
   WHEN stage = 'Fulfillment' THEN 'Fulfillment queue'
   WHEN state = 'Open' THEN 'Intake queue'
   ELSE COALESCE(stage, state) END AS x,
-  COUNT(DISTINCT sys_id) AS y
+  COUNT(*) AS y
 FROM "07_requests_CSV"
 WHERE unix_timestamp(CAST(requested_date AS timestamp)) <= {end}
   AND (closed_at IS NULL OR unix_timestamp(CAST(closed_at AS timestamp)) > {end})
   AND {site_filter}
 GROUP BY 1 ORDER BY 2 DESC"""
-    catalog_sql = f"""SELECT CAST(catalog_item_name AS string) AS x, COUNT(DISTINCT sys_id) AS y
+    catalog_sql = f"""{CACHE_HINT}
+SELECT CAST(catalog_item_name AS string) AS x, COUNT(*) AS y
 FROM "08_requested_items_CSV"
 WHERE unix_timestamp(CAST(opened_at AS timestamp)) >= {start}
   AND unix_timestamp(CAST(opened_at AS timestamp)) <= {end}
   AND {site_filter}
 GROUP BY 1 ORDER BY 2 DESC LIMIT 7"""
-    queue_sql = f"""SELECT CAST(assignment_group_name AS string) AS x, COUNT(DISTINCT sys_id) AS y
+    queue_sql = f"""{CACHE_HINT}
+SELECT CAST(assignment_group_name AS string) AS x, COUNT(*) AS y
 FROM "09_catalog_tasks_CSV"
 WHERE unix_timestamp(CAST(opened_at AS timestamp)) <= {end}
   AND (closed_at IS NULL OR unix_timestamp(CAST(closed_at AS timestamp)) > {end})
