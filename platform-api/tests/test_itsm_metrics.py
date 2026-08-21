@@ -7,8 +7,10 @@ import math
 
 from app.services.itsm_metrics.comparison import compute_comparison, outcome_color_class
 from app.services.itsm_metrics.engine import (
+    _build_combined_metric_sql,
     _build_metric_sql,
     _extract_metric_value,
+    _fetch_period_rows,
     _format_filter,
     _month_bounds,
     _period_epoch,
@@ -188,7 +190,11 @@ class TestSqlGeneration:
         period = PeriodBounds(start="2026-07-01", end="2026-07-31", label="Jul 2026")
         sql = _build_metric_sql(metric, period, "US01")
         assert "01_incidents_CSV" in sql
-        assert "COUNT(DISTINCT sys_id)" in sql
+        # sys_id is the unique record key on every ITSM CSV, so DISTINCT is
+        # redundant and was dropped for query performance -- COUNT(sys_id)
+        # is equivalent to COUNT(DISTINCT sys_id) here.
+        assert "COUNT(sys_id)" in sql
+        assert "DISTINCT" not in sql
         assert '"site_code" = \'US01\'' in sql
         assert 'unix_timestamp(CAST("opened_at" AS timestamp))' in sql
 
@@ -243,3 +249,160 @@ class TestSqlGeneration:
         assert "task_count" in sql
         assert "automated / fulfilled" in sql
         assert '"site_code" = \'US01\'' in sql
+
+
+class TestCombinedMetricSql:
+    """_build_combined_metric_sql halves the number of full-CSV-scan Teiid
+    queries per metric by computing current+previous in one pass instead
+    of two independent queries -- see the ITSM dashboard performance
+    investigation. Only mechanical, unambiguous kinds are combined; custom
+    value_expression metrics (most ratio_period ones) are left untouched."""
+
+    def _periods(self):
+        from app.services.itsm_metrics.models import PeriodBounds
+
+        return (
+            PeriodBounds(start="2026-07-01", end="2026-07-31", label="Jul 2026"),
+            PeriodBounds(start="2026-06-01", end="2026-06-30", label="Jun 2026"),
+        )
+
+    def test_value_expression_metrics_are_not_combined(self) -> None:
+        metric = get_metric("service_request_insights", "automated_fulfillment_rate")
+        assert metric is not None
+        current, previous = self._periods()
+        assert _build_combined_metric_sql(metric, current, previous) is None
+
+    def test_ratio_period_metrics_are_not_combined(self) -> None:
+        metric = get_metric("incident", "resolution_sla")
+        assert metric is not None
+        current, previous = self._periods()
+        assert _build_combined_metric_sql(metric, current, previous) is None
+
+    def test_event_period_distinct_sys_id_combines_without_distinct(self) -> None:
+        metric = get_metric("incident", "major_incidents")
+        assert metric is not None
+        current, previous = self._periods()
+        sql = _build_combined_metric_sql(metric, current, previous, "US01")
+        assert sql is not None
+        assert "current_value" in sql and "previous_value" in sql
+        assert "DISTINCT" not in sql
+        assert sql.count("COUNT(CASE WHEN") == 2
+        assert '"site_code" = \'US01\'' in sql
+        # The WHERE prefilter spans both periods so only one file scan happens.
+        assert "01_incidents_CSV" in sql
+
+    def test_event_period_sum_combines_with_conditional_sum(self) -> None:
+        metric = get_metric("service_request", "catalog_value")
+        assert metric is not None
+        current, previous = self._periods()
+        sql = _build_combined_metric_sql(metric, current, previous)
+        assert sql is not None
+        assert sql.count("SUM(CASE WHEN") == 2
+        assert '"price_usd"' in sql
+
+    def test_snapshot_eom_combines_both_period_ends_in_one_pass(self) -> None:
+        metric = get_metric("incident", "open_backlog")
+        assert metric is not None
+        current, previous = self._periods()
+        sql = _build_combined_metric_sql(metric, current, previous)
+        assert sql is not None
+        assert sql.count("COUNT(CASE WHEN") == 2
+        assert '"resolved_at"' in sql
+        # Each snapshot instant checks its own period end, not a shared one.
+        assert sql.count("IS NULL OR") == 2
+
+    def test_duration_period_average_combines_with_conditional_avg(self) -> None:
+        metric = get_metric("service_request", "average_fulfillment")
+        assert metric is not None
+        current, previous = self._periods()
+        sql = _build_combined_metric_sql(metric, current, previous)
+        assert sql is not None
+        assert sql.count("AVG(CASE WHEN") == 2
+        assert '"request_fulfillment_minutes"' in sql
+
+    def test_duration_period_median_returns_period_tagged_rows_not_aggregate(self) -> None:
+        metric = get_metric("service_request", "median_fulfillment")
+        assert metric is not None
+        current, previous = self._periods()
+        sql = _build_combined_metric_sql(metric, current, previous)
+        assert sql is not None
+        assert "AVG(" not in sql
+        assert "period_tag" in sql
+        assert "'current'" in sql and "'previous'" in sql
+
+
+class TestFetchPeriodRows:
+    """compute_metric's data-fetch step: prefer the combined single query,
+    fall back to two independent queries when the metric can't be
+    combined, and reshape either path back into the same
+    (current_rows, previous_rows) two-list contract."""
+
+    def _periods(self):
+        from app.services.itsm_metrics.models import PeriodBounds
+
+        return (
+            PeriodBounds(start="2026-07-01", end="2026-07-31", label="Jul 2026"),
+            PeriodBounds(start="2026-06-01", end="2026-06-30", label="Jun 2026"),
+        )
+
+    async def test_combinable_metric_issues_a_single_query(self, monkeypatch) -> None:
+        import app.services.itsm_metrics.engine as engine
+
+        metric = get_metric("incident", "major_incidents")
+        assert metric is not None
+        current, previous = self._periods()
+        calls: list[str] = []
+
+        async def fake_run_sql(database, host, port, sql):
+            calls.append(sql)
+            return [{"current_value": 7, "previous_value": 4}]
+
+        monkeypatch.setattr(engine, "_run_sql", fake_run_sql)
+        current_rows, previous_rows = await _fetch_period_rows(
+            metric, current, previous, "US01", "seconds", "site_code", "db", "host", 5432,
+        )
+        assert len(calls) == 1
+        assert _extract_metric_value(current_rows, metric) == 7
+        assert _extract_metric_value(previous_rows, metric) == 4
+
+    async def test_non_combinable_metric_still_issues_two_queries(self, monkeypatch) -> None:
+        import app.services.itsm_metrics.engine as engine
+
+        metric = get_metric("incident", "resolution_sla")
+        assert metric is not None
+        current, previous = self._periods()
+        calls: list[str] = []
+
+        async def fake_run_sql(database, host, port, sql):
+            calls.append(sql)
+            return [{"metric_value": 91.2}]
+
+        monkeypatch.setattr(engine, "_run_sql", fake_run_sql)
+        current_rows, previous_rows = await _fetch_period_rows(
+            metric, current, previous, None, "seconds", "site_code", "db", "host", 5432,
+        )
+        assert len(calls) == 2
+        assert _extract_metric_value(current_rows, metric) == 91.2
+        assert _extract_metric_value(previous_rows, metric) == 91.2
+
+    async def test_median_metric_splits_combined_rows_by_period_tag(self, monkeypatch) -> None:
+        import app.services.itsm_metrics.engine as engine
+
+        metric = get_metric("service_request", "median_fulfillment")
+        assert metric is not None
+        current, previous = self._periods()
+
+        async def fake_run_sql(database, host, port, sql):
+            return [
+                {"metric_value": 10, "period_tag": "current"},
+                {"metric_value": 30, "period_tag": "current"},
+                {"metric_value": 5, "period_tag": "previous"},
+                {"metric_value": 15, "period_tag": "previous"},
+            ]
+
+        monkeypatch.setattr(engine, "_run_sql", fake_run_sql)
+        current_rows, previous_rows = await _fetch_period_rows(
+            metric, current, previous, None, "seconds", "site_code", "db", "host", 5432,
+        )
+        assert _extract_metric_value(current_rows, metric) == 20
+        assert _extract_metric_value(previous_rows, metric) == 10

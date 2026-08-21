@@ -39,6 +39,12 @@ logger = logging.getLogger(__name__)
 
 CACHE_HINT = "/*+ cache(pref_mem ttl:300000) */"
 
+# Safety valve for the per-site warm expansion in warm_itsm_dashboards_for_project:
+# caps how many of a project's real sites get pre-warmed alongside the "all
+# sites" bucket, so a project with an unusually large number of distinct
+# sites can't turn one warm cycle into an unbounded number of Teiid queries.
+_MAX_SITES_TO_WARM = 15
+
 _DIMENSION_CODE_COLUMN: dict[str, str] = {
     "site": "site_code",
     "region": "region",
@@ -377,6 +383,121 @@ def _build_metric_sql(
     return "SELECT NULL AS metric_value"
 
 
+def _build_combined_metric_sql(
+    metric: MetricDefinition,
+    current_period: PeriodBounds,
+    previous_period: PeriodBounds,
+    site_code: str | None = None,
+    date_unit: str = "seconds",
+    site_column: str = "site_code",
+) -> str | None:
+    """Build ONE query computing both the current- and previous-period
+    values for a metric, instead of two independent full-table-scan
+    queries.
+
+    Teiid's CSV-backed views cannot push a WHERE/GROUP BY/aggregate down to
+    the source -- every query pays the cost of reading and parsing the
+    entire source file, regardless of selectivity (see the ITSM dashboard
+    performance investigation). Combining current+previous into one pass
+    halves that dominant, WHERE-independent cost for the metrics this
+    covers, instead of just widening the semaphore around two full scans.
+
+    Only the safe, mechanical cases are combined: the generic kind-based
+    builders (event_period, snapshot_eom, duration_period) with no custom
+    ``value_expression`` and a plain count/distinct/sum aggregation.
+    Metrics with a hand-written ``value_expression`` (subqueries, joins --
+    most ratio_period metrics) are far too varied to rewrite generically
+    and safely, so they keep running as two separate queries. Returns None
+    when the metric can't be combined this way; the caller falls back to
+    the existing two-query path unchanged.
+    """
+    if metric.value_expression or metric.status == "not_implemented":
+        return None
+    if metric.kind not in ("event_period", "snapshot_eom", "duration_period"):
+        return None
+    if not metric.date_field:
+        return None
+
+    table = _quote_identifier(metric.table)
+    cur_start, cur_end = _period_epoch(current_period)
+    prev_start, prev_end = _period_epoch(previous_period)
+    date_expr = _date_expression(metric.date_field, date_unit)
+
+    base_where_clauses = [_format_filter(f) for f in metric.filters]
+    if site_code and site_code.lower() != "all":
+        base_where_clauses.append(_site_filter(site_code, site_column))
+    base_where = " AND ".join(base_where_clauses)
+
+    if metric.kind == "event_period":
+        if metric.aggregation not in ("count", "distinct", "sum"):
+            return None
+        target_col = _quote_identifier(metric.numerator) if metric.numerator else "sys_id"
+        cur_cond = f"{date_expr} >= {cur_start} AND {date_expr} <= {cur_end}"
+        prev_cond = f"{date_expr} >= {prev_start} AND {date_expr} <= {prev_end}"
+
+        def agg(cond: str) -> str:
+            if metric.aggregation == "sum":
+                return f"SUM(CASE WHEN {cond} THEN CAST({target_col} AS double) END)"
+            if metric.aggregation == "distinct" and target_col != "sys_id":
+                return f"COUNT(DISTINCT CASE WHEN {cond} THEN {target_col} END)"
+            # Plain count, or distinct on sys_id -- the unique record key on
+            # every ITSM CSV, so DISTINCT is redundant here (same rationale
+            # as the two-query builder's DISTINCT removal).
+            counted = target_col if metric.aggregation == "distinct" else "1"
+            return f"COUNT(CASE WHEN {cond} THEN {counted} END)"
+
+        where_parts = [f"{date_expr} >= {prev_start} AND {date_expr} <= {cur_end}"]
+        if base_where:
+            where_parts.append(base_where)
+        where = "WHERE " + " AND ".join(where_parts)
+        return f"""{CACHE_HINT}
+SELECT {agg(cur_cond)} AS current_value, {agg(prev_cond)} AS previous_value
+FROM {table} {where}"""
+
+    if metric.kind == "snapshot_eom":
+        open_field = metric.date_field
+        close_field = metric.close_field or "resolved_at"
+        open_expr = _date_expression(open_field, date_unit)
+        close_expr = _date_expression(close_field, date_unit)
+
+        def snap_cond(end_epoch: float) -> str:
+            return f"{open_expr} <= {end_epoch} AND ({close_expr} IS NULL OR {close_expr} > {end_epoch})"
+
+        where_parts = [f"{open_expr} <= {cur_end}"]
+        if base_where:
+            where_parts.append(base_where)
+        where = "WHERE " + " AND ".join(where_parts)
+        return f"""{CACHE_HINT}
+SELECT COUNT(CASE WHEN {snap_cond(cur_end)} THEN sys_id END) AS current_value,
+       COUNT(CASE WHEN {snap_cond(prev_end)} THEN sys_id END) AS previous_value
+FROM {table} {where}"""
+
+    # duration_period
+    duration_col = _quote_identifier(metric.numerator or "resolution_minutes")
+    cur_cond = f"{date_expr} >= {cur_start} AND {date_expr} <= {cur_end}"
+    prev_cond = f"{date_expr} >= {prev_start} AND {date_expr} <= {prev_end}"
+    where_parts = [
+        f"{date_expr} >= {prev_start} AND {date_expr} <= {cur_end}",
+        f"{duration_col} IS NOT NULL",
+    ]
+    if base_where:
+        where_parts.append(base_where)
+    where = "WHERE " + " AND ".join(where_parts)
+    if metric.aggregation == "median":
+        # Median has no Teiid-portable aggregate function, so the
+        # single-period path already returns raw rows and computes the
+        # median in Python. Combining periods means each row must carry
+        # which period it belongs to instead of a scalar aggregate.
+        return f"""{CACHE_HINT}
+SELECT CAST({duration_col} AS double) AS metric_value,
+       CASE WHEN {cur_cond} THEN 'current' ELSE 'previous' END AS period_tag
+FROM {table} {where}"""
+    return f"""{CACHE_HINT}
+SELECT AVG(CASE WHEN {cur_cond} THEN CAST({duration_col} AS double) END) AS current_value,
+       AVG(CASE WHEN {prev_cond} THEN CAST({duration_col} AS double) END) AS previous_value
+FROM {table} {where}"""
+
+
 def _build_ratio_sql(
     metric: MetricDefinition,
     start_epoch: float,
@@ -521,6 +642,60 @@ def _metric_sql_safe(metric: MetricDefinition, period: PeriodBounds, site_code: 
         return "SELECT NULL AS metric_value"
 
 
+async def _fetch_period_rows(
+    metric: MetricDefinition,
+    current_period: PeriodBounds,
+    previous_period: PeriodBounds,
+    site_code: str | None,
+    date_unit: str,
+    site_column: str,
+    database: str,
+    host: str,
+    port: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Fetch a metric's current- and previous-period rows, preferring one
+    combined query over two independent full-scan queries when the metric's
+    shape allows it (see _build_combined_metric_sql). Reshapes the combined
+    result back into the same ``(current_rows, previous_rows)`` two-list
+    shape the two-query path already produces, so downstream extraction
+    (_extract_metric_value) needs no changes either way.
+    """
+    try:
+        combined_sql = _build_combined_metric_sql(
+            metric, current_period, previous_period, site_code, date_unit, site_column
+        )
+    except Exception as exc:
+        logger.warning("Combined SQL build failed for %s: %s", metric.key, exc)
+        combined_sql = None
+
+    if combined_sql is not None:
+        rows = await _run_sql(database, host, port, combined_sql)
+        if metric.kind == "duration_period" and metric.aggregation == "median":
+            current_rows = [
+                {"metric_value": r.get("metric_value", r.get("METRIC_VALUE"))}
+                for r in rows
+                if r.get("period_tag", r.get("PERIOD_TAG")) == "current"
+            ]
+            previous_rows = [
+                {"metric_value": r.get("metric_value", r.get("METRIC_VALUE"))}
+                for r in rows
+                if r.get("period_tag", r.get("PERIOD_TAG")) == "previous"
+            ]
+            return current_rows, previous_rows
+        row = rows[0] if rows else {}
+        current_rows = [{"metric_value": row.get("current_value", row.get("CURRENT_VALUE"))}]
+        previous_rows = [{"metric_value": row.get("previous_value", row.get("PREVIOUS_VALUE"))}]
+        return current_rows, previous_rows
+
+    current_sql = _metric_sql_safe(metric, current_period, site_code, date_unit, site_column)
+    previous_sql = _metric_sql_safe(metric, previous_period, site_code, date_unit, site_column)
+    current_rows, previous_rows = await asyncio.gather(
+        _run_sql(database, host, port, current_sql),
+        _run_sql(database, host, port, previous_sql),
+    )
+    return current_rows, previous_rows
+
+
 async def compute_metric(
     metric: MetricDefinition,
     project_id: int,
@@ -541,12 +716,8 @@ async def compute_metric(
     else:
         database, host, port = teiid_endpoint
 
-    current_sql = _metric_sql_safe(metric, current_period, site_code, date_unit, site_column)
-    previous_sql = _metric_sql_safe(metric, previous_period, site_code, date_unit, site_column)
-
-    current_rows, previous_rows = await asyncio.gather(
-        _run_sql(database, host, port, current_sql),
-        _run_sql(database, host, port, previous_sql),
+    current_rows, previous_rows = await _fetch_period_rows(
+        metric, current_period, previous_period, site_code, date_unit, site_column, database, host, port,
     )
 
     current_value = _convert_duration(_extract_metric_value(current_rows, metric), metric.unit, duration_unit)
@@ -997,8 +1168,10 @@ async def compute_dashboard(
 ) -> DashboardResult:
     """Compute all KPIs and charts for an ITSM dashboard preset.
 
-    Metric queries are executed concurrently to keep dashboard load times under
-    control; each metric still runs current and previous periods independently.
+    Metric queries are executed concurrently, and each metric's current and
+    previous periods are combined into a single query when the metric's
+    shape allows it (see _build_combined_metric_sql) to halve the number of
+    full-table-scan Teiid round trips.
     """
     site_column = _dimension_column(dimension)
     site_label_column = _dimension_label_column(dimension)
@@ -1006,7 +1179,10 @@ async def compute_dashboard(
     current_period, previous_period = _reporting_bounds(period_key, as_of)
     teiid_endpoint = await _resolve_teiid(project_id, session, tenant_id, user_id)
 
-    values: list[MetricValue] = []
+    # Mutated concurrently by the three phases below (asyncio is
+    # single-threaded/cooperative, so concurrent list.append calls across
+    # coroutines are safe); each phase's own values/charts/insights/
+    # site-options are returned and assigned from asyncio.gather.
     warnings: list[str] = []
 
     # Bound concurrency so we do not exhaust the Teiid connection pool.  Each
@@ -1032,65 +1208,52 @@ async def compute_dashboard(
                 site_column=site_column,
             )
 
-    metric_tasks = [_compute_metric(metric) for metric in metrics]
-    metric_results = await asyncio.gather(*metric_tasks, return_exceptions=True)
-    for metric, result in zip(metrics, metric_results, strict=True):
-        if isinstance(result, MetricValue):
-            values.append(result)
-        else:
-            exc = result if isinstance(result, BaseException) else Exception(result)
-            logger.warning("Metric %s failed: %s", metric.key, exc)
-            warnings.append(f"{metric.key}: {exc}")
-            values.append(MetricValue(
-                metric_key=metric.key,
-                label=metric.label,
-                value=None,
-                display_value="—",
-                period_start=current_period.start,
-                period_end=current_period.end,
-                status="not_implemented",
-                as_of=utc_now_iso(),
-                unit=_display_unit(metric, duration_unit),
-                description=_metric_description(metric),
-                calculation=_metric_calculation(metric),
-                target=metric.target,
-            ))
-
     # Insight presets use purpose-built multi-series and skinny-bar charts. The
     # original five KPI presets retain their existing chart pipeline.
     chart_metrics = [m for m in metrics if m.group_by]
-    charts: list[ChartResult] = []
-    insights: list[InsightSummary] = []
-    site_options: list[dict[str, str]] = []
-    if dashboard_key in {"incident_insights", "service_request_insights"}:
-        charts, insights = await _build_insight_charts(
-            dashboard_key=dashboard_key,
-            endpoint=teiid_endpoint,
-            period=current_period,
-            period_key=period_key,
-            site_code=site_code,
-            warnings=warnings,
-            site_column=site_column,
-        )
-        site_table = "01_incidents_CSV" if dashboard_key == "incident_insights" else "07_requests_CSV"
-        try:
-            site_rows = await _run_sql(
-                *teiid_endpoint,
-                f"""{CACHE_HINT}
-SELECT CAST({_quote_identifier(site_column)} AS string) AS code, MAX(CAST({_quote_identifier(site_label_column)} AS string)) AS name
-FROM {_quote_identifier(site_table)}
-WHERE {_quote_identifier(site_column)} IS NOT NULL
-GROUP BY {_quote_identifier(site_column)}
-ORDER BY 2""",
+    is_insight_dashboard = dashboard_key in {"incident_insights", "service_request_insights"}
+
+    async def _metrics_phase() -> list[MetricValue]:
+        metric_tasks = [_compute_metric(metric) for metric in metrics]
+        metric_results = await asyncio.gather(*metric_tasks, return_exceptions=True)
+        out: list[MetricValue] = []
+        for metric, result in zip(metrics, metric_results, strict=True):
+            if isinstance(result, MetricValue):
+                out.append(result)
+            else:
+                exc = result if isinstance(result, BaseException) else Exception(result)
+                logger.warning("Metric %s failed: %s", metric.key, exc)
+                warnings.append(f"{metric.key}: {exc}")
+                out.append(MetricValue(
+                    metric_key=metric.key,
+                    label=metric.label,
+                    value=None,
+                    display_value="—",
+                    period_start=current_period.start,
+                    period_end=current_period.end,
+                    status="not_implemented",
+                    as_of=utc_now_iso(),
+                    unit=_display_unit(metric, duration_unit),
+                    description=_metric_description(metric),
+                    calculation=_metric_calculation(metric),
+                    target=metric.target,
+                ))
+        return out
+
+    async def _charts_phase() -> tuple[list[ChartResult], list[InsightSummary]]:
+        if is_insight_dashboard:
+            return await _build_insight_charts(
+                dashboard_key=dashboard_key,
+                endpoint=teiid_endpoint,
+                period=current_period,
+                period_key=period_key,
+                site_code=site_code,
+                warnings=warnings,
+                site_column=site_column,
             )
-            site_options = [
-                {"code": _row_text(row, "code"), "name": _row_text(row, "name")}
-                for row in site_rows
-            ]
-        except Exception as exc:
-            logger.warning("ITSM insight site options failed: %s", exc)
-            warnings.append("site-filter: site options unavailable")
-    elif len(chart_metrics) >= 2:
+        if len(chart_metrics) < 2:
+            return [], []
+
         async def _build_chart(dashboard: str, chart_metric: MetricDefinition) -> ChartResult | BaseException:
             assert chart_metric.group_by is not None
             is_date_chart = bool(
@@ -1122,13 +1285,48 @@ ORDER BY 2""",
 
         chart_tasks = [_build_chart_guarded(dashboard_key, m) for m in chart_metrics[:2]]
         chart_results = await asyncio.gather(*chart_tasks, return_exceptions=True)
+        out_charts: list[ChartResult] = []
         for chart_result in chart_results:
             if isinstance(chart_result, ChartResult):
-                charts.append(chart_result)
+                out_charts.append(chart_result)
             else:
                 chart_exc = chart_result if isinstance(chart_result, BaseException) else Exception(chart_result)
                 logger.warning("Chart build failed: %s", chart_exc)
                 warnings.append(f"chart: {chart_exc}")
+        return out_charts, []
+
+    async def _site_options_phase() -> list[dict[str, str]]:
+        if not is_insight_dashboard:
+            return []
+        site_table = "01_incidents_CSV" if dashboard_key == "incident_insights" else "07_requests_CSV"
+        try:
+            site_rows = await _run_sql(
+                *teiid_endpoint,
+                f"""{CACHE_HINT}
+SELECT CAST({_quote_identifier(site_column)} AS string) AS code, MAX(CAST({_quote_identifier(site_label_column)} AS string)) AS name
+FROM {_quote_identifier(site_table)}
+WHERE {_quote_identifier(site_column)} IS NOT NULL
+GROUP BY {_quote_identifier(site_column)}
+ORDER BY 2""",
+            )
+            return [
+                {"code": _row_text(row, "code"), "name": _row_text(row, "name")}
+                for row in site_rows
+            ]
+        except Exception as exc:
+            logger.warning("ITSM insight site options failed: %s", exc)
+            warnings.append("site-filter: site options unavailable")
+            return []
+
+    # Run all three phases concurrently instead of strictly sequentially --
+    # metrics, charts and site-options are otherwise independent Teiid
+    # round-trips, and serializing them (await phase 1 fully, then phase 2,
+    # then phase 3) roughly triples wall-clock time for no correctness
+    # reason. Each phase still bounds its own sub-query concurrency via its
+    # own semaphore.
+    values, (charts, insights), site_options = await asyncio.gather(
+        _metrics_phase(), _charts_phase(), _site_options_phase()
+    )
 
     return DashboardResult(
         dashboard=dashboard_key,
@@ -1170,14 +1368,22 @@ async def warm_itsm_dashboards_for_project(
     blocks user traffic. Dashboards are warmed concurrently up to the limit
     supported by the Teiid connection pool, and each completed dashboard also
     populates the assembled-response cache.
+
+    For the insight presets (the ones the ITSM dashboard UI actually opens),
+    the "all sites" warm result already carries the project's real site list
+    (``data_quality.availableSites``) -- switching to one of those sites was
+    otherwise a guaranteed cache miss, since only the "all sites" bucket was
+    ever warmed. When ``site_code`` is not already pinned by the caller, warm
+    each real site too so a user picking a specific site also gets a cache
+    hit. Capped at ``_MAX_SITES_TO_WARM`` sites per project as a safety valve
+    against a project with an unusually large number of distinct sites.
     """
     presets = presets or list(list_dashboards())
     sem = asyncio.Semaphore(max(1, min(2, pool_manager.max_size // 8)))
 
-    async def _warm_one(preset: str) -> None:
+    async def _warm_dashboard(preset: str, warm_site_code: str | None, period_key: str) -> DashboardResult | None:
         async with sem:
             try:
-                period_key = "1_year" if preset in {"incident_insights", "service_request_insights"} else "latest_month"
                 async with SessionLocal() as warm_session:
                     result = await compute_dashboard(
                         dashboard_key=preset,
@@ -1185,7 +1391,7 @@ async def warm_itsm_dashboards_for_project(
                         session=warm_session,
                         tenant_id=tenant_id,
                         user_id=user_id,
-                        site_code=site_code,
+                        site_code=warm_site_code,
                         date_unit=date_unit,
                         duration_unit=duration_unit,
                         period_key=period_key,
@@ -1198,7 +1404,7 @@ async def warm_itsm_dashboards_for_project(
                         tenant_id=tenant_id,
                         project_id=project_id,
                         dashboard_key=preset,
-                        site_code=site_code,
+                        site_code=warm_site_code,
                         as_of=None,
                         duration_unit=duration_unit,
                         period_key=period_key,
@@ -1206,8 +1412,35 @@ async def warm_itsm_dashboards_for_project(
                     ),
                     result,
                 )
-                logger.info("Warmed ITSM dashboard preset %s for project %s", preset, project_id)
+                logger.info(
+                    "Warmed ITSM dashboard preset %s (site=%s) for project %s",
+                    preset, warm_site_code or "all", project_id,
+                )
+                return result
             except Exception as exc:
-                logger.warning("ITSM dashboard warm failed for %s/%s: %s", project_id, preset, exc)
+                logger.warning(
+                    "ITSM dashboard warm failed for %s/%s (site=%s): %s",
+                    project_id, preset, warm_site_code or "all", exc,
+                )
+                return None
+
+    async def _warm_one(preset: str) -> None:
+        period_key = "1_year" if preset in {"incident_insights", "service_request_insights"} else "latest_month"
+        result = await _warm_dashboard(preset, site_code, period_key)
+        if (
+            site_code is not None
+            or result is None
+            or preset not in {"incident_insights", "service_request_insights"}
+        ):
+            return
+        real_sites = [
+            entry.get("code")
+            for entry in result.data_quality.get("availableSites", [])
+            if entry.get("code")
+        ][:_MAX_SITES_TO_WARM]
+        await asyncio.gather(
+            *[_warm_dashboard(preset, code, period_key) for code in real_sites],
+            return_exceptions=True,
+        )
 
     await asyncio.gather(*[_warm_one(preset) for preset in presets], return_exceptions=True)
