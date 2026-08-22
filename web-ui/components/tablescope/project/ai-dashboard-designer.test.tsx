@@ -52,9 +52,11 @@ function review(
 function renderDesigner({
   mode = "create",
   dashboardId,
+  existingWidgets,
 }: {
   mode?: "create" | "add_insight" | "edit_dashboard";
   dashboardId?: number;
+  existingWidgets?: Array<{ id: string; type: string; title: string; chartSubtype?: string; visualizationOptions?: { valueScale?: string } }>;
 } = {}) {
   const client = new QueryClient();
   const onApplied = vi.fn();
@@ -66,6 +68,7 @@ function renderDesigner({
         projectId="44"
         mode={mode}
         dashboardId={dashboardId}
+        existingWidgets={existingWidgets as never}
         onClose={vi.fn()}
         onApplied={onApplied}
         notify={notify}
@@ -197,6 +200,35 @@ describe("AIDashboardDesigner", () => {
       "/api/ai/actions/dashboard-designer/apply",
       expect.objectContaining({ mode: "edit_dashboard", dashboard_id: 91, currency: "USD" }),
     );
+  });
+
+  it("pre-populates Specific charts from the dashboard's current widgets on Edit", async () => {
+    post
+      .mockResolvedValueOnce(review("fully_supported"))
+      .mockResolvedValueOnce({ dashboard_id: 91, dashboard_name: "Incident Operations Insights", status: "updated" });
+    renderDesigner({
+      mode: "edit_dashboard",
+      dashboardId: 91,
+      existingWidgets: [
+        { id: "w1", type: "kpi", title: "Total Revenue", visualizationOptions: { valueScale: "millions" } },
+        { id: "w2", type: "line", title: "Monthly Revenue", visualizationOptions: { valueScale: "millions" } },
+      ],
+    });
+
+    // Both existing widgets show up as editable rows -- not an empty list --
+    // so an edit means adjusting/removing rows against a real starting
+    // point instead of starting over from a blank "Specific charts" list.
+    expect(screen.getByDisplayValue("Total Revenue")).toBeTruthy();
+    expect(screen.getByDisplayValue("Monthly Revenue")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /analyze data/i }));
+    await screen.findByText("Fully supported");
+
+    const [, reviewBody] = post.mock.calls[0];
+    expect(reviewBody.chart_overrides).toEqual([
+      expect.objectContaining({ label: "Total Revenue", chart_type: "kpi", unit: "millions" }),
+      expect.objectContaining({ label: "Monthly Revenue", chart_type: "line", unit: "millions" }),
+    ]);
   });
 
   it("defaults currency to USD and sends the selected currency through review and apply", async () => {

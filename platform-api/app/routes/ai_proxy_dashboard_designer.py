@@ -1227,7 +1227,18 @@ async def _widget_configs(
         chart_type, label_column, value_column, value_column_2 = _grounded_chart_selection(widget)
         # A display-unit request ("thousands") only divides the rendered axis
         # tick labels; the widget's SQL and raw values are left untouched.
-        axis_scale = _requested_axis_scale(widget)
+        # An explicit unit picked in the designer's "Specific charts" list
+        # (widget["_valueScale"], from ChartOverride.unit) always wins over
+        # the LLM's own axis-scale hint -- same "explicit user pick wins"
+        # rule already applied to a forced chart type below. "hundreds" has
+        # no axis-division equivalent (yAxisScale only supports thousands/
+        # millions/billions -- see components/dashboard/types.ts), so it
+        # only ever reaches valueScale, not the axis.
+        value_scale = widget.get("_valueScale")
+        axis_scale = (
+            value_scale if value_scale in ("thousands", "millions", "billions")
+            else _requested_axis_scale(widget)
+        )
         config = build_widget_config(
             title=str(widget.get("title") or widget.get("businessQuestion") or "Dashboard insight"),
             query_id=query.id,
@@ -1257,7 +1268,6 @@ async def _widget_configs(
         date_field = _widget_date_field(widget, label_column)
         if date_field:
             config["dateField"] = date_field
-        value_scale = widget.get("_valueScale")
         if value_scale:
             config["visualizationOptions"]["valueScale"] = value_scale
         config["visualizationOptions"]["currencySymbol"] = _CURRENCY_SYMBOLS[currency]

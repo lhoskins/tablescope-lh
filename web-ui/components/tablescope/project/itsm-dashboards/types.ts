@@ -1,5 +1,7 @@
 "use client";
 
+import type { VisualizationOptions } from "@/components/dashboard/types";
+
 export interface ItsmMetricValue {
   metricKey: string;
   label: string;
@@ -37,6 +39,13 @@ export interface ItsmChart {
   series: ItsmChartSeries[];
   categories: string[];
   unit: string | null;
+  // Number/currency/scale display options -- set only for AI-Designer
+  // widgets (see toOperationalChartData), which unlike the ITSM presets'
+  // hand-tuned small counts can hold arbitrary-domain values (e.g. dollar
+  // figures in the millions) that need axis/label compacting. Absent for
+  // the ITSM dashboards themselves, so their unformatted-count rendering
+  // (the original, deliberate behavior for that data) is unaffected.
+  visualizationOptions?: VisualizationOptions;
   description?: string | null;
   calculation?: string | null;
   drilldownMetricKey?: string | null;

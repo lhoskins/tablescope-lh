@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { InsightChartBlock } from "@/components/tablescope/home/intelligence-card";
 import type { InsightChart } from "@/lib/api/home-intelligence";
-import type { WidgetType } from "@/components/dashboard/types";
+import type { WidgetConfig, WidgetType } from "@/components/dashboard/types";
 import { ChartTypePicker, type ChartTypeChoice } from "./chart-type-picker";
 import { CHART_REGISTRY } from "@/lib/visualizations/chartRegistry";
 
@@ -241,6 +241,7 @@ export function AIDashboardDesigner({
   dashboardGroupId,
   dashboardGroupName,
   initialPrompt = "",
+  existingWidgets,
   onClose,
   onApplied,
   notify,
@@ -253,6 +254,11 @@ export function AIDashboardDesigner({
   dashboardGroupId?: number;
   dashboardGroupName?: string;
   initialPrompt?: string;
+  // The dashboard's current widgets, in "edit_dashboard" mode only -- seeds
+  // the "Specific charts" list with what's already there so editing means
+  // adjusting/removing/adding rows against a real starting point instead of
+  // an empty list (see the reset effect below).
+  existingWidgets?: WidgetConfig[];
   onClose: () => void;
   onApplied: (dashboardId: number) => void;
   notify: (message: string, tone?: "success" | "error" | "info") => void;
@@ -287,10 +293,25 @@ export function AIDashboardDesigner({
     setStep(1);
     setPrompt(initialPrompt);
     setDashboardTitle("");
-    setDesiredCharts([emptyDesiredChart()]);
+    setDesiredCharts(
+      mode === "edit_dashboard" && existingWidgets && existingWidgets.length > 0
+        ? existingWidgets.map((w) => ({
+            label: w.title,
+            chartType: w.type,
+            chartSubtype: w.chartSubtype ?? "",
+            unit: w.visualizationOptions?.valueScale ?? "auto",
+          }))
+        : [emptyDesiredChart()],
+    );
     setPrimaryDimensionCandidates([]);
     setReview(null);
     setAcceptPartial(false);
+    // existingWidgets is an array literal from the parent's own useMemo, but
+    // is otherwise stable per dashboard load -- excluded from deps so a
+    // parent re-render mid-edit (e.g. from an unrelated query refetch)
+    // doesn't wipe rows the user is actively editing. mode/open already
+    // cover every case this effect needs to re-run for.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialPrompt, mode, open]);
 
   // "Specific charts" (exact chart list with per-row type/unit) is available
