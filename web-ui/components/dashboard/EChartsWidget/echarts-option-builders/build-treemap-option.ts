@@ -89,7 +89,7 @@ export function buildTreemapOption(
   return {
     aria: { enabled: true, description: `${widget.title || widget.type} chart` },
     color: colors,
-    tooltip: opts.showTooltip === false || tiny ? { show: false } : { trigger: "item", formatter: (p: any) => `${p.name}: ${formatNumber(Number(p.value ?? 0), opts.yAxisFormat)}` },
+    tooltip: opts.showTooltip === false || tiny ? { show: false } : { trigger: "item", formatter: (p: any) => `${p.name}: ${formatNumber(Number(p.value ?? 0), opts.yAxisFormat, undefined, opts.currencySymbol)}` },
     series: [{
       type: "treemap" as const,
       data: treeData,

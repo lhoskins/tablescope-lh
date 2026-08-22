@@ -21,6 +21,11 @@ import type {
   ItsmChart as OperationalChartData,
   ItsmChartSeries,
 } from "@/components/tablescope/project/itsm-dashboards/types";
+import {
+  OperationalBriefStrip,
+  toOperationalStories,
+  type OperationalNarrativeItem,
+} from "@/components/tablescope/project/operational-dashboard-shell";
 
 export { OperationalChart };
 export type { OperationalChartData };
@@ -30,11 +35,15 @@ interface OperationalNarrativeWidget {
   type?: string;
   title?: string;
   summary?: string;
-  items?: string[];
+  // The designer emits structured `{label, detail, tone}` brief items;
+  // dashboards saved earlier hold plain strings. Both render (see
+  // `toOperationalStories`), so no migration is required.
+  items?: Array<string | OperationalNarrativeItem>;
 }
 
-const BRIEF_LABELS = ["Risk", "Primary driver", "Recommended action"];
-const BRIEF_DOT_CLASSES = ["bg-rose-500", "bg-amber-500", "bg-emerald-500"];
+function narrativeText(item: string | OperationalNarrativeItem): string {
+  return typeof item === "string" ? item : item.detail || item.label || "";
+}
 
 const EDIT_ICON = (
   <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -274,29 +283,10 @@ export function OperationalInsightGrid({
   return (
     <div className={styles.dashboardContainer}>
       {brief && (
-        <div className={styles.insightBrief}>
-          <div>
-            <div className="text-small font-semibold text-ink-primary">Operational brief</div>
-            <div className="text-[11px] text-ink-tertiary">
-              {brief.summary || "The story behind the selected period"}
-            </div>
-          </div>
-          <div className={styles.insightBriefGrid}>
-            {(brief.items ?? []).slice(0, 3).map((item, index) => (
-              <div key={index} className="grid grid-cols-[auto_1fr] gap-2 text-left">
-                <span
-                  className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${BRIEF_DOT_CLASSES[index] ?? "bg-blue-500"}`}
-                />
-                <span>
-                  <span className="block text-xs font-semibold text-ink-primary">
-                    {BRIEF_LABELS[index] ?? "Insight"}
-                  </span>
-                  <span className="block text-[11px] leading-4 text-ink-tertiary">{item}</span>
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <OperationalBriefStrip
+          stories={toOperationalStories(brief.items, brief.summary)}
+          subtitle={brief.summary || "The story behind the selected period"}
+        />
       )}
 
       {kpiWidgets.length > 0 && (
@@ -368,7 +358,7 @@ export function OperationalInsightGrid({
                     className="flex items-start justify-between gap-3 border-b border-line-tertiary pb-3 text-left last:border-0"
                   >
                     <span className="block text-xs font-semibold text-ink-primary">
-                      {index + 1}. {item}
+                      {index + 1}. {narrativeText(item)}
                     </span>
                   </div>
                 ))}

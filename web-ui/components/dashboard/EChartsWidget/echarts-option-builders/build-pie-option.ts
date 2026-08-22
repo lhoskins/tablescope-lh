@@ -96,7 +96,7 @@ export function buildPieOption(
   const labelFormatter = (p: any) => {
     if (labelMode === "none") return "";
     if (labelMode === "name") return p.name;
-    if (labelMode === "value") return formatNumber(Number(p.value ?? 0), opts.yAxisFormat);
+    if (labelMode === "value") return formatNumber(Number(p.value ?? 0), opts.yAxisFormat, undefined, opts.currencySymbol);
     return `${p.name}\n${p.percent}%`;
   };
 
@@ -109,7 +109,7 @@ export function buildPieOption(
   const option: any = {
     aria: { enabled: true, description: `${widget.title || widget.type} chart` },
     color: colors,
-    tooltip: opts.showTooltip === false ? { show: false } : { trigger: "item", formatter: (p: any) => `${p.name}: ${formatNumber(Number(p.value ?? 0), opts.yAxisFormat)} (${p.percent}%)` },
+    tooltip: opts.showTooltip === false ? { show: false } : { trigger: "item", formatter: (p: any) => `${p.name}: ${formatNumber(Number(p.value ?? 0), opts.yAxisFormat, undefined, opts.currencySymbol)} (${p.percent}%)` },
     legend: opts.showLegend !== false ? getLegendConfig(opts, isDark) : undefined,
     series: [{
       type: "pie" as const,
@@ -144,7 +144,7 @@ export function buildPieOption(
       endAngle: end,
       min: opts.domainMin ?? 0,
       max: opts.domainMax && opts.domainMax > 0 ? opts.domainMax : Math.max(100, d.value * 1.2),
-      detail: { formatter: (v: number) => formatNumber(v, opts.yAxisFormat), fontSize: 14, color: isDark ? "#cbd5e1" : "#475569" },
+      detail: { formatter: (v: number) => formatNumber(v, opts.yAxisFormat, undefined, opts.currencySymbol), fontSize: 14, color: isDark ? "#cbd5e1" : "#475569" },
       data: [{ value: d.value, name: d.name }],
       axisLine: { lineStyle: { color: [[1, colors[0]]], width: 20 } },
       splitLine: { show: false },

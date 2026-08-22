@@ -64,9 +64,9 @@ import { CanvasRenderer } from "echarts/renderers";import { formatNumber, type V
 
 
 
-export function tooltipFormatter(params: any, format?: string, scale?: ValueScale) {
+export function tooltipFormatter(params: any, format?: string, scale?: ValueScale, currencySymbol?: string) {
   const rows = Array.isArray(params) ? params : [params];
   if (!rows.length) return "";
   const axis = rows[0].axisValueLabel ?? rows[0].name ?? "";
-  return axis + rows.map((p: any) => `<br/>${p.marker} ${p.seriesName}: ${formatNumber(Number(p.value ?? 0), format, scale)}`).join("");
+  return axis + rows.map((p: any) => `<br/>${p.marker} ${p.seriesName}: ${formatNumber(Number(p.value ?? 0), format, scale, currencySymbol)}`).join("");
 }

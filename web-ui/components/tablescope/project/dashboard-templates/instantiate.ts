@@ -63,6 +63,8 @@ function operationalWidgets(
     ...(suggestion.widgets ?? []).map((widget) => widget.businessQuestion || widget.title || ""),
   ].filter(Boolean).slice(0, 5);
   const now = new Date().toISOString();
+  const risk = context?.risks?.[0] || suggestion.businessPurpose || suggestion.description || `Operational view of ${dashboardName}.`;
+  const driver = suggestion.widgets?.[0]?.businessQuestion || suggestion.widgets?.[0]?.title || risk;
   return [
     {
       id: "operational-brief",
@@ -75,7 +77,11 @@ function operationalWidgets(
         suggestion.businessPurpose ||
         suggestion.description ||
         `Operational view of ${dashboardName}.`,
-      items: context?.risks?.slice(0, 3) ?? [],
+      items: [
+        { label: "Backing risk", detail: risk, tone: "critical" },
+        { label: "Primary driver", detail: driver, tone: "warning" },
+        { label: "Recommended action", detail: opportunities[0] || "Review the highest-impact validated measure and its leading contributor.", tone: "positive" },
+      ],
       updatedAt: now,
     },
     {
@@ -90,6 +96,7 @@ function operationalWidgets(
           ? opportunities
           : ["Analyze the latest governed data to identify the highest-impact opportunity."],
       updatedAt: now,
+      layout: { position: 1, width: "standard", gridX: 9, gridY: 5, gridW: 3, gridH: 3 },
     },
   ];
 }
@@ -179,6 +186,7 @@ async function generateDashboard(
       dashboardGroupId,
       dashboardTemplate: metadata,
       operationalWidgets: operationalWidgets(definition.name, prompt, review.suggestion),
+      operationalLayoutVersion: 2,
     },
   });
 

@@ -14,6 +14,7 @@ import { COLOR_SCHEME_OPTION } from "./color-scheme-option";
 import { LEGEND_POSITION_OPTION } from "./legend-position-option";
 import { X_AXIS_ROTATE_OPTION } from "./x-axis-rotate-option";
 import { Y_AXIS_FORMAT_OPTION } from "./y-axis-format-option";
+import { Y_AXIS_SCALE_OPTION } from "./y-axis-scale-option";
 import { DATA_ZOOM_OPTION } from "./data-zoom-option";
 import { SHARED_DISPLAY_OPTIONS } from "./shared-display-options";
 import { ANALYTICAL_LAYER_OPTIONS } from "./analytical-layer-options";
@@ -25,6 +26,7 @@ export const LINE_OPTIONS: ChartOptionDefinition[] = [
   COLOR_SCHEME_OPTION,
   LEGEND_POSITION_OPTION,
   Y_AXIS_FORMAT_OPTION,
+  Y_AXIS_SCALE_OPTION,
   X_AXIS_ROTATE_OPTION,
   DATA_ZOOM_OPTION,
   ...ANALYTICAL_LAYER_OPTIONS,

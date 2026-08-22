@@ -53,9 +53,13 @@ export type VisualizationOptions = {
   // Axis & formatting
   xAxisLabelRotate?: number;
   yAxisFormat?: "number" | "currency" | "percent" | "compact";
+  /** Divide displayed axis ticks by the selected unit while preserving raw data. */
+  yAxisScale?: "none" | "thousands" | "millions" | "billions";
   // Forces the display unit (e.g. always $ in millions) instead of the
   // auto K/M breakpoints yAxisFormat's "currency"/"compact" already apply.
   valueScale?: "auto" | "hundreds" | "thousands" | "millions";
+  /** Symbol shown for yAxisFormat: "currency" (e.g. "$", "€"). Defaults to "$". */
+  currencySymbol?: string;
   dataZoom?: boolean;
   // Line / Area
   lineStyle?: "solid" | "dashed";
@@ -263,6 +267,8 @@ export type DashboardConfig = {
   dashboardTemplate?: Record<string, unknown>;
   /** Reusable AI-managed narrative widgets rendered above the chart grid. */
   operationalWidgets?: Array<Record<string, unknown>>;
+  /** Versioned ITSM-compatible placement policy for AI operational dashboards. */
+  operationalLayoutVersion?: number;
   templateBindingId?: number;
   dashboardGroupId?: number;
 };

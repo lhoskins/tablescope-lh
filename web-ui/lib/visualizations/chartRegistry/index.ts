@@ -9,6 +9,7 @@ export * from "./color-scheme-option";
 export * from "./legend-position-option";
 export * from "./x-axis-rotate-option";
 export * from "./y-axis-format-option";
+export * from "./y-axis-scale-option";
 export * from "./data-zoom-option";
 export * from "./analytical-layer-options";
 export * from "./line-options";

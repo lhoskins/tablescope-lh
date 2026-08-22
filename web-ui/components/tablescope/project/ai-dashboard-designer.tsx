@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   IconAlertTriangle,
   IconArrowLeft,
   IconChartBar,
   IconCheck,
+  IconCommand,
   IconDatabase,
   IconSparkles,
   IconX,
@@ -21,8 +22,6 @@ import type { InsightChart } from "@/lib/api/home-intelligence";
 import type { WidgetType } from "@/components/dashboard/types";
 import { ChartTypePicker, type ChartTypeChoice } from "./chart-type-picker";
 import { CHART_REGISTRY } from "@/lib/visualizations/chartRegistry";
-import { useProjectQueries, type SavedQuery } from "@/lib/ui/use-project-data";
-import { safeTableName } from "./detail-views/safe-table-name";
 
 export type DashboardDesignerMode =
   | "create"
@@ -66,6 +65,21 @@ interface DashboardSuggestion {
   savePayload?: Record<string, unknown>;
 }
 
+/** A categorical field discovered across the proposed widgets' already-
+ * executed previews (see _discover_primary_dimensions on the backend) --
+ * never a manually typed Site/Region label. `label` starts as the AI's
+ * suggestion and is user-editable; `incompatibleWidgets` and `fullCoverage`
+ * are recomputed client-side after a "Remove incompatible chart" click. */
+interface PrimaryDimensionCandidate {
+  field: string;
+  label: string;
+  compatibleCount: number;
+  totalCount: number;
+  fullCoverage: boolean;
+  compatibleWidgets: string[];
+  incompatibleWidgets: Array<{ title: string }>;
+}
+
 interface DesignReview {
   supportStatus: SupportStatus;
   supportSummary: string;
@@ -88,6 +102,7 @@ interface DesignReview {
     columns: Array<{ name: string; type: string }>;
   }>;
   suggestion: DashboardSuggestion | null;
+  primaryDimensionCandidates?: PrimaryDimensionCandidate[];
 }
 
 interface ApplyResponse {
@@ -104,6 +119,12 @@ const PERIODS = [
   ["1_year", "1 year"],
   ["2_years", "2 years"],
 ] as const;
+
+const CURRENCIES = [
+  ["USD", "USD"],
+  ["EUR", "Euro"],
+] as const;
+type CurrencyCode = (typeof CURRENCIES)[number][0];
 
 const DESIGN_STEPS = [
   [1, "Describe"],
@@ -249,11 +270,15 @@ export function AIDashboardDesigner({
   const [audience, setAudience] = useState("operational");
   const [emphasis, setEmphasis] = useState("balanced_operational_health");
   const [period, setPeriod] = useState("1_year");
-  const [dimensionLabel, setDimensionLabel] = useState("Site");
-  // A saved query the user picked as the dimension's real value source
-  // (must return exactly one column); undefined keeps today's decorative,
-  // unbound free-text label with "Not listed -- Generate from AI".
-  const [primaryDimensionQueryId, setPrimaryDimensionQueryId] = useState<number | undefined>(undefined);
+  const [currency, setCurrency] = useState<CurrencyCode>("USD");
+  // Decorative fallback label used only when no AI-discovered primary
+  // dimension ends up assigned (see primaryDimensionCandidates below) -- no
+  // longer a user-facing Site/Region default on this screen.
+  const [dimensionLabel, setDimensionLabel] = useState("Dimension");
+  // Every candidate _discover_primary_dimensions found on the review step,
+  // client-editable (label) and client-recomputable (coverage, after a
+  // "Remove incompatible chart" click removes a widget from review.suggestion).
+  const [primaryDimensionCandidates, setPrimaryDimensionCandidates] = useState<PrimaryDimensionCandidate[]>([]);
   const [review, setReview] = useState<DesignReview | null>(null);
   const [acceptPartial, setAcceptPartial] = useState(false);
 
@@ -263,58 +288,25 @@ export function AIDashboardDesigner({
     setPrompt(initialPrompt);
     setDashboardTitle("");
     setDesiredCharts([emptyDesiredChart()]);
-    setPrimaryDimensionQueryId(undefined);
+    setPrimaryDimensionCandidates([]);
     setReview(null);
     setAcceptPartial(false);
   }, [initialPrompt, mode, open]);
 
-  const { data: projectQueries } = useProjectQueries(projectId);
-  const [singleColumnQueryIds, setSingleColumnQueryIds] = useState<Set<number> | null>(null);
-  const loadingSingleColumnQueries = useRef(false);
-
-  // Lazily probes each saved query's column count on first dropdown open --
-  // there's no cached column metadata on SavedQuery today, so this is the
-  // only way to filter to single-column queries, and it's deferred so a
-  // project with many queries doesn't pay for it on every designer open.
-  const loadSingleColumnQueries = async () => {
-    if (singleColumnQueryIds !== null || loadingSingleColumnQueries.current || !projectQueries?.length) return;
-    loadingSingleColumnQueries.current = true;
-    try {
-      const results = await Promise.all(
-        projectQueries.map(async (query) => {
-          if (!query.sql_text) return null;
-          try {
-            const resp = await apiClient.post<{ columns?: string[] }>("/api/query/datasource", {
-              tableName: safeTableName(query.left_datasource),
-              sql: query.sql_text,
-              limit: 1,
-              project_id: Number(projectId),
-            });
-            return (resp.columns?.length ?? 0) === 1 ? query.id : null;
-          } catch {
-            return null;
-          }
-        }),
-      );
-      setSingleColumnQueryIds(new Set(results.filter((id): id is number => id !== null)));
-    } finally {
-      loadingSingleColumnQueries.current = false;
-    }
-  };
-
-  const singleColumnQueries: SavedQuery[] = useMemo(() => {
-    if (!projectQueries || !singleColumnQueryIds) return [];
-    return projectQueries.filter((q) => singleColumnQueryIds.has(q.id));
-  }, [projectQueries, singleColumnQueryIds]);
+  // "Specific charts" (exact chart list with per-row type/unit) is available
+  // wherever the designer proposes a full dashboard result to review before
+  // applying -- create and edit_dashboard -- but not the single-insight
+  // add/edit modes, which already target one chart by construction.
+  const showsSpecificCharts = mode === "create" || mode === "edit_dashboard";
 
   const requestedChartCount = useMemo(
-    () => (mode === "create" ? desiredCharts.map((c) => c.label.trim()).filter(Boolean).length : 0),
-    [desiredCharts, mode],
+    () => (showsSpecificCharts ? desiredCharts.map((c) => c.label.trim()).filter(Boolean).length : 0),
+    [desiredCharts, showsSpecificCharts],
   );
 
   const effectivePrompt = useMemo(
-    () => (mode === "create" ? buildDesignPrompt(prompt, desiredCharts) : prompt.trim()),
-    [desiredCharts, mode, prompt],
+    () => (showsSpecificCharts ? buildDesignPrompt(prompt, desiredCharts) : prompt.trim()),
+    [desiredCharts, showsSpecificCharts, prompt],
   );
 
   const chartOverrides = useMemo(
@@ -340,11 +332,15 @@ export function AIDashboardDesigner({
       audience,
       emphasis,
       period,
+      currency,
       dimension_label: dimensionLabel.trim() || "Dimension",
-      chart_overrides: mode === "create" ? chartOverrides : [],
+      chart_overrides: showsSpecificCharts ? chartOverrides : [],
       dashboard_group_id: dashboardGroupId,
     }),
-    [audience, dashboardGroupId, dashboardId, dimensionLabel, effectivePrompt, emphasis, mode, period, projectId, targetInsightId],
+    [
+      audience, chartOverrides, currency, dashboardGroupId, dashboardId, dimensionLabel,
+      effectivePrompt, emphasis, mode, period, projectId, showsSpecificCharts, targetInsightId,
+    ],
   );
 
   const reviewMutation = useMutation({
@@ -355,6 +351,7 @@ export function AIDashboardDesigner({
       ),
     onSuccess: (response) => {
       setReview(response);
+      setPrimaryDimensionCandidates(response.primaryDimensionCandidates ?? []);
       setAcceptPartial(false);
       setStep(2);
     },
@@ -364,6 +361,9 @@ export function AIDashboardDesigner({
   const applyMutation = useMutation({
     mutationFn: () => {
       if (!review?.suggestion) throw new Error("There is no validated design to apply.");
+      const fullCoverageDimensions = primaryDimensionCandidates
+        .filter((candidate) => candidate.fullCoverage)
+        .map((candidate) => ({ field: candidate.field, label: candidate.label.trim() || candidate.field }));
       return apiClient.post<ApplyResponse>(
         "/api/ai/actions/dashboard-designer/apply",
         {
@@ -377,8 +377,9 @@ export function AIDashboardDesigner({
           audience,
           emphasis,
           period,
+          currency,
           dimension_label: dimensionLabel.trim() || "Dimension",
-          primary_dimension_query_id: primaryDimensionQueryId ?? null,
+          primary_dimensions: fullCoverageDimensions,
           support_status: review.supportStatus,
           accept_partial: acceptPartial,
           suggestion: review.suggestion,
@@ -469,7 +470,7 @@ export function AIDashboardDesigner({
                   </div>
                 )}
 
-                {mode === "create" && (
+                {showsSpecificCharts && (
                   <div className="mb-4">
                     <div className="text-h3 text-ink-primary">Specific charts (optional)</div>
                     <p className="mt-1 text-small text-ink-tertiary">
@@ -555,7 +556,7 @@ export function AIDashboardDesigner({
                 )}
 
                 <label htmlFor="ai-dashboard-request" className="text-h3 text-ink-primary">
-                  {mode === "create" && requestedChartCount > 0 ? "Additional context (optional)" : copy.prompt}
+                  {showsSpecificCharts && requestedChartCount > 0 ? "Additional context (optional)" : copy.prompt}
                 </label>
                 <p className="mt-1 text-small text-ink-tertiary">
                   Use business language. AI selects the metrics, queries, calculations and compatible charts.
@@ -564,7 +565,7 @@ export function AIDashboardDesigner({
                   id="ai-dashboard-request"
                   value={prompt}
                   onChange={(event) => setPrompt(event.target.value)}
-                  rows={mode === "create" && requestedChartCount > 0 ? 3 : 7}
+                  rows={showsSpecificCharts && requestedChartCount > 0 ? 3 : 7}
                   placeholder="Example: Show demand versus resolution capacity, backlog and SLA risk, the sites driving breaches, and the best improvement opportunities."
                   className="mt-3 w-full resize-y rounded-md border border-line-secondary bg-bg-primary p-3 text-[13px] text-ink-primary focus:border-brand-500 focus:outline-none"
                 />
@@ -599,31 +600,14 @@ export function AIDashboardDesigner({
                     </select>
                   </label>
                   <label className="text-small font-medium text-ink-secondary">
-                    Primary dimension
+                    Currency
                     <select
-                      value={primaryDimensionQueryId ?? "ai"}
-                      onFocus={loadSingleColumnQueries}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        if (value === "ai") {
-                          setPrimaryDimensionQueryId(undefined);
-                          setDimensionLabel("Dimension");
-                          return;
-                        }
-                        const id = Number(value);
-                        setPrimaryDimensionQueryId(id);
-                        setDimensionLabel(singleColumnQueries.find((q) => q.id === id)?.name || "Dimension");
-                      }}
+                      value={currency}
+                      onChange={(event) => setCurrency(event.target.value as CurrencyCode)}
                       className="mt-1 h-9 w-full rounded-md border border-line-secondary bg-bg-primary px-2 text-[12px]"
                     >
-                      {singleColumnQueries.map((query) => (
-                        <option key={query.id} value={query.id}>{query.name}</option>
-                      ))}
-                      <option value="ai">Not listed — Generate from AI</option>
+                      {CURRENCIES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                     </select>
-                    <span className="mt-1 block text-[11px] leading-4 text-ink-tertiary">
-                      Only single-column queries are listed. Pick &quot;Not listed&quot; to let AI derive the dimension.
-                    </span>
                   </label>
                   <label className="text-small font-medium text-ink-secondary">
                     Operational emphasis
@@ -661,6 +645,7 @@ export function AIDashboardDesigner({
               audience={audience}
               emphasis={emphasis}
               acceptPartial={acceptPartial}
+              primaryDimensionCandidates={primaryDimensionCandidates}
               onAudience={setAudience}
               onEmphasis={setEmphasis}
               onAcceptPartial={setAcceptPartial}
@@ -668,6 +653,37 @@ export function AIDashboardDesigner({
               onSaveRequest={() => {
                 window.sessionStorage.setItem(`dashboard-request:${projectId}`, effectivePrompt);
                 notify("Dashboard request saved until supporting data is added", "info");
+              }}
+              onRelabelDimension={(field, label) =>
+                setPrimaryDimensionCandidates((current) =>
+                  current.map((candidate) => (candidate.field === field ? { ...candidate, label } : candidate)),
+                )
+              }
+              onRemoveIncompatibleChart={(field, widgetTitle) => {
+                setReview((current) => {
+                  if (!current?.suggestion) return current;
+                  return {
+                    ...current,
+                    suggestion: {
+                      ...current.suggestion,
+                      widgets: current.suggestion.widgets.filter((widget) => widget.title !== widgetTitle),
+                    },
+                  };
+                });
+                setPrimaryDimensionCandidates((current) =>
+                  current.map((candidate) => {
+                    if (candidate.field !== field) return candidate;
+                    const incompatibleWidgets = candidate.incompatibleWidgets.filter(
+                      (widget) => widget.title !== widgetTitle,
+                    );
+                    return {
+                      ...candidate,
+                      incompatibleWidgets,
+                      totalCount: Math.max(0, candidate.totalCount - 1),
+                      fullCoverage: incompatibleWidgets.length === 0,
+                    };
+                  }),
+                );
               }}
             />
             <div className="mt-4 flex flex-wrap justify-end gap-2">
@@ -689,7 +705,7 @@ export function AIDashboardDesigner({
             <OperationalDashboardPreview
               suggestion={review.suggestion}
               period={PERIODS.find(([value]) => value === period)?.[1] ?? period}
-              dimension={dimensionLabel}
+              dimension={primaryDimensionCandidates.find((c) => c.fullCoverage)?.label ?? dimensionLabel}
               compact={mode === "add_insight" || mode === "edit_insight"}
             />
             <div className="mt-4 flex flex-wrap justify-end gap-2 px-1 pb-1">
@@ -735,21 +751,27 @@ function SupportReview({
   audience,
   emphasis,
   acceptPartial,
+  primaryDimensionCandidates,
   onAudience,
   onEmphasis,
   onAcceptPartial,
   onAddData,
   onSaveRequest,
+  onRelabelDimension,
+  onRemoveIncompatibleChart,
 }: {
   review: DesignReview;
   audience: string;
   emphasis: string;
   acceptPartial: boolean;
+  primaryDimensionCandidates: PrimaryDimensionCandidate[];
   onAudience: (value: string) => void;
   onEmphasis: (value: string) => void;
   onAcceptPartial: (value: boolean) => void;
   onAddData: () => void;
   onSaveRequest: () => void;
+  onRelabelDimension: (field: string, label: string) => void;
+  onRemoveIncompatibleChart: (field: string, widgetTitle: string) => void;
 }) {
   const status = statusPresentation(review.supportStatus);
   const StatusIcon = status.icon;
@@ -844,6 +866,68 @@ function SupportReview({
           </div>
         </Card>
       </div>
+
+      {primaryDimensionCandidates.length > 0 && (
+        <Card className="p-4 lg:col-span-2">
+          <div className="flex items-center gap-2">
+            <IconCommand size={17} />
+            <h3 className="text-h3 text-ink-primary">Primary dimension compatibility</h3>
+            <Badge tone="ai">AI analyzed</Badge>
+          </div>
+          <p className="mt-1 text-small text-ink-tertiary">
+            AI labels categorical fields from validated query results. Only dimensions covering every retained chart are created.
+          </p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {primaryDimensionCandidates.map((candidate) => (
+              <div
+                key={candidate.field}
+                className={`rounded-lg border p-3 ${candidate.fullCoverage ? "border-emerald-200 bg-emerald-50/40" : "border-amber-200 bg-amber-50/40"}`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <label className="min-w-0 flex-1 text-[10px] font-semibold uppercase tracking-wide text-ink-tertiary">
+                    Editable dimension label
+                    <input
+                      value={candidate.label}
+                      onChange={(event) => onRelabelDimension(candidate.field, event.target.value)}
+                      className="mt-1 h-8 w-full rounded-md border border-line-secondary bg-bg-primary px-2 text-[13px] font-normal normal-case text-ink-primary focus:border-brand-500 focus:outline-none"
+                    />
+                  </label>
+                  <Badge tone={candidate.fullCoverage ? "success" : "warning"}>
+                    {candidate.fullCoverage ? "Full coverage" : `${candidate.compatibleCount}/${candidate.totalCount} charts`}
+                  </Badge>
+                </div>
+                <p className="mt-2 text-[11px] text-ink-tertiary">Field: {candidate.field} · AI-generated label</p>
+                {candidate.fullCoverage ? (
+                  <p className="mt-2 text-[11px] text-emerald-700">
+                    ✓ This dimension will be created and available in the dashboard switcher.
+                  </p>
+                ) : (
+                  <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2">
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-amber-900">Incompatible chart{candidate.incompatibleWidgets.length === 1 ? "" : "s"}</div>
+                    <ul className="mt-1 space-y-1">
+                      {candidate.incompatibleWidgets.map((widget) => (
+                        <li key={widget.title} className="text-[11px] text-amber-800">• {widget.title}</li>
+                      ))}
+                    </ul>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="mt-2"
+                      onClick={() => {
+                        for (const widget of candidate.incompatibleWidgets) {
+                          onRemoveIncompatibleChart(candidate.field, widget.title);
+                        }
+                      }}
+                    >
+                      Remove incompatible chart{candidate.incompatibleWidgets.length === 1 ? "" : "s"}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
     </div>
   );
 }

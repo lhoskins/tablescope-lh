@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { IconArrowLeft, IconRefresh, IconX } from "@tabler/icons-react";
+import { IconRefresh, IconX } from "@tabler/icons-react";
 import { apiClient } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -18,6 +18,10 @@ import type {
 } from "./types";
 import { useItsmDashboardQuery } from "./use-itsm-dashboard-query";
 import styles from "./ItsmDashboardScreen.module.css";
+import {
+  OperationalBriefStrip,
+  OperationalDashboardHeader,
+} from "@/components/tablescope/project/operational-dashboard-shell";
 
 const INSIGHT_LABELS: Record<string, string> = {
   incident_insights: "Incident Management Insights",
@@ -59,13 +63,6 @@ function formatPrevious(metric: ItsmMetricValue): string {
   if (metric.unit === "days") return `${metric.previousValue.toFixed(1)} days`;
   if (metric.unit === "count") return Math.round(metric.previousValue).toLocaleString();
   return metric.previousValue.toFixed(1);
-}
-
-function toneClass(tone: string): string {
-  if (tone === "critical") return "bg-rose-500";
-  if (tone === "warning") return "bg-amber-500";
-  if (tone === "positive") return "bg-emerald-500";
-  return "bg-blue-500";
 }
 
 export function ItsmInsightsDashboardContent({
@@ -207,30 +204,13 @@ export function ItsmInsightsDashboardContent({
 
   return (
     <div className={cn("space-y-3", styles.dashboardContainer)}>
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div className="flex items-start gap-2">
-          <button
-            type="button"
-            onClick={onBack}
-            aria-label="Back to dashboards"
-            className="mt-1 rounded-md p-1 text-ink-tertiary hover:bg-brand-50/60 hover:text-ink-primary"
-          >
-            <IconArrowLeft size={18} />
-          </button>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-h2 text-ink-primary">{INSIGHT_LABELS[selectedPreset]}</h1>
-              {dashboard && <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600">Live</span>}
-            </div>
-            <p className="text-xs text-ink-tertiary">
-              Operational patterns, contributors and recommended actions
-              {dashboard && ` · ${dashboard.dataQuality.reportingPeriod ?? dashboard.dataQuality.latestCompleteMonth}`}
-              {(backgroundRefreshing || isFetching) && " · refreshing in background"}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-end gap-2">
+      <OperationalDashboardHeader
+        title={INSIGHT_LABELS[selectedPreset]}
+        subtitle={`Operational patterns, contributors and recommended actions${dashboard ? ` · ${dashboard.dataQuality.reportingPeriod ?? dashboard.dataQuality.latestCompleteMonth}` : ""}${backgroundRefreshing || isFetching ? " · refreshing in background" : ""}`}
+        live={Boolean(dashboard)}
+        onBack={onBack}
+        controls={
+          <>
           <label className="sr-only" htmlFor="itsm-insight-period">Period</label>
           <select
             id="itsm-insight-period"
@@ -274,8 +254,9 @@ export function ItsmInsightsDashboardContent({
           <Button variant="secondary" size="sm" onClick={forceRefresh} disabled={manualRefreshing}>
             <IconRefresh size={14} className={cn(manualRefreshing && "animate-spin")} /> Refresh
           </Button>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {editingLayout && (
         <div className="rounded-md border border-dashed border-brand-200 bg-brand-50/40 px-3 py-2 text-xs text-ink-secondary">
@@ -288,31 +269,18 @@ export function ItsmInsightsDashboardContent({
 
       {dashboard && (
         <>
-          <div className={styles.insightBrief}>
-            <div>
-              <div className="text-sm font-semibold text-ink-primary">Operational brief</div>
-              <div className="text-[11px] text-ink-tertiary">The story behind the selected period</div>
-            </div>
-            <div className={styles.insightBriefGrid}>
-              {(dashboard.insights ?? []).map((insight) => (
-                <button
-                  type="button"
-                  key={insight.insightType}
-                  className="grid grid-cols-[auto_1fr] gap-2 text-left"
-                  onClick={() => {
-                    const metric = dashboard.metrics.find((item) => item.metricKey === insight.metricKey);
-                    if (metric) openMetric(metric);
-                  }}
-                >
-                  <span className={cn("mt-1.5 h-2.5 w-2.5 rounded-full", toneClass(insight.tone))} />
-                  <span>
-                    <span className="block text-xs font-semibold text-ink-primary">{insight.title}</span>
-                    <span className="block text-[11px] leading-4 text-ink-tertiary">{insight.detail}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
+          <OperationalBriefStrip
+            stories={(dashboard.insights ?? []).map((insight) => ({
+              id: insight.insightType,
+              title: insight.title,
+              detail: insight.detail,
+              tone: insight.tone,
+              onClick: () => {
+                const metric = dashboard.metrics.find((item) => item.metricKey === insight.metricKey);
+                if (metric) openMetric(metric);
+              },
+            }))}
+          />
 
           <div className={styles.kpiGrid}>
             {orderedMetrics.map((metric) => {

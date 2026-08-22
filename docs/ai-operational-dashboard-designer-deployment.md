@@ -13,16 +13,23 @@ The same workflow powers **Edit dashboard**, **Add insight**, and per-insight
 widgets. Existing non-operational dashboards and their query wiring remain
 unchanged.
 
+This increment also makes AI-created dashboards use the same shared header and
+operational-story shell as ITSM Insights. The dimension type and value are
+separate header controls, layout changes are explicitly gated by **Edit
+layout**, horizontal rankings cannot become full width, improvement
+opportunities default to the bottom-right, and chart display units work like
+Excel without changing raw query values.
+
 ## Branch and pull request
 
 ```bash
 git fetch origin
-git checkout codex/operational-template-bindings
-git pull --ff-only origin codex/operational-template-bindings
+git checkout claude/restore-operational-layout-alignment
+git pull --ff-only origin claude/restore-operational-layout-alignment
 ```
 
-Review and deploy the updated PR #191 into
-`devin/servicenow-itsm-dashboards-v2`.
+Merge into `release/deploy-2026-08-07` (fast-forwards cleanly from the current
+deploy HEAD).
 
 ## Pre-deployment validation
 
@@ -44,10 +51,26 @@ Frontend:
 cd web-ui
 npm ci
 npm run typecheck
-npm run test -- components/tablescope/project/ai-dashboard-designer.test.tsx
+npm run test -- \
+  components/tablescope/project/ai-dashboard-designer.test.tsx \
+  lib/dashboard/operationalLayout.test.ts \
+  components/dashboard/EChartsWidget/axis-scale.test.ts
 npm run build
 cd ..
 ```
+
+## AI server lifecycle for Devin
+
+Devin has permission to start the AI server when a live dashboard-generation
+smoke test requires it. Check and record the server status first. If it is
+stopped, start it through the existing admin AI-server control and mark that
+the task started it. In a `finally`/cleanup step, stop any AI-server instance
+started by this task and confirm the final state is stopped. Do not stop an
+instance that was already running before this task.
+
+Unit tests, typechecking, builds, and deterministic rendering checks do not
+require starting the AI server. Start it only for the live AI acceptance steps
+below, and stop the task-started instance even if validation fails.
 
 ## Release sequence
 
@@ -81,22 +104,33 @@ validation, binding and dashboard hydration pipeline.
 5. In a project without supporting data, confirm **Not supported** prevents
    dashboard creation and **Upload or connect data** opens project datasource
    onboarding.
-6. Create the dashboard. Confirm it uses the complete ServiceNow-style
-   Operational Insight background, cards, skinny bars, Operational Brief and
-   Best Improvement Opportunities—not the legacy dashboard shell.
-7. Confirm the header contains **Edit dashboard** and **+ Add insight**, and no
-   **+ Add Widget** button or legacy widget configuration screen.
-8. Use **+ Add insight** to add one KPI card or chart. Confirm existing insights
-   are unchanged. Use a chart pencil to replace only that insight through AI.
-9. Use **Edit dashboard** to restructure the operational story and review the
+6. Create the dashboard. Confirm its header is the same shared component as
+   ITSM Insights and contains, in order: period, configured dimension type
+   (for example Site or Region), dimension value, dashboard selector, **Edit
+   layout**, **Edit with AI**, and **Refresh**. Confirm there is no inline
+   pencil beside the dimension.
+7. Confirm the full-width Operational Brief sits immediately below the header
+   with Backing risk, Primary driver and Recommended action; KPI cards are the
+   first grid row; and Best Improvement Opportunities is in the bottom-right.
+8. Enter **Edit layout**, drag a chart to the first available grid position,
+   resize it, select **Done**, reload, and confirm the layout persists. Confirm
+   drag/resize is disabled outside Edit layout mode.
+9. Confirm every horizontal bar/ranking chart is at most 6 of 12 columns wide,
+   including after a resize attempt.
+10. Set a numeric chart to **Thousands**. Confirm 37,100,000 renders as 37,100
+    on the numeric axis and the axis is labeled **Thousands**; query results and
+    tooltips retain the original value.
+11. Use **Edit with AI** to restructure the operational story and review the
    full dashboard before applying. Confirm SavedQuery wiring remains governed
    and the dashboard's AI design history increments.
-10. Drag a chart above KPI cards and resize it. Reload and confirm the grid
-    layout persists and remaining cards reflow.
-11. Create a dashboard inside an existing group. Confirm it stays in that group
+12. Create a dashboard inside an existing group. Confirm it stays in that group
     and does not create a duplicate Custom dashboards group.
-12. Open a legacy non-operational dashboard and confirm its existing renderer,
+13. Open a legacy non-operational dashboard and confirm its existing renderer,
     queries and controls still work.
+
+The expected desktop result is captured in
+`docs/mockups/ai-dashboard-itsm-layout.png`; its editable source is the adjacent
+SVG and mirrors the implemented 12-column layout contract.
 
 ## API smoke checks
 

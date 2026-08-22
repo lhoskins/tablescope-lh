@@ -19,7 +19,10 @@ vi.mock("@/components/tablescope/home/intelligence-card", () => ({
 
 import { AIDashboardDesigner } from "./ai-dashboard-designer";
 
-function review(status: "fully_supported" | "partially_supported" | "not_supported") {
+function review(
+  status: "fully_supported" | "partially_supported" | "not_supported",
+  options: { primaryDimensionCandidates?: unknown[]; widgets?: unknown[] } = {},
+) {
   return {
     supportStatus: status,
     supportSummary: "Validated against project data.",
@@ -29,13 +32,14 @@ function review(status: "fully_supported" | "partially_supported" | "not_support
       { chartType: "line", label: "Trend line", compatible: true, reason: "Date plus measure" },
     ],
     sources: [{ viewName: "incidents", fileName: "incidents.csv", columns: [{ name: "opened_at", type: "date" }] }],
+    primaryDimensionCandidates: options.primaryDimensionCandidates ?? [],
     suggestion: status === "not_supported" ? null : {
       id: "one",
       title: "Incident Operations Insights",
       description: "Operational view",
       businessPurpose: "Monitor risk",
       audience: "operational",
-      widgets: [{ title: "Demand trend", chartType: "line", businessQuestion: "Opened over time", status: "valid", sql: "SELECT 1", chart: null, previewData: { columns: ["period", "count"], rows: [{ period: "Jul", count: 10 }] } }],
+      widgets: options.widgets ?? [{ title: "Demand trend", chartType: "line", businessQuestion: "Opened over time", status: "valid", sql: "SELECT 1", chart: null, previewData: { columns: ["period", "count"], rows: [{ period: "Jul", count: 10 }] } }],
       kpis: ["Open backlog"],
       dataSources: ["incidents"],
       confidence: 0.9,
@@ -49,7 +53,7 @@ function renderDesigner({
   mode = "create",
   dashboardId,
 }: {
-  mode?: "create" | "add_insight";
+  mode?: "create" | "add_insight" | "edit_dashboard";
   dashboardId?: number;
 } = {}) {
   const client = new QueryClient();
@@ -163,6 +167,62 @@ describe("AIDashboardDesigner", () => {
     await screen.findByText(/Requested 2 charts; AI proposed 1\./);
   });
 
+  it("shows Specific charts, chart type/unit and Additional context on the Edit dashboard screen too", async () => {
+    post
+      .mockResolvedValueOnce(review("fully_supported"))
+      .mockResolvedValueOnce({ dashboard_id: 91, dashboard_name: "Incident Operations Insights", status: "updated" });
+    const { onApplied } = renderDesigner({ mode: "edit_dashboard", dashboardId: 91 });
+
+    // The "Specific charts (optional)" section -- previously create-only --
+    // must be present and usable on the edit screen.
+    expect(screen.getByText("Specific charts (optional)")).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText(/vendor spend trend/i), {
+      target: { value: "Vendor spend trend over time" },
+    });
+    // Naming a chart relabels the free-text field to "Additional context".
+    expect(screen.getByText("Additional context (optional)")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /analyze data/i }));
+    await screen.findByText("Fully supported");
+    fireEvent.click(screen.getByRole("button", { name: /preview servicenow-style dashboard/i }));
+    fireEvent.click(screen.getByRole("button", { name: /apply dashboard changes/i }));
+
+    await waitFor(() => expect(onApplied).toHaveBeenCalledWith(91));
+    const [reviewCall] = post.mock.calls;
+    const [, reviewBody] = reviewCall;
+    expect(reviewBody.chart_overrides).toEqual([
+      expect.objectContaining({ label: "Vendor spend trend over time" }),
+    ]);
+    expect(post).toHaveBeenLastCalledWith(
+      "/api/ai/actions/dashboard-designer/apply",
+      expect.objectContaining({ mode: "edit_dashboard", dashboard_id: 91, currency: "USD" }),
+    );
+  });
+
+  it("defaults currency to USD and sends the selected currency through review and apply", async () => {
+    post
+      .mockResolvedValueOnce(review("fully_supported"))
+      .mockResolvedValueOnce({ dashboard_id: 91, dashboard_name: "Incident Operations Insights", status: "created" });
+    const { onApplied } = renderDesigner();
+
+    expect(screen.getByLabelText(/currency/i)).toHaveValue("USD");
+    fireEvent.change(screen.getByLabelText(/currency/i), { target: { value: "EUR" } });
+
+    fireEvent.change(screen.getByLabelText(/what do you want people/i), { target: { value: "Show revenue and backlog" } });
+    fireEvent.click(screen.getByRole("button", { name: /analyze data/i }));
+    await screen.findByText("Fully supported");
+    const [, reviewBody] = post.mock.calls[0];
+    expect(reviewBody.currency).toBe("EUR");
+
+    fireEvent.click(screen.getByRole("button", { name: /preview servicenow-style dashboard/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^create dashboard$/i }));
+    await waitFor(() => expect(onApplied).toHaveBeenCalledWith(91));
+    expect(post).toHaveBeenLastCalledWith(
+      "/api/ai/actions/dashboard-designer/apply",
+      expect.objectContaining({ currency: "EUR" }),
+    );
+  });
+
   it("adds one validated insight without regenerating the dashboard", async () => {
     post
       .mockResolvedValueOnce(review("fully_supported"))
@@ -180,5 +240,88 @@ describe("AIDashboardDesigner", () => {
       "/api/ai/actions/dashboard-designer/apply",
       expect.objectContaining({ mode: "add_insight", dashboard_id: 91 }),
     );
+  });
+
+  it("has no Site/Region primary-dimension dropdown on the Describe step", () => {
+    renderDesigner();
+    expect(screen.queryByLabelText(/primary dimension/i)).toBeNull();
+    expect(screen.queryByText(/not listed.*generate from ai/i)).toBeNull();
+  });
+
+  it("shows a full-coverage AI-discovered dimension and sends it on apply", async () => {
+    const twoWidgets = [
+      { title: "Revenue by Unit", chartType: "bar", businessQuestion: "Revenue by business unit", status: "valid", sql: "SELECT 1", chart: null, previewData: { columns: ["business_unit", "revenue"], rows: [{ business_unit: "East", revenue: 100 }] } },
+      { title: "Backlog by Unit", chartType: "bar", businessQuestion: "Backlog by business unit", status: "valid", sql: "SELECT 1", chart: null, previewData: { columns: ["business_unit", "backlog"], rows: [{ business_unit: "East", backlog: 20 }] } },
+    ];
+    post
+      .mockResolvedValueOnce(review("fully_supported", {
+        widgets: twoWidgets,
+        primaryDimensionCandidates: [
+          {
+            field: "business_unit", label: "Business Unit", compatibleCount: 2, totalCount: 2,
+            fullCoverage: true, compatibleWidgets: ["Revenue by Unit", "Backlog by Unit"], incompatibleWidgets: [],
+          },
+        ],
+      }))
+      .mockResolvedValueOnce({ dashboard_id: 91, dashboard_name: "Revenue Dashboard", status: "created" });
+    const { onApplied } = renderDesigner();
+
+    fireEvent.change(screen.getByLabelText(/what do you want people/i), { target: { value: "Show revenue by business unit" } });
+    fireEvent.click(screen.getByRole("button", { name: /analyze data/i }));
+    await screen.findByText("Fully supported");
+
+    expect(screen.getByText("Primary dimension compatibility")).toBeTruthy();
+    expect(screen.getByText("Full coverage")).toBeTruthy();
+    const labelInput = screen.getByDisplayValue("Business Unit");
+    fireEvent.change(labelInput, { target: { value: "Unit" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /preview servicenow-style dashboard/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^create dashboard$/i }));
+
+    await waitFor(() => expect(onApplied).toHaveBeenCalledWith(91));
+    expect(post).toHaveBeenLastCalledWith(
+      "/api/ai/actions/dashboard-designer/apply",
+      expect.objectContaining({
+        primary_dimensions: [{ field: "business_unit", label: "Unit" }],
+      }),
+    );
+  });
+
+  it("does not send a partial dimension until its incompatible chart is removed", async () => {
+    const widgets = [
+      { title: "Revenue by Unit", chartType: "bar", businessQuestion: "Revenue by business unit", status: "valid", sql: "SELECT 1", chart: null, previewData: { columns: ["business_unit", "revenue"], rows: [{ business_unit: "East", revenue: 100 }] } },
+      { title: "Total Revenue", chartType: "kpi", businessQuestion: "Total revenue", status: "valid", sql: "SELECT 1", chart: null, previewData: { columns: ["revenue"], rows: [{ revenue: 4200 }] } },
+    ];
+    post
+      .mockResolvedValueOnce(review("fully_supported", {
+        widgets,
+        primaryDimensionCandidates: [
+          {
+            field: "business_unit", label: "Business Unit", compatibleCount: 1, totalCount: 2,
+            fullCoverage: false, compatibleWidgets: ["Revenue by Unit"],
+            incompatibleWidgets: [{ title: "Total Revenue" }],
+          },
+        ],
+      }))
+      .mockResolvedValueOnce({ dashboard_id: 91, dashboard_name: "Revenue Dashboard", status: "created" });
+    const { onApplied } = renderDesigner();
+
+    fireEvent.change(screen.getByLabelText(/what do you want people/i), { target: { value: "Show revenue by business unit" } });
+    fireEvent.click(screen.getByRole("button", { name: /analyze data/i }));
+    await screen.findByText("Fully supported");
+
+    expect(screen.getByText("1/2 charts")).toBeTruthy();
+    expect(screen.getByText("Total Revenue", { exact: false })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /remove incompatible chart/i }));
+    await waitFor(() => expect(screen.getByText("Full coverage")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: /preview servicenow-style dashboard/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^create dashboard$/i }));
+
+    await waitFor(() => expect(onApplied).toHaveBeenCalledWith(91));
+    const [, applyBody] = post.mock.calls[1];
+    expect(applyBody.primary_dimensions).toEqual([{ field: "business_unit", label: "Business Unit" }]);
+    expect(applyBody.suggestion.widgets.map((w: { title: string }) => w.title)).toEqual(["Revenue by Unit"]);
   });
 });

@@ -13,4 +13,7 @@ export type Props = {
   onPersisted?: () => void;
   /** Called when the user pins a widget to their Home grid. */
   onPinWidget?: (widget: WidgetConfig, data: unknown[], dashboardId: number) => void;
+  /** Dashboards in the same template group, rendered in the shared header. */
+  dashboardOptions?: Array<{ id: number; name: string }>;
+  onSelectDashboard?: (dashboardId: number) => void;
 };

@@ -46,13 +46,51 @@ import { SavedQuery } from "./DashboardViewer/saved-query";
 import { Props } from "./DashboardViewer/props";
 import { resolveDatePreset, type DatePresetId } from "@/lib/dashboard/dateRange";
 import type { DashboardTemplateMetadata } from "@/components/tablescope/project/dashboard-templates/types";
-import { DimensionLabelEditor } from "@/components/tablescope/project/dashboard-templates/dimension-label-editor";
+import {
+  DimensionSwitcher,
+  type DimensionSwitcherOption,
+} from "@/components/tablescope/project/dashboard-templates/dimension-switcher";
 import {
   AIDashboardDesigner,
   type DashboardDesignerMode,
 } from "@/components/tablescope/project/ai-dashboard-designer";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { Button } from "@/components/ui/button";
+import { IconRefresh, IconSparkles } from "@tabler/icons-react";
+// The brief strip itself is rendered by OperationalInsightGrid (the CSS-grid
+// operational renderer), so only the header shell is needed here.
+import {
+  OperationalDashboardHeader,
+  type OperationalNarrativeItem,
+} from "@/components/tablescope/project/operational-dashboard-shell";
+import {
+  operationalLayout,
+  OPERATIONAL_IMPROVEMENTS_LAYOUT_ID,
+} from "@/lib/dashboard/operationalLayout";
+
+const OPERATIONAL_PERIODS: Array<[DatePresetId, string]> = [
+  ["last_30_days", "30 days"],
+  ["last_60_days", "60 days"],
+  ["last_90_days", "90 days"],
+  ["last_6_months", "6 months"],
+  ["last_1_year", "1 Year"],
+  ["last_2_years", "2 Years"],
+];
+
+interface OperationalNarrativeWidget {
+  id: string;
+  type: "operational_brief" | "improvement_opportunities";
+  title?: string;
+  summary?: string;
+  items?: Array<string | OperationalNarrativeItem>;
+  layout?: { position?: number; width?: string; gridX?: number; gridY?: number; gridW?: number; gridH?: number };
+}
+
+function operationalNarratives(dashboard: Dashboard): OperationalNarrativeWidget[] {
+  const value = dashboard.config?.operationalWidgets;
+  return Array.isArray(value) ? value as unknown as OperationalNarrativeWidget[] : [];
+}
 
 function templateMetadata(dashboard: Dashboard): DashboardTemplateMetadata | undefined {
   const value = dashboard.config?.dashboardTemplate;
@@ -78,7 +116,7 @@ function bindingPeriod(period: DatePresetId | undefined, fallback = "30_days"): 
 interface TemplateHydration { metrics: Record<string, { value: unknown; previousValue: unknown; deltaPercent: number | null }>; batches: Array<{ metricKeys: string[]; lineage: { kind?: string }; rows: Array<Record<string, unknown>> }>; }
 
 
-export function DashboardViewer({ dashboard, projectId, savedQueries, datasources, onBack, onPersisted, onPinWidget }: Props) {
+export function DashboardViewer({ dashboard, projectId, savedQueries, datasources, onBack, onPersisted, onPinWidget, dashboardOptions, onSelectDashboard }: Props) {
   const queryClient = useQueryClient();
   const { toasts, push, dismiss } = useToasts();
   const widgets = useMemo(() => dashboard.config?.widgets ?? [], [dashboard.config?.widgets]);
@@ -110,6 +148,10 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   }, [widgetData]);
   const [designerMode, setDesignerMode] = useState<DashboardDesignerMode | null>(null);
   const [dashboardStatus, setDashboardStatus] = useState(dashboard.status);
+  // Operational dashboards are read-only by default; drag/resize is gated
+  // behind an explicit "Edit layout" toggle so a stray drag can't reshuffle
+  // a published dashboard.
+  const [editingLayout, setEditingLayout] = useState(false);
 
   // Ephemeral interaction state (not persisted): date range + cross-filters.
   const [runtime, setRuntime] = useState<DashboardRuntimeState>({
@@ -123,7 +165,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   );
   const [templateField, setTemplateField] = useState(template?.parameters.dimensionLabel ?? "");
   const [templateValue, setTemplateValue] = useState("");
-  const [dimensionLabel, setDimensionLabel] = useState(template?.parameters.dimensionLabel ?? "Dimension");
+  const dimensionLabel = template?.parameters.dimensionLabel ?? "Dimension";
   const [templateOptionsLoading, setTemplateOptionsLoading] = useState(false);
   const [drilldown, setDrilldown] = useState<DrilldownState>({
     open: false, loading: false, error: null, title: "", targetQueryName: null, columns: [], rows: [],
@@ -144,12 +186,32 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   });
   const [editingWidget, setEditingWidget] = useState<WidgetConfig | null>(null);
 
-  const saveDimensionLabel = useCallback(async (nextLabel: string) => {
-    if (!template) return;
-    const nextTemplate = { ...template, parameters: { ...template.parameters, dimensionLabel: nextLabel } };
-    await apiClient.put(`/api/projects/${projectId}/dashboards/${dashboard.id}`, { config: { ...dashboard.config, dashboardTemplate: nextTemplate } });
-    setDimensionLabel(nextLabel); onPersisted?.();
-  }, [dashboard.config, dashboard.id, onPersisted, projectId, template]);
+  // A dashboard can have more than one AI-discovered, full-coverage
+  // primary dimension assigned; the header's switch icon (only, no more
+  // inline label-edit pencil -- labels are now set once, during the AI
+  // designer's review step) toggles which one is active. Gated on
+  // hasBoundDimension since only a query-backed dimension can ever have
+  // assignments -- avoids the request on dashboards that never will.
+  const { data: primaryDimensionAssignments = [] } = useQuery({
+    queryKey: ["dashboard-primary-dimensions", projectId, dashboard.id],
+    queryFn: () =>
+      apiClient.get<Array<{ id: number; label: string; is_active: boolean }>>(
+        `/api/projects/${projectId}/dashboards/${dashboard.id}/primary-dimensions`,
+      ),
+    enabled: hasBoundDimension,
+  });
+  const dimensionSwitcherOptions: DimensionSwitcherOption[] = useMemo(
+    () => primaryDimensionAssignments.map((a) => ({ id: a.id, label: a.label, isActive: a.is_active })),
+    [primaryDimensionAssignments],
+  );
+  const activateDimensionMutation = useMutation({
+    mutationFn: (assignmentId: number) =>
+      apiClient.post(`/api/projects/${projectId}/dashboards/${dashboard.id}/primary-dimensions/${assignmentId}/activate`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["dashboard-primary-dimensions", projectId, dashboard.id] });
+      onPersisted?.();
+    },
+  });
 
   // Collect query IDs referenced by widgets that aren't in the provided savedQueries
   const missingQueryIds = useMemo(() => {
@@ -553,23 +615,32 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
     }
   }, [addCrossFilter, openDrilldown]);
 
+  const narratives = useMemo(() => operationalNarratives(dashboard), [dashboard]);
+  const improvements = narratives.find((item) => item.type === "improvement_opportunities");
+  const headerDashboards = dashboardOptions?.length ? dashboardOptions : [{ id: dashboard.id, name: dashboard.name }];
+  // The CSS-grid operational renderer owns its own layout, so the drag-based
+  // "Edit layout" affordance only applies to the react-grid-layout path.
+  const gridLayoutEditable = operational && operationalWidgets.length === 0;
+
   // ── react-grid-layout ────────────────────────────────────────────
   const colSpanToGridW = (span: number) => Math.min(12, Math.max(2, span));
 
   const layoutRef = useRef<LayoutItem[]>([]);
   const layouts = useMemo(() => {
-    const lg: LayoutItem[] = widgets.map((w, idx) => ({
-      i: w.id,
-      x: w.gridX ?? ((idx * (w.colSpan || 6)) % 12),
-      y: w.gridY ?? Math.floor((idx * (w.colSpan || 6)) / 12) * 4,
-      w: w.gridW ?? colSpanToGridW(w.colSpan || 6),
-      h: w.gridH ?? (w.type === "kpi" ? 2 : 4),
-      minW: 2,
-      minH: 2,
-    }));
+    const lg: LayoutItem[] = operational
+      ? operationalLayout(widgets, improvements?.layout, (dashboard.config?.operationalLayoutVersion ?? 0) >= 2).filter((item) => improvements || item.i !== OPERATIONAL_IMPROVEMENTS_LAYOUT_ID)
+      : widgets.map((w, idx) => ({
+        i: w.id,
+        x: w.gridX ?? ((idx * (w.colSpan || 6)) % 12),
+        y: w.gridY ?? Math.floor((idx * (w.colSpan || 6)) / 12) * 4,
+        w: w.gridW ?? colSpanToGridW(w.colSpan || 6),
+        h: w.gridH ?? (w.type === "kpi" ? 2 : 4),
+        minW: 2,
+        minH: 2,
+      }));
     layoutRef.current = lg;
     return { lg };
-  }, [widgets]);
+  }, [dashboard.config?.operationalLayoutVersion, improvements?.layout, operational, widgets]);
 
   const persistLayout = useCallback((layout: Layout) => {
     const prev = layoutRef.current;
@@ -584,8 +655,12 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
       if (!l) return w;
       return { ...w, gridX: l.x, gridY: l.y, gridW: l.w, gridH: l.h };
     });
-    updateMutation.mutate({ config: { ...dashboard.config, widgets: updatedWidgets, globalFilters } });
-  }, [dashboard.config, widgets, globalFilters, updateMutation]);
+    const improvementLayout = layout.find((item) => item.i === OPERATIONAL_IMPROVEMENTS_LAYOUT_ID);
+    const updatedNarratives = narratives.map((item) => item.type === "improvement_opportunities" && improvementLayout
+      ? { ...item, layout: { ...item.layout, gridX: improvementLayout.x, gridY: improvementLayout.y, gridW: Math.min(improvementLayout.w, 6), gridH: improvementLayout.h } }
+      : item);
+    updateMutation.mutate({ config: { ...dashboard.config, widgets: updatedWidgets, globalFilters, ...(operational ? { operationalLayoutVersion: 2, operationalWidgets: updatedNarratives as unknown as Array<Record<string, unknown>> } : {}) } });
+  }, [dashboard.config, widgets, globalFilters, narratives, operational, updateMutation]);
 
   const handleDragStop: EventCallback = useCallback(
     (layout) => persistLayout(layout as unknown as Layout),
@@ -625,67 +700,88 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
         // dashboard's own generic filters/period/AI-designer actions
         // instead of the ITSM presets' fixed Site/Region data.
         <div className="px-2 py-2">
-          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-            <div className="flex items-start gap-2">
-              <button
-                type="button"
-                onClick={onBack}
-                aria-label="Back to dashboards"
-                className="mt-1 rounded-md p-1 text-ink-tertiary hover:bg-brand-50/60 hover:text-ink-primary"
-              >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-              </button>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-h2 text-ink-primary">{dashboard.name}</h1>
-                  <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-600">Live</span>
-                </div>
-                <p className="text-xs text-ink-tertiary">
-                  {dashboard.description ? `${dashboard.description} · ` : ""}
-                  {widgets.length} insight{widgets.length !== 1 ? "s" : ""}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              {template?.parameters && hasBoundDimension && (
-                <label className="flex h-8 items-center gap-1.5 rounded-md border border-line-secondary bg-bg-primary px-2 text-xs">
-                  <DimensionLabelEditor label={dimensionLabel} onSave={saveDimensionLabel} />
+          <OperationalDashboardHeader
+            title={dashboard.name}
+            subtitle={`${dashboard.description ? `${dashboard.description} · ` : ""}${widgets.length} insight${widgets.length !== 1 ? "s" : ""}`}
+            live={dashboardStatus === "published"}
+            onBack={onBack}
+            controls={
+              <>
+                <label className="sr-only" htmlFor={`operational-period-${dashboard.id}`}>Period</label>
+                <select
+                  id={`operational-period-${dashboard.id}`}
+                  value={runtime.dateRange?.preset ?? initialPeriod ?? "last_1_year"}
+                  onChange={(event) => {
+                    const preset = event.target.value as DatePresetId;
+                    const resolved = resolveDatePreset(preset);
+                    if (resolved) setDateRange({ preset, ...resolved });
+                  }}
+                  className="h-8 rounded-md border border-line-secondary bg-bg-primary px-2 text-xs text-ink-primary focus:border-brand-500 focus:outline-none"
+                >
+                  {OPERATIONAL_PERIODS.map(([value, label]) => <option key={value} value={value}>Period: {label}</option>)}
+                </select>
+                {template?.parameters && hasBoundDimension && (
+                  <>
+                    {/* Dimension type and dimension value are separate
+                        controls, matching the ITSM header. */}
+                    <span className="flex h-8 items-center gap-1 rounded-md border border-line-secondary bg-bg-primary px-2 text-xs font-medium text-ink-primary">
+                      <span>{dimensionLabel}</span>
+                      <DimensionSwitcher
+                        options={dimensionSwitcherOptions}
+                        onSelect={(id) => activateDimensionMutation.mutate(id)}
+                        pending={activateDimensionMutation.isPending}
+                      />
+                    </span>
+                    <select
+                      value={templateValue}
+                      onChange={(event) => changeTemplateValue(event.target.value)}
+                      disabled={templateOptionsLoading}
+                      aria-label={`${dimensionLabel} filter`}
+                      className="h-8 rounded-md border border-line-secondary bg-bg-primary px-2 text-xs text-ink-primary focus:border-brand-500 focus:outline-none"
+                    >
+                      <option value="">All {dimensionLabel}</option>
+                      {templateOptions.map((value) => <option key={value} value={value}>{value}</option>)}
+                    </select>
+                  </>
+                )}
+                {headerDashboards.length > 1 && (
                   <select
-                    value={templateValue}
-                    onChange={(event) => changeTemplateValue(event.target.value)}
-                    disabled={templateOptionsLoading}
-                    className="h-full border-0 bg-transparent pr-1 text-xs text-ink-primary focus:outline-none"
+                    value={dashboard.id}
+                    onChange={(event) => onSelectDashboard?.(Number(event.target.value))}
+                    aria-label="Dashboard"
+                    disabled={!onSelectDashboard}
+                    className="h-8 max-w-56 rounded-md border border-line-secondary bg-bg-primary px-2 text-xs text-ink-primary focus:border-brand-500 focus:outline-none disabled:opacity-100"
                   >
-                    <option value="">All {dimensionLabel}</option>
-                    {templateOptions.map((value) => <option key={value} value={value}>{value}</option>)}
+                    {headerDashboards.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                   </select>
-                </label>
-              )}
-              <DateRangeControl value={runtime.dateRange} onChange={setDateRange} />
-              <button
-                onClick={() => { setEditingWidget(null); setDesignerMode("edit_dashboard"); }}
-                className="flex h-8 items-center gap-1 rounded-md border border-line-secondary px-2.5 text-xs font-medium text-ink-secondary transition-colors hover:bg-bg-secondary"
-              >
-                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                Edit dashboard
-              </button>
-              <button
-                onClick={refreshAllWidgets}
-                className="flex h-8 items-center gap-1 rounded-md border border-line-secondary px-2.5 text-xs font-medium text-ink-secondary transition-colors hover:bg-bg-secondary"
-              >
-                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                Refresh
-              </button>
-              <button
-                onClick={() => { setEditingWidget(null); setDesignerMode("add_insight"); }}
-                className="flex h-8 items-center gap-1 rounded-md bg-brand-600 px-2.5 text-xs font-bold text-white transition-colors hover:bg-brand-700"
-              >
-                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                Add insight
-              </button>
+                )}
+                {gridLayoutEditable && (
+                  <Button variant="secondary" size="sm" onClick={() => setEditingLayout((value) => !value)}>
+                    {editingLayout ? "Done" : "Edit layout"}
+                  </Button>
+                )}
+                <Button variant="secondary" size="sm" onClick={() => { setEditingWidget(null); setDesignerMode("edit_dashboard"); }}>
+                  <IconSparkles size={14} /> Edit with AI
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => void refreshAllWidgets()}>
+                  <IconRefresh size={14} /> Refresh
+                </Button>
+                <button
+                  onClick={() => { setEditingWidget(null); setDesignerMode("add_insight"); }}
+                  className="flex h-8 items-center gap-1 rounded-md bg-brand-600 px-2.5 text-xs font-bold text-white transition-colors hover:bg-brand-700"
+                >
+                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                  Add insight
+                </button>
+              </>
+            }
+          />
+
+          {editingLayout && gridLayoutEditable && (
+            <div className="mt-2 rounded-md border border-dashed border-brand-200 bg-brand-50/40 px-3 py-2 text-xs text-ink-secondary">
+              Drag cards by their headers and resize from any edge. Horizontal rankings remain half width or smaller; improvement opportunities default to the bottom-right.
             </div>
-          </div>
+          )}
 
           {runtimeFilterChips && <div className="mt-2">{runtimeFilterChips}</div>}
           {allColumns.length > 0 && (
@@ -747,7 +843,12 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
             <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
               {template?.parameters && hasBoundDimension && (
                 <label className="flex items-center gap-1.5 text-[11px] font-medium text-ink-secondary">
-                  <DimensionLabelEditor label={dimensionLabel} onSave={saveDimensionLabel} />
+                  <span>{dimensionLabel}</span>
+                  <DimensionSwitcher
+                    options={dimensionSwitcherOptions}
+                    onSelect={(id) => activateDimensionMutation.mutate(id)}
+                    pending={activateDimensionMutation.isPending}
+                  />
                   <select
                     value={templateValue}
                     onChange={(event) => changeTemplateValue(event.target.value)}
@@ -812,15 +913,15 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
                 containerPadding={GRID_CONTAINER_PADDING}
                 onDragStop={handleDragStop}
                 onResizeStop={handleResizeStop}
-                dragConfig={GRID_DRAG_CONFIG}
-                resizeConfig={GRID_RESIZE_CONFIG}
+                dragConfig={{ ...GRID_DRAG_CONFIG, enabled: !operational || editingLayout }}
+                resizeConfig={{ ...GRID_RESIZE_CONFIG, enabled: !operational || editingLayout }}
                 width={containerWidth}
               >
             {widgets.map((w) => (
               <div key={w.id}>
                 <div className={`h-full overflow-hidden border bg-white transition-shadow ${operational ? "rounded-xl border-line-tertiary shadow-none hover:border-brand-200" : "rounded-lg border-slate-200 shadow-sm hover:shadow-md"}`}>
                   {/* Widget header — drag handle + metadata badges */}
-                  <div className={`widget-drag-handle flex cursor-grab items-center justify-between bg-white px-3 active:cursor-grabbing ${operational ? "pb-1 pt-3" : "border-b border-slate-100 py-2"}`}>
+                  <div className={`widget-drag-handle flex items-center justify-between bg-white px-3 ${!operational || editingLayout ? "cursor-grab active:cursor-grabbing" : "cursor-default"} ${operational ? "pb-1 pt-3" : "border-b border-slate-100 py-2"}`}>
                     <div className="flex flex-col gap-0.5 min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         {!operational && <svg className="h-3 w-3 flex-shrink-0 text-slate-300" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="5" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="12" cy="19" r="2"/></svg>}
@@ -885,6 +986,29 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
                 </div>
               </div>
             ))}
+            {operational && improvements && (
+              <div key={OPERATIONAL_IMPROVEMENTS_LAYOUT_ID}>
+                <div className="h-full overflow-hidden rounded-xl border border-line-tertiary bg-white p-4">
+                  <div className={`widget-drag-handle flex items-start justify-between gap-3 ${editingLayout ? "cursor-grab active:cursor-grabbing" : "cursor-default"}`}>
+                    <div>
+                      <h4 className="text-sm font-semibold text-ink-primary">{improvements.title || "Best Improvement Opportunities"}</h4>
+                      <p className="mt-0.5 text-[11px] text-ink-tertiary">Prioritized by operational impact</p>
+                    </div>
+                    <button type="button" onClick={() => { setEditingWidget(null); setDesignerMode("edit_dashboard"); }} title="Edit with AI" className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+                      <IconSparkles size={14} />
+                    </button>
+                  </div>
+                  <ol className="mt-3 space-y-2.5">
+                    {(improvements.items ?? []).slice(0, 5).map((item, index) => (
+                      <li key={`improvement-${index}`} className="flex gap-2 border-b border-line-tertiary pb-2 text-[11px] leading-4 text-ink-secondary last:border-0">
+                        <span className="font-semibold text-brand-600">{index + 1}.</span>
+                        <span>{typeof item === "string" ? item : item.detail || item.label}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              </div>
+            )}
               </ResponsiveGridLayout>
             )}
           </div>

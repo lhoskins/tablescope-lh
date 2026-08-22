@@ -64,12 +64,12 @@ import { CanvasRenderer } from "echarts/renderers";import { formatNumber } from 
 
 
 
-export function tooltipScatterFormatter(p: any, xKey: string, yKey: string, zKey: string, format?: string) {
+export function tooltipScatterFormatter(p: any, xKey: string, yKey: string, zKey: string, format?: string, currencySymbol?: string) {
   const vals = Array.isArray(p.value) ? p.value : [p.value];
   const x = vals[0];
   const y = vals[1];
   const z = vals[2];
-  let s = `${xKey}: ${formatNumber(Number(x), format)}<br/>${yKey}: ${formatNumber(Number(y), format)}`;
-  if (z !== undefined && zKey) s += `<br/>${zKey}: ${formatNumber(Number(z), format)}`;
+  let s = `${xKey}: ${formatNumber(Number(x), format, undefined, currencySymbol)}<br/>${yKey}: ${formatNumber(Number(y), format, undefined, currencySymbol)}`;
+  if (z !== undefined && zKey) s += `<br/>${zKey}: ${formatNumber(Number(z), format, undefined, currencySymbol)}`;
   return s;
 }

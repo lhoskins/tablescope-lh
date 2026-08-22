@@ -109,7 +109,7 @@ export function buildRadialBarOption(
     axisLine: { lineStyle: { color: [[1, r.color]], width: 18 } },
     progress: { show: false },
     pointer: { show: true, width: 3, itemStyle: { color: r.color } },
-    detail: { show: !!opts.showLabels, formatter: (v: number) => `${r.name}: ${formatNumber(v, opts.yAxisFormat)}`, fontSize: 10, color: colorsForChart.text, offsetCenter: ["0%", `${(i - rows.length / 2) * 20}%`] },
+    detail: { show: !!opts.showLabels, formatter: (v: number) => `${r.name}: ${formatNumber(v, opts.yAxisFormat, undefined, opts.currencySymbol)}`, fontSize: 10, color: colorsForChart.text, offsetCenter: ["0%", `${(i - rows.length / 2) * 20}%`] },
     data: [{ value: r.value, name: r.name }],
     axisTick: { show: false },
     splitLine: { show: false },
@@ -121,7 +121,7 @@ export function buildRadialBarOption(
   return {
     aria: { enabled: true, description: `${widget.title || widget.type} chart` },
     color: colors,
-    tooltip: opts.showTooltip === false || tiny ? { show: false } : { trigger: "item", formatter: (p: any) => `${p.name}: ${formatNumber(Number(p.value ?? 0), opts.yAxisFormat)}` },
+    tooltip: opts.showTooltip === false || tiny ? { show: false } : { trigger: "item", formatter: (p: any) => `${p.name}: ${formatNumber(Number(p.value ?? 0), opts.yAxisFormat, undefined, opts.currencySymbol)}` },
     series,
     animation: animate,
   };

@@ -122,7 +122,7 @@ export function buildHeatmapOption(
         : {
             position: "top",
             formatter: (p: any) =>
-              `${xValues[p.data[0]] ?? ""} / ${yValues[p.data[1]] ?? ""}: ${formatNumber(Number(p.data[2] ?? 0), opts.yAxisFormat)}`,
+              `${xValues[p.data[0]] ?? ""} / ${yValues[p.data[1]] ?? ""}: ${formatNumber(Number(p.data[2] ?? 0), opts.yAxisFormat, undefined, opts.currencySymbol)}`,
           },
     grid: { top: 10, bottom: 50, left: 80, right: 20, containLabel: true },
     xAxis: {

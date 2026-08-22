@@ -6,13 +6,19 @@ from app.auth.jwt import create_access_token
 from app.models.file_source_meta import FileSourceMeta
 from app.routes.ai_proxy_dashboard_designer import (
     ChartOverride,
+    PrimaryDimensionSelection,
     _apply_chart_overrides,
+    _apply_operational_layout,
+    _apply_primary_dimension_selection,
     _chart_recommendations,
     _concept_supported,
+    _discover_primary_dimensions,
     _engine_chart_recommendations,
     _grounded_chart_selection,
     _infer_domain,
     _missing_concepts,
+    _operational_widgets,
+    _requested_axis_scale,
     _support_status,
     _widget_date_field,
 )
@@ -414,6 +420,26 @@ def _combo_widget(title: str) -> dict:
     }
 
 
+def _dimension_widget(title: str, *, with_dimension: bool, kpi: bool = False) -> dict:
+    """A widget whose preview does (or doesn't) carry a shared categorical
+    "business_unit" column, for _discover_primary_dimensions tests."""
+    columns = ["business_unit", "revenue"] if with_dimension else ["revenue"]
+    rows = (
+        [{"business_unit": unit, "revenue": 100 + i} for i, unit in enumerate(["East", "West", "Central"])]
+        if with_dimension
+        else [{"revenue": 4200}]
+    )
+    return {
+        "title": title,
+        "status": "valid",
+        "sql": f'SELECT * FROM "revenue_by_unit" -- {title}',
+        "chartType": "kpi" if kpi else "bar",
+        "labelColumn": "business_unit" if with_dimension else None,
+        "valueColumn": "revenue",
+        "previewData": {"columns": columns, "rows": rows},
+    }
+
+
 def test_chart_overrides_match_by_title_and_force_the_chart_type() -> None:
     suggestion = {"widgets": [_combo_widget("Monthly Revenue vs Backlog")]}
     _apply_chart_overrides(
@@ -535,5 +561,475 @@ async def test_chart_candidates_requires_project_access(
             "rows": [{"x": 1}],
         },
         headers=headers,
+    )
+    assert r.status_code in (403, 404)
+
+
+def test_operational_sections_match_the_itsm_story_and_bottom_right_layout() -> None:
+    widgets = _operational_widgets(
+        "Show sales health",
+        {
+            "businessPurpose": "Monitor delivery and forecast alignment.",
+            "knowledgeGraphContext": {
+                "risks": ["Backlog is rising"],
+                "opportunities": ["Rebalance the highest-volume region"],
+            },
+            "widgets": [{"businessQuestion": "Which region drives the backlog?"}],
+        },
+    )
+    brief, improvements = widgets
+    assert [item["label"] for item in brief["items"]] == [
+        "Backing risk",
+        "Primary driver",
+        "Recommended action",
+    ]
+    assert improvements["layout"] == {
+        "position": 1,
+        "width": "standard",
+        "gridX": 9,
+        "gridY": 5,
+        "gridW": 3,
+        "gridH": 3,
+    }
+
+
+def test_ai_layout_caps_horizontal_rankings_at_half_width() -> None:
+    configs = _apply_operational_layout(
+        [
+            {"id": "revenue", "type": "kpi"},
+            {"id": "backlog", "type": "kpi"},
+            {
+                "id": "ranking",
+                "type": "bar",
+                "chartSubtype": "horizontal_bar",
+                "visualizationOptions": {"barLayout": "horizontal"},
+            },
+        ]
+    )
+    ranking = next(item for item in configs if item["id"] == "ranking")
+    assert ranking["gridW"] <= 6
+    assert _requested_axis_scale({"valueFormat": "Thousands"}) == "thousands"
+
+
+async def test_widget_configs_carry_the_requested_currency_symbol(monkeypatch) -> None:
+    """Every AI-designer widget's visualizationOptions must carry the
+    dashboard's selected currencySymbol so charts and KPI cards render in
+    that currency -- default "USD" maps to "$", "EUR" maps to "€"."""
+    import app.services.dashboard_widget as dashboard_widget
+    from app.routes.ai_proxy_dashboard_designer import _widget_configs
+
+    class _FakeQuery:
+        id = 1
+
+    async def fake_find_or_create(*args, **kwargs):
+        return _FakeQuery()
+
+    monkeypatch.setattr(dashboard_widget, "find_or_create_saved_query", fake_find_or_create)
+
+    class _FakeContext:
+        tenant_id = 1
+        user_id = 1
+
+    class _FakeSession:
+        async def scalars(self, *args, **kwargs):
+            return []  # no allowed_tables -- irrelevant to currencySymbol
+
+    suggestion = {"widgets": [_combo_widget("Monthly Revenue vs Backlog")]}
+
+    default_configs = await _widget_configs(
+        session=_FakeSession(), context=_FakeContext(), project_id=1, suggestion=suggestion, start_index=0,
+    )
+    assert default_configs[0]["visualizationOptions"]["currencySymbol"] == "$"
+
+    eur_configs = await _widget_configs(
+        session=_FakeSession(), context=_FakeContext(), project_id=1, suggestion=suggestion,
+        start_index=0, currency="EUR",
+    )
+    assert eur_configs[0]["visualizationOptions"]["currencySymbol"] == "€"
+
+
+def test_discover_primary_dimensions_flags_a_kpi_missing_the_shared_field() -> None:
+    suggestion = {
+        "widgets": [
+            _dimension_widget("Revenue by Unit", with_dimension=True),
+            _dimension_widget("Backlog by Unit", with_dimension=True),
+            _dimension_widget("Total Revenue", with_dimension=False, kpi=True),
+        ]
+    }
+    candidates = _discover_primary_dimensions(suggestion)
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate["field"] == "business_unit"
+    assert candidate["label"] == "Business Unit"
+    assert candidate["fullCoverage"] is False
+    assert candidate["compatibleCount"] == 2
+    assert candidate["totalCount"] == 3
+    assert candidate["incompatibleWidgets"] == [{"title": "Total Revenue"}]
+    assert set(candidate["compatibleWidgets"]) == {"Revenue by Unit", "Backlog by Unit"}
+
+
+def test_discover_primary_dimensions_reaches_full_coverage_once_the_kpi_is_removed() -> None:
+    suggestion = {
+        "widgets": [
+            _dimension_widget("Revenue by Unit", with_dimension=True),
+            _dimension_widget("Backlog by Unit", with_dimension=True),
+        ]
+    }
+    candidates = _discover_primary_dimensions(suggestion)
+    assert len(candidates) == 1
+    assert candidates[0]["fullCoverage"] is True
+    assert candidates[0]["incompatibleWidgets"] == []
+
+
+def test_discover_primary_dimensions_requires_the_field_in_at_least_two_widgets() -> None:
+    suggestion = {"widgets": [_dimension_widget("Revenue by Unit", with_dimension=True)]}
+    assert _discover_primary_dimensions(suggestion) == []
+
+
+def test_discover_primary_dimensions_finds_nothing_without_a_shared_categorical_field() -> None:
+    suggestion = {
+        "widgets": [
+            _dimension_widget("Total Revenue", with_dimension=False, kpi=True),
+            _dimension_widget("Total Backlog", with_dimension=False, kpi=True),
+        ]
+    }
+    assert _discover_primary_dimensions(suggestion) == []
+
+
+async def test_apply_primary_dimension_selection_rejects_a_still_partial_candidate() -> None:
+    """The server must recompute coverage against the FINAL widget list --
+    trusting a client's stale review-step coverage would let a partial
+    dimension get silently applied instead of rejected with 409."""
+    from fastapi import HTTPException
+
+    suggestion = {
+        "widgets": [
+            _dimension_widget("Revenue by Unit", with_dimension=True),
+            _dimension_widget("Backlog by Unit", with_dimension=True),
+            _dimension_widget("Total Revenue", with_dimension=False, kpi=True),
+        ]
+    }
+
+    class _FakeContext:
+        tenant_id = 1
+        user_id = 1
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _apply_primary_dimension_selection(
+            session=None,  # never reached -- rejected before any DB access
+            context=_FakeContext(),
+            project_id=1,
+            dashboard_id=1,
+            suggestion=suggestion,
+            configs=[],
+            selection=PrimaryDimensionSelection(field="business_unit", label="Business Unit"),
+            default_period="1_year",
+        )
+    assert exc_info.value.status_code == 409
+
+
+async def test_apply_primary_dimension_selection_persists_and_reuses_the_dimension(
+    client, service_headers, db_session,
+) -> None:
+    """A full-coverage selection must be persisted across the three new
+    tables, reused (not duplicated) on a second dashboard in the same
+    project, and produce dimension_parameters pointing at a real
+    distinct-values query -- the same valueSource: "query" contract
+    DashboardViewer.tsx already hydrates for a manually-picked dimension.
+
+    find_or_create_saved_query does only DB work (no Teiid/AI-server call),
+    so it runs for real here rather than being mocked -- a mock that returns
+    a query id with no backing row would silently hide whether
+    _dimension_parameters' own SavedQuery lookup actually succeeds.
+    """
+    from sqlalchemy import select
+
+    from app.models.dashboard import Dashboard
+    from app.models.dashboard_primary_dimension import (
+        DashboardPrimaryDimension,
+        DashboardPrimaryDimensionAssignment,
+        DashboardPrimaryDimensionBinding,
+    )
+
+    _tenant, project, _headers = await _tenant_project(client, service_headers, "dd-primary-dim")
+
+    class _Context:
+        tenant_id = _tenant["id"]
+        user_id = 1
+
+    dashboard = Dashboard(
+        project_id=project["id"],
+        tenant_id=_Context.tenant_id,
+        owner_id=None,
+        name="Revenue Dashboard",
+        status="published",
+        config={},
+        ai_generated=True,
+    )
+    db_session.add(dashboard)
+    await db_session.flush()
+
+    suggestion = {
+        "widgets": [
+            _dimension_widget("Revenue by Unit", with_dimension=True),
+            _dimension_widget("Backlog by Unit", with_dimension=True),
+        ]
+    }
+    configs = [
+        {"id": "w1", "title": "Revenue by Unit"},
+        {"id": "w2", "title": "Backlog by Unit"},
+    ]
+
+    parameters = await _apply_primary_dimension_selection(
+        db_session,
+        context=_Context(),
+        project_id=project["id"],
+        dashboard_id=dashboard.id,
+        suggestion=suggestion,
+        configs=configs,
+        selection=PrimaryDimensionSelection(field="business_unit", label="Business Unit"),
+        default_period="1_year",
+    )
+    await db_session.flush()
+
+    assert parameters["valueSource"] == "query"
+    assert parameters["dimensionLabel"] == "Business Unit"
+
+    dimensions = list(await db_session.scalars(select(DashboardPrimaryDimension)))
+    assert len(dimensions) == 1
+    assert dimensions[0].field == "business_unit"
+    assert dimensions[0].source_view == "revenue_by_unit"
+
+    assignments = list(await db_session.scalars(select(DashboardPrimaryDimensionAssignment)))
+    assert len(assignments) == 1
+    assert assignments[0].dashboard_id == dashboard.id
+    assert assignments[0].is_active is True
+
+    bindings = list(await db_session.scalars(select(DashboardPrimaryDimensionBinding)))
+    assert {b.widget_id for b in bindings} == {"w1", "w2"}
+
+    # A second dashboard discovering the SAME field on the SAME source view
+    # must reuse the existing DashboardPrimaryDimension row, not duplicate it.
+    dashboard_2 = Dashboard(
+        project_id=project["id"],
+        tenant_id=_Context.tenant_id,
+        owner_id=None,
+        name="Backlog Dashboard",
+        status="published",
+        config={},
+        ai_generated=True,
+    )
+    db_session.add(dashboard_2)
+    await db_session.flush()
+
+    await _apply_primary_dimension_selection(
+        db_session,
+        context=_Context(),
+        project_id=project["id"],
+        dashboard_id=dashboard_2.id,
+        suggestion=suggestion,
+        configs=configs,
+        selection=PrimaryDimensionSelection(field="business_unit", label="Unit"),
+        default_period="1_year",
+    )
+    await db_session.flush()
+
+    dimensions_after = list(await db_session.scalars(select(DashboardPrimaryDimension)))
+    assert len(dimensions_after) == 1  # reused, not duplicated
+    assignments_after = list(await db_session.scalars(select(DashboardPrimaryDimensionAssignment)))
+    assert len(assignments_after) == 2  # one per dashboard
+
+
+async def test_apply_primary_dimension_selection_keeps_exactly_one_assignment_active(
+    client, service_headers, db_session,
+) -> None:
+    """A dashboard with two full-coverage dimension candidates -- the header
+    switch icon's premise -- must end up with exactly one active
+    assignment: the first one applied, when later selections pass
+    make_active=False (as the apply endpoint does for every entry in
+    primary_dimensions after the first)."""
+    from sqlalchemy import select
+
+    from app.models.dashboard import Dashboard
+    from app.models.dashboard_primary_dimension import DashboardPrimaryDimensionAssignment
+
+    _tenant, project, _headers = await _tenant_project(client, service_headers, "dd-primary-dim-2")
+
+    class _Context:
+        tenant_id = _tenant["id"]
+        user_id = 1
+
+    dashboard = Dashboard(
+        project_id=project["id"], tenant_id=_Context.tenant_id, owner_id=None,
+        name="Two Dimensions", status="published", config={}, ai_generated=True,
+    )
+    db_session.add(dashboard)
+    await db_session.flush()
+
+    def _widget(title: str) -> dict:
+        # Both dimensions are present on every widget, so both independently
+        # reach full coverage -- the scenario the header switch icon exists
+        # for (pick which of two equally-valid dimensions is active).
+        return {
+            "title": title,
+            "status": "valid",
+            "sql": f'SELECT * FROM "revenue_by_unit" -- {title}',
+            "chartType": "bar",
+            "previewData": {
+                "columns": ["business_unit", "customer_segment", "revenue"],
+                "rows": [
+                    {"business_unit": bu, "customer_segment": cs, "revenue": 100 + i}
+                    for i, (bu, cs) in enumerate(zip(["A", "B", "C"], ["X", "Y", "Z"], strict=True))
+                ],
+            },
+        }
+
+    suggestion = {"widgets": [_widget("Revenue by Unit"), _widget("Backlog by Unit")]}
+    configs = [
+        {"id": "w1", "title": "Revenue by Unit"},
+        {"id": "w2", "title": "Backlog by Unit"},
+    ]
+
+    for index, selection in enumerate([
+        PrimaryDimensionSelection(field="business_unit", label="Business Unit"),
+        PrimaryDimensionSelection(field="customer_segment", label="Customer Segment"),
+    ]):
+        await _apply_primary_dimension_selection(
+            db_session,
+            context=_Context(),
+            project_id=project["id"],
+            dashboard_id=dashboard.id,
+            suggestion=suggestion,
+            configs=configs,
+            selection=selection,
+            default_period="1_year",
+            make_active=(index == 0),
+        )
+    await db_session.flush()
+
+    assignments = list(await db_session.scalars(select(DashboardPrimaryDimensionAssignment)))
+    assert len(assignments) == 2
+    active = [a for a in assignments if a.is_active]
+    assert len(active) == 1
+    assert active[0].label == "Business Unit"
+
+
+async def test_primary_dimension_switch_endpoints_activate_and_isolate_by_tenant(
+    client, service_headers, db_session,
+) -> None:
+    """The header switch icon's backend: listing a dashboard's assigned
+    dimensions and activating one reloads dimension_parameters at real
+    distinct values -- and a user from a different tenant can neither see
+    nor activate another tenant's dimension assignments (production
+    acceptance check 8)."""
+    from app.models.dashboard import Dashboard
+
+    tenant, project, headers = await _tenant_project(client, service_headers, "dd-switch")
+
+    class _Context:
+        tenant_id = tenant["id"]
+        user_id = 1
+
+    dashboard = Dashboard(
+        project_id=project["id"],
+        tenant_id=_Context.tenant_id,
+        owner_id=None,
+        name="Two Dimensions",
+        status="published",
+        config={
+            "presentation": "operational_insight",
+            "dashboardTemplate": {"parameters": {"defaultPeriod": "1_year"}},
+        },
+        ai_generated=True,
+    )
+    db_session.add(dashboard)
+    await db_session.flush()
+
+    def _widget(title: str) -> dict:
+        return {
+            "title": title,
+            "status": "valid",
+            "sql": f'SELECT * FROM "revenue_by_unit" -- {title}',
+            "chartType": "bar",
+            "previewData": {
+                "columns": ["business_unit", "customer_segment", "revenue"],
+                "rows": [
+                    {"business_unit": bu, "customer_segment": cs, "revenue": 100 + i}
+                    for i, (bu, cs) in enumerate(zip(["A", "B", "C"], ["X", "Y", "Z"], strict=True))
+                ],
+            },
+        }
+
+    suggestion = {"widgets": [_widget("Revenue by Unit"), _widget("Backlog by Unit")]}
+    configs = [
+        {"id": "w1", "title": "Revenue by Unit"},
+        {"id": "w2", "title": "Backlog by Unit"},
+    ]
+
+    for index, selection in enumerate([
+        PrimaryDimensionSelection(field="business_unit", label="Business Unit"),
+        PrimaryDimensionSelection(field="customer_segment", label="Customer Segment"),
+    ]):
+        await _apply_primary_dimension_selection(
+            db_session,
+            context=_Context(),
+            project_id=project["id"],
+            dashboard_id=dashboard.id,
+            suggestion=suggestion,
+            configs=configs,
+            selection=selection,
+            default_period="1_year",
+            make_active=(index == 0),
+        )
+    await db_session.commit()
+
+    r = await client.get(
+        f"/api/projects/{project['id']}/dashboards/{dashboard.id}/primary-dimensions",
+        headers=headers,
+    )
+    assert r.status_code == 200
+    rows = r.json()
+    assert len(rows) == 2
+    active_row = next(row for row in rows if row["is_active"])
+    inactive_row = next(row for row in rows if not row["is_active"])
+    assert active_row["label"] == "Business Unit"
+    assert inactive_row["label"] == "Customer Segment"
+
+    r = await client.post(
+        f"/api/projects/{project['id']}/dashboards/{dashboard.id}"
+        f"/primary-dimensions/{inactive_row['id']}/activate",
+        headers=headers,
+    )
+    assert r.status_code == 200
+    updated = r.json()
+    parameters = updated["config"]["dashboardTemplate"]["parameters"]
+    assert parameters["dimensionLabel"] == "Customer Segment"
+    assert parameters["valueSource"] == "query"
+
+    r = await client.get(
+        f"/api/projects/{project['id']}/dashboards/{dashboard.id}/primary-dimensions",
+        headers=headers,
+    )
+    rows_after = r.json()
+    assert next(row for row in rows_after if row["id"] == inactive_row["id"])["is_active"] is True
+    assert next(row for row in rows_after if row["id"] == active_row["id"])["is_active"] is False
+
+    # A user from a DIFFERENT tenant must not see or reuse these dimension
+    # records: the project lookup is tenant-scoped, so both endpoints 404
+    # rather than leaking cross-tenant data.
+    _other_tenant, _other_project, other_headers = await _tenant_project(
+        client, service_headers, "dd-switch-other-tenant",
+    )
+
+    r = await client.get(
+        f"/api/projects/{project['id']}/dashboards/{dashboard.id}/primary-dimensions",
+        headers=other_headers,
+    )
+    assert r.status_code in (403, 404)
+
+    r = await client.post(
+        f"/api/projects/{project['id']}/dashboards/{dashboard.id}"
+        f"/primary-dimensions/{active_row['id']}/activate",
+        headers=other_headers,
     )
     assert r.status_code in (403, 404)

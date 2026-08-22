@@ -16,7 +16,6 @@ import { DashboardViewer } from "@/components/dashboard/DashboardViewer";
 import { QueryBuilder } from "@/components/query-builder/QueryBuilder";
 import { ItsmDashboardContent } from "@/components/tablescope/project/itsm-dashboards/ItsmDashboardContent";
 import { DashboardGroupNavigation } from "@/components/tablescope/project/dashboard-templates/group-navigation";
-import { OperationalInsightWidgets } from "@/components/tablescope/project/dashboard-templates/operational-widgets";
 import type { Dashboard as ViewerDashboard, WidgetConfig } from "@/components/dashboard/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -62,6 +61,10 @@ export function DashboardDetailView({
     typeof dashboard.config === "object" && dashboard.config !== null
       ? (dashboard.config as Record<string, unknown>).itsm_dashboard
       : undefined;
+  const operational =
+    typeof dashboard.config === "object"
+    && dashboard.config !== null
+    && (dashboard.config as Record<string, unknown>).presentation === "operational_insight";
 
   if (typeof itsmPreset === "string") {
     return (
@@ -75,7 +78,7 @@ export function DashboardDetailView({
 
   return (
     <div>
-      {dashboardGroupName && dashboardGroup && onSelectDashboard && (
+      {!operational && dashboardGroupName && dashboardGroup && onSelectDashboard && (
         <DashboardGroupNavigation
           groupName={dashboardGroupName}
           dashboards={dashboardGroup}
@@ -84,12 +87,6 @@ export function DashboardDetailView({
           onBack={onBack}
         />
       )}
-      <OperationalInsightWidgets
-        key={`operational-widgets-${dashboard.id}`}
-        projectId={projectId}
-        dashboard={dashboard}
-        onUpdated={onPersisted ? () => onPersisted() : undefined}
-      />
       <DashboardViewer
         key={dashboard.id}
         dashboard={dashboard as unknown as ViewerDashboard}
@@ -106,6 +103,8 @@ export function DashboardDetailView({
         onBack={onBack}
         onPersisted={onPersisted}
         onPinWidget={onPinWidget}
+        dashboardOptions={dashboardGroup?.map((item) => ({ id: item.id, name: item.name }))}
+        onSelectDashboard={onSelectDashboard}
       />
     </div>
   );

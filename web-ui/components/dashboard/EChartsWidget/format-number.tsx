@@ -83,19 +83,24 @@ const SCALE_SUFFIXES: Record<Exclude<ValueScale, "auto">, string> = {
  * magnitude. Left at "auto" (or omitted), behavior is unchanged. Percent
  * values are never rescaled -- a forced scale on a 0-100% axis would be
  * meaningless.
+ *
+ * `currencySymbol` is the symbol shown for `format: "currency"` (e.g. "$",
+ * "€"), set from the dashboard's selected currency. Defaults to "$" so
+ * every existing call site (and every saved dashboard predating currency
+ * selection) renders unchanged.
  */
-export function formatNumber(v: number, format?: string, scale?: ValueScale): string {
+export function formatNumber(v: number, format?: string, scale?: ValueScale, currencySymbol = "$"): string {
   if (!Number.isFinite(v)) return "—";
   if (format === "percent") return `${(v * 100).toFixed(1)}%`;
   if (scale && scale !== "auto") {
     const scaled = v / SCALE_DIVISORS[scale];
-    const prefix = format === "currency" ? "$" : "";
+    const prefix = format === "currency" ? currencySymbol : "";
     return `${prefix}${scaled.toLocaleString(undefined, { maximumFractionDigits: 1 })}${SCALE_SUFFIXES[scale]}`;
   }
   if (format === "currency") {
-    if (Math.abs(v) >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
-    if (Math.abs(v) >= 1_000) return `$${(v / 1_000).toFixed(0)}K`;
-    return `$${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+    if (Math.abs(v) >= 1_000_000) return `${currencySymbol}${(v / 1_000_000).toFixed(1)}M`;
+    if (Math.abs(v) >= 1_000) return `${currencySymbol}${(v / 1_000).toFixed(0)}K`;
+    return `${currencySymbol}${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
   }
   if (format === "compact") {
     if (Math.abs(v) >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;

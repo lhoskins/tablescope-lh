@@ -95,7 +95,7 @@ export function buildBoxplotOption(
     tooltip: opts.showTooltip === false ? { show: false } : { trigger: "item" as const },
     dataset: [{ source }, { type: "boxplot" as const }],
     xAxis: { type: "category" as const, data: categories, axisLabel: { fontSize: 10, color: colorsForChart.text }, axisLine: { lineStyle: { color: colorsForChart.line } }, splitLine: { show: false } },
-    yAxis: { type: "value" as const, axisLabel: { formatter: (v: number) => formatNumber(v, opts.yAxisFormat), fontSize: 10, color: colorsForChart.text }, splitLine: { lineStyle: { color: colorsForChart.grid } } },
+    yAxis: { type: "value" as const, axisLabel: { formatter: (v: number) => formatNumber(v, opts.yAxisFormat, undefined, opts.currencySymbol), fontSize: 10, color: colorsForChart.text }, splitLine: { lineStyle: { color: colorsForChart.grid } } },
     series: [{ type: "boxplot" as const, datasetIndex: 1, itemStyle: { color: colors[0], borderColor: colorsForChart.text } }],
   };
 }
