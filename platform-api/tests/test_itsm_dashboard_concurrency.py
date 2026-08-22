@@ -77,30 +77,33 @@ async def test_dashboard_phases_run_concurrently_not_sequentially(monkeypatch):
     assert elapsed < 0.12, f"phases appear to run sequentially: {elapsed:.3f}s"
 
 
-async def test_warm_makes_exactly_one_call_per_preset(monkeypatch):
-    """warm_itsm_dashboards_for_project no longer expands into a per-site or
-    per-period matrix: compute_dashboard's snapshot path (see
+async def test_warm_covers_the_kpi_period_picker_but_not_insight_presets(monkeypatch):
+    """warm_itsm_dashboards_for_project still makes exactly one call for an
+    insight preset: compute_dashboard's snapshot path (see
     insight_snapshot.py) loads every source CSV for a project/dashboard/
     dimension once and derives every Period/Site/Region combination from it
     in-process, so a single warm call at (site=None/"all", default period)
-    is all that's needed to cover every combination a user can pick for the
-    life of that snapshot. Non-insight presets are unaffected by the
-    per-site expansion (they never had one), but they DO warm at "1_year"
-    too -- that's every ITSM dashboard's actual frontend default, not just
-    the insight presets'."""
+    covers every combination a user can pick for the life of that snapshot.
+
+    A KPI preset has no such snapshot, so its period picker (the only axis
+    that actually varies a request, since availableSites is always [] for
+    these five) is warmed in full -- one call per _KPI_WARM_PERIODS entry.
+    Each of those calls also populates the cache under BOTH the "site" and
+    "region" dimension keys from the single computed result, since at
+    site="all" the dimension toggle can't change what SQL runs."""
     from app.services.itsm_metrics.cache import _get_entry, clear_dashboard_cache, make_cache_key
 
     clear_dashboard_cache()
     warmed: list[tuple[str, str | None, str]] = []
 
-    async def fake_compute_dashboard(*, dashboard_key, site_code, period_key, **kwargs):
+    async def fake_compute_dashboard(*, dashboard_key, site_code, period_key, dimension="site", **kwargs):
         warmed.append((dashboard_key, site_code, period_key))
         from app.services.itsm_metrics.models import DashboardResult
 
         return DashboardResult(
             dashboard=dashboard_key,
             as_of="2026-08-01T00:00:00Z",
-            filters={"site": site_code or "all"},
+            filters={"site": site_code or "all", "dimension": dimension},
             metrics=[],
             charts=[],
             data_quality={"latestCompleteMonth": "Jul 2026", "missingMetrics": [], "warnings": []},
@@ -116,15 +119,38 @@ async def test_warm_makes_exactly_one_call_per_preset(monkeypatch):
         presets=["incident_insights", "incident"],
     )
 
-    assert warmed == [("incident_insights", None, "1_year"), ("incident", None, "1_year")]
+    insight_calls = [call for call in warmed if call[0] == "incident_insights"]
+    kpi_calls = [call for call in warmed if call[0] == "incident"]
+    assert insight_calls == [("incident_insights", None, "1_year")]
+    assert kpi_calls == [("incident", None, period) for period in engine._KPI_WARM_PERIODS]
 
-    cached = _get_entry(
+    insight_site_entry = _get_entry(
         make_cache_key(
             tenant_id=1, project_id=1, dashboard_key="incident_insights",
             site_code=None, as_of=None, duration_unit="hours", period_key="1_year", dimension="site",
         )
     )
-    assert cached is not None
+    assert insight_site_entry is not None
+    insight_region_entry = _get_entry(
+        make_cache_key(
+            tenant_id=1, project_id=1, dashboard_key="incident_insights",
+            site_code=None, as_of=None, duration_unit="hours", period_key="1_year", dimension="region",
+        )
+    )
+    assert insight_region_entry is None  # not dual-cached -- the snapshot path covers it already
+
+    for period in engine._KPI_WARM_PERIODS:
+        for cache_dimension in ("site", "region"):
+            entry = _get_entry(
+                make_cache_key(
+                    tenant_id=1, project_id=1, dashboard_key="incident",
+                    site_code=None, as_of=None, duration_unit="hours",
+                    period_key=period, dimension=cache_dimension,
+                )
+            )
+            assert entry is not None, f"missing cache entry for period={period} dimension={cache_dimension}"
+            result, _state, _age = entry
+            assert result.filters["dimension"] == cache_dimension
 
 
 async def test_warm_does_not_expand_sites_when_site_code_already_pinned(monkeypatch):

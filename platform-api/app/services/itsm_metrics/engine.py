@@ -10,6 +10,7 @@ import asyncio
 import logging
 import math
 from calendar import monthrange
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta, timezone
 from statistics import median
 from typing import Any, cast
@@ -38,6 +39,16 @@ from .registry import get_dashboard_metrics, list_dashboards
 logger = logging.getLogger(__name__)
 
 CACHE_HINT = "/*+ cache(pref_mem ttl:300000) */"
+
+# The two dashboards with their own in-process snapshot cache (see
+# insight_snapshot.py) -- every other preset takes the per-metric Teiid path.
+_INSIGHT_DASHBOARD_KEYS = frozenset({"incident_insights", "service_request_insights"})
+
+# Every period the KPI dashboards' period picker actually offers (see
+# ItsmDashboardContent.tsx's PERIODS) -- warmed in full for the 5 KPI
+# presets so switching periods within a dashboard is also a cache hit, not
+# just the default-period dashboard switch stage 1 fixed.
+_KPI_WARM_PERIODS: tuple[str, ...] = ("30_days", "60_days", "90_days", "6_months", "1_year", "2_years")
 
 _DIMENSION_CODE_COLUMN: dict[str, str] = {
     "site": "site_code",
@@ -828,7 +839,7 @@ async def compute_dashboard(
     metrics = get_dashboard_metrics(dashboard_key)
     current_period, previous_period = _reporting_bounds(period_key, as_of)
     teiid_endpoint = await _resolve_teiid(project_id, session, tenant_id, user_id)
-    is_insight_dashboard = dashboard_key in {"incident_insights", "service_request_insights"}
+    is_insight_dashboard = dashboard_key in _INSIGHT_DASHBOARD_KEYS
 
     if is_insight_dashboard:
         from .insight_snapshot import aggregate_insight_snapshot, load_insight_snapshot
@@ -1043,13 +1054,30 @@ async def warm_itsm_dashboards_for_project(
     compute_dashboard's snapshot path (see insight_snapshot.py) loads every
     source CSV for the project/dashboard/dimension once and keeps it for five
     minutes, so every Period/Site/Region combination a user can pick is
-    already covered by that one load -- there is no longer a per-site or
-    per-period matrix to expand into.
+    already covered by that one load.
+
+    The five KPI presets have no equivalent snapshot (each metric's SQL --
+    joins, cross-table lookups, SLA joins included -- runs against Teiid
+    as-is; see compute_dashboard's docstring for why that's not something to
+    hand-port into Python), so getting the same "any combination is a cache
+    hit" behavior for them means actually warming every combination a user
+    can request rather than deriving it in-process. That combination space is
+    smaller than it looks: ``data_quality.availableSites`` is always ``[]``
+    for these five (see compute_dashboard below), so the frontend's site/
+    region picker never has a real option besides "All" -- the only axis a
+    KPI dashboard request actually varies on is the period dropdown. And
+    because the site filter is skipped whenever site is "all" and none of
+    these dashboards' two charts group by site or region (see registry.py's
+    _CHARTS), the "site" vs "region" dimension toggle produces an identical
+    result at site="all" -- so each period is computed once and the same
+    result is cached under both dimension keys instead of querying twice.
     """
     presets = presets or list(list_dashboards())
     sem = asyncio.Semaphore(max(1, min(2, pool_manager.max_size // 8)))
 
-    async def _warm_dashboard(preset: str, warm_site_code: str | None, period_key: str) -> DashboardResult | None:
+    async def _warm_dashboard(
+        preset: str, warm_site_code: str | None, period_key: str, warm_dimension: str,
+    ) -> DashboardResult | None:
         async with sem:
             try:
                 async with SessionLocal() as warm_session:
@@ -1063,43 +1091,55 @@ async def warm_itsm_dashboards_for_project(
                         date_unit=date_unit,
                         duration_unit=duration_unit,
                         period_key=period_key,
-                        dimension=dimension,
+                        dimension=warm_dimension,
                     )
-                from .cache import make_cache_key, set_cached_dashboard
-
-                set_cached_dashboard(
-                    make_cache_key(
-                        tenant_id=tenant_id,
-                        project_id=project_id,
-                        dashboard_key=preset,
-                        site_code=warm_site_code,
-                        as_of=None,
-                        duration_unit=duration_unit,
-                        period_key=period_key,
-                        dimension=dimension,
-                    ),
-                    result,
-                )
+                _cache_result(preset, warm_site_code, period_key, warm_dimension, result)
                 logger.info(
-                    "Warmed ITSM dashboard preset %s (site=%s) for project %s",
-                    preset, warm_site_code or "all", project_id,
+                    "Warmed ITSM dashboard preset %s (site=%s, period=%s, dimension=%s) for project %s",
+                    preset, warm_site_code or "all", period_key, warm_dimension, project_id,
                 )
                 return result
             except Exception as exc:
                 logger.warning(
-                    "ITSM dashboard warm failed for %s/%s (site=%s): %s",
-                    project_id, preset, warm_site_code or "all", exc,
+                    "ITSM dashboard warm failed for %s/%s (site=%s, period=%s): %s",
+                    project_id, preset, warm_site_code or "all", period_key, exc,
                 )
                 return None
 
+    def _cache_result(
+        preset: str, warm_site_code: str | None, period_key: str, cache_dimension: str, result: DashboardResult,
+    ) -> None:
+        from .cache import make_cache_key, set_cached_dashboard
+
+        set_cached_dashboard(
+            make_cache_key(
+                tenant_id=tenant_id,
+                project_id=project_id,
+                dashboard_key=preset,
+                site_code=warm_site_code,
+                as_of=None,
+                duration_unit=duration_unit,
+                period_key=period_key,
+                dimension=cache_dimension,
+            ),
+            result,
+        )
+
     async def _warm_one(preset: str) -> None:
-        # "1_year" is every ITSM dashboard's actual frontend default (see
-        # ItsmDashboardContent.tsx and ItsmInsightsDashboardContent.tsx, both
-        # `useState<PeriodKey>("1_year")`) -- warming the 5 KPI presets at
-        # "latest_month" here instead was a cache-key mismatch that made
-        # every KPI dashboard load a guaranteed miss (full CSV scan) despite
-        # the warm cycle running every 240s, since no request ever actually
-        # asked for "latest_month".
-        await _warm_dashboard(preset, site_code, "1_year")
+        if preset in _INSIGHT_DASHBOARD_KEYS:
+            # "1_year" is both insight dashboards' actual frontend default
+            # (ItsmInsightsDashboardContent.tsx's `useState<PeriodKey>
+            # ("1_year")`); the snapshot path covers every other
+            # Period/Site/Region combination from this one load.
+            await _warm_dashboard(preset, site_code, "1_year", dimension)
+            return
+        for period_key in _KPI_WARM_PERIODS:
+            result = await _warm_dashboard(preset, site_code, period_key, dimension)
+            other_dimension = "region" if dimension == "site" else "site"
+            if result is not None and (site_code or "all").lower() == "all":
+                _cache_result(
+                    preset, site_code, period_key, other_dimension,
+                    replace(result, filters={**result.filters, "dimension": other_dimension}),
+                )
 
     await asyncio.gather(*[_warm_one(preset) for preset in presets], return_exceptions=True)
