@@ -24,12 +24,12 @@ Excel without changing raw query values.
 
 ```bash
 git fetch origin
-git checkout codex/operational-template-bindings
-git pull --ff-only origin codex/operational-template-bindings
+git checkout claude/restore-operational-layout-alignment
+git pull --ff-only origin claude/restore-operational-layout-alignment
 ```
 
-Review and deploy the updated PR #191 into
-`devin/servicenow-itsm-dashboards-v2`.
+Merge into `release/deploy-2026-08-07` (fast-forwards cleanly from the current
+deploy HEAD).
 
 ## Pre-deployment validation
 
