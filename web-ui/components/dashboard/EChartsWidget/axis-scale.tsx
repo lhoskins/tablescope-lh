@@ -26,8 +26,8 @@ const SCALE_FACTORS = {
  */
 export function formatAxisNumber(value: number, options: VisualizationOptions): string {
   const scale = options.yAxisScale ?? "none";
-  if (scale === "none") return formatNumber(value, options.yAxisFormat, options.valueScale);
-  return formatNumber(value / SCALE_FACTORS[scale], options.yAxisFormat);
+  if (scale === "none") return formatNumber(value, options.yAxisFormat, options.valueScale, options.currencySymbol);
+  return formatNumber(value / SCALE_FACTORS[scale], options.yAxisFormat, undefined, options.currencySymbol);
 }
 
 export function axisScaleLabel(options: VisualizationOptions): string | undefined {

@@ -17,4 +17,15 @@ describe("axis scale", () => {
     expect(formatAxisNumber(2_500_000, { valueScale: "millions" })).toBe("2.5M");
     expect(formatAxisNumber(2_500, { yAxisScale: "none", valueScale: "thousands" })).toBe("2.5K");
   });
+
+  it("uses the dashboard's selected currency symbol in both display-unit paths", () => {
+    expect(
+      formatAxisNumber(2_500_000, { yAxisFormat: "currency", valueScale: "millions", currencySymbol: "€" }),
+    ).toBe("€2.5M");
+    // yAxisScale divides the value first (37,100,000 / 1,000 = 37,100), then
+    // "currency" format's own K/M auto-compacting still applies on top.
+    expect(
+      formatAxisNumber(37_100_000, { yAxisScale: "thousands", yAxisFormat: "currency", currencySymbol: "€" }),
+    ).toBe("€37K");
+  });
 });

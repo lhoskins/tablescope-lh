@@ -138,7 +138,7 @@ export function addAnalyticalLayers(
       if (v === null) return;
       option.series[0].markPoint.data.push({
         coord: [i, v],
-        value: formatNumber(v, opts.yAxisFormat),
+        value: formatNumber(v, opts.yAxisFormat, undefined, opts.currencySymbol),
         itemStyle: { color: "#ef4444" },
       });
     });
@@ -151,7 +151,7 @@ export function addAnalyticalLayers(
       if (v !== null && Math.abs(v - mean) > threshold) {
         option.series[0].markPoint.data.push({
           coord: [i, v],
-          value: formatNumber(v, opts.yAxisFormat),
+          value: formatNumber(v, opts.yAxisFormat, undefined, opts.currencySymbol),
           itemStyle: { color: "#ef4444" },
         });
       }

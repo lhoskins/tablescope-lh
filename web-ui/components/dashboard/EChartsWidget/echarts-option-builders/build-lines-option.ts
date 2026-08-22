@@ -93,10 +93,10 @@ export function buildLinesOption(
   }
   return {
     backgroundColor: "transparent",
-    tooltip: opts.showTooltip === false ? { show: false } : { trigger: "item" as const, formatter: (p: any) => `${xKey}: ${categories[p.value?.[0]?.[0] ?? 0]}<br/>${yKey}: ${formatNumber(Number(p.value?.[1] ?? 0), opts.yAxisFormat)}` },
+    tooltip: opts.showTooltip === false ? { show: false } : { trigger: "item" as const, formatter: (p: any) => `${xKey}: ${categories[p.value?.[0]?.[0] ?? 0]}<br/>${yKey}: ${formatNumber(Number(p.value?.[1] ?? 0), opts.yAxisFormat, undefined, opts.currencySymbol)}` },
     grid: { top: 30, right: 20, bottom: 60, left: 10, containLabel: true },
     xAxis: { type: "category" as const, data: categories, axisLabel: { rotate: categories.length > 8 ? -30 : 0, fontSize: 10, color: colorsForChart.text }, axisLine: { lineStyle: { color: colorsForChart.line } }, splitLine: { show: false } },
-    yAxis: { type: "value" as const, axisLabel: { formatter: (v: number) => formatNumber(v, opts.yAxisFormat), fontSize: 10, color: colorsForChart.text }, splitLine: { lineStyle: { color: colorsForChart.grid } } },
+    yAxis: { type: "value" as const, axisLabel: { formatter: (v: number) => formatNumber(v, opts.yAxisFormat, undefined, opts.currencySymbol), fontSize: 10, color: colorsForChart.text }, splitLine: { lineStyle: { color: colorsForChart.grid } } },
     series: [{
       type: "lines" as const,
       coordinateSystem: "cartesian2d" as const,

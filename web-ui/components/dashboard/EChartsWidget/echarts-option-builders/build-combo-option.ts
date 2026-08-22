@@ -106,7 +106,7 @@ export function buildComboOption(
       type: "bar" as const,
       data: chartData.map((r) => toNumber(r[barName]) ?? 0),
       itemStyle: { color: colors[0] },
-      label: { show: !!opts.showLabels, position: "top", fontSize: 9, color: colorsForChart.text, formatter: (p: any) => formatNumber(Number(p.value ?? 0), opts.yAxisFormat, opts.valueScale) },
+      label: { show: !!opts.showLabels, position: "top", fontSize: 9, color: colorsForChart.text, formatter: (p: any) => formatNumber(Number(p.value ?? 0), opts.yAxisFormat, opts.valueScale, opts.currencySymbol) },
       yAxisIndex: 0,
       barMaxWidth: 40,
       animation: animate,
@@ -118,7 +118,7 @@ export function buildComboOption(
       data: chartData.map((r) => toNumber(r[lineName]) ?? 0),
       itemStyle: { color: colors[1 % colors.length] },
       yAxisIndex: dualAxis ? 1 : 0,
-      label: { show: !!opts.showLabels, position: "top", fontSize: 9, color: colorsForChart.text, formatter: (p: any) => formatNumber(Number(p.value ?? 0), opts.yAxisFormat, opts.valueScale) },
+      label: { show: !!opts.showLabels, position: "top", fontSize: 9, color: colorsForChart.text, formatter: (p: any) => formatNumber(Number(p.value ?? 0), opts.yAxisFormat, opts.valueScale, opts.currencySymbol) },
       animation: animate,
     });
   } else if (y2Key) {
@@ -169,7 +169,7 @@ export function buildComboOption(
     aria: { enabled: true, description: `${widget.title || widget.type} chart` },
     color: colors,
     grid: commonGrid(tiny),
-    tooltip: opts.showTooltip === false || tiny ? { show: false } : { trigger: "axis", formatter: (params: any) => tooltipFormatter(params, opts.yAxisFormat, opts.valueScale) },
+    tooltip: opts.showTooltip === false || tiny ? { show: false } : { trigger: "axis", formatter: (params: any) => tooltipFormatter(params, opts.yAxisFormat, opts.valueScale, opts.currencySymbol) },
     legend: showLegend ? getLegendConfig(opts, isDark) : undefined,
     xAxis: { type: "category" as const, data: categoryData, show: !tiny, axisLabel: { rotate: opts.xAxisLabelRotate ?? (categoryData.length > 8 ? -30 : 0), fontSize: 10, color: colorsForChart.text }, axisLine: { lineStyle: { color: colorsForChart.line } }, splitLine: { show: false } },
     yAxis: [

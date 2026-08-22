@@ -106,7 +106,7 @@ export function buildLineOption(
     : (v: number) => formatAxisNumber(v, opts);
   const tooltipFormatterFn = opts.percentChangeTooltip
     ? (params: any) => percentChangeTooltipFormatter(params)
-    : (params: any) => tooltipFormatter(params, opts.yAxisFormat, opts.valueScale);
+    : (params: any) => tooltipFormatter(params, opts.yAxisFormat, opts.valueScale, opts.currencySymbol);
 
   const series = names.map((name, i) => ({
     name,
@@ -123,7 +123,7 @@ export function buildLineOption(
     }),
     itemStyle: opts.colorBySign ? undefined : { color: colors[i % colors.length] },
     lineStyle: { width: 2.5, type: dash as any },
-    label: { show: !tiny && !!opts.showLabels, position: "top", fontSize: 9, color: colorsForChart.text, formatter: (p: any) => formatNumber(Number(p.value ?? 0), opts.yAxisFormat, opts.valueScale) },
+    label: { show: !tiny && !!opts.showLabels, position: "top", fontSize: 9, color: colorsForChart.text, formatter: (p: any) => formatNumber(Number(p.value ?? 0), opts.yAxisFormat, opts.valueScale, opts.currencySymbol) },
     areaStyle: widget.type === "area" ? { opacity: opts.fillOpacity ?? 0.35 } : undefined,
     stack: widget.type === "area" && opts.stackMode && opts.stackMode !== "none" ? "total" : undefined,
     animation: animate,

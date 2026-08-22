@@ -70,6 +70,22 @@ describe("WidgetRenderer", () => {
     expect(screen.getByText("1,234")).toBeTruthy();
   });
 
+  it("uses the widget's selected currency symbol for a scaled KPI value", () => {
+    const widget = makeWidget({
+      type: "kpi",
+      aggregation: "sum",
+      visualizationOptions: { valueScale: "millions", currencySymbol: "€" },
+    });
+    render(<WidgetRenderer widget={widget} data={[{ Value: 4_200_000 }]} />);
+    expect(screen.getByText("€4.2M")).toBeTruthy();
+  });
+
+  it("defaults the KPI currency symbol to $ when none is set", () => {
+    const widget = makeWidget({ type: "kpi", aggregation: "sum" });
+    render(<WidgetRenderer widget={widget} data={[{ Value: 4_200_000 }]} />);
+    expect(screen.getByText("$4.2M")).toBeTruthy();
+  });
+
   it("renders the real prior-period delta with KPI polarity", () => {
     const widget = makeWidget({
       type: "kpi",

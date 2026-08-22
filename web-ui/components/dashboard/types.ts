@@ -58,6 +58,8 @@ export type VisualizationOptions = {
   // Forces the display unit (e.g. always $ in millions) instead of the
   // auto K/M breakpoints yAxisFormat's "currency"/"compact" already apply.
   valueScale?: "auto" | "hundreds" | "thousands" | "millions";
+  /** Symbol shown for yAxisFormat: "currency" (e.g. "$", "€"). Defaults to "$". */
+  currencySymbol?: string;
   dataZoom?: boolean;
   // Line / Area
   lineStyle?: "solid" | "dashed";

@@ -46,7 +46,10 @@ import { SavedQuery } from "./DashboardViewer/saved-query";
 import { Props } from "./DashboardViewer/props";
 import { resolveDatePreset, type DatePresetId } from "@/lib/dashboard/dateRange";
 import type { DashboardTemplateMetadata } from "@/components/tablescope/project/dashboard-templates/types";
-import { DimensionLabelEditor } from "@/components/tablescope/project/dashboard-templates/dimension-label-editor";
+import {
+  DimensionSwitcher,
+  type DimensionSwitcherOption,
+} from "@/components/tablescope/project/dashboard-templates/dimension-switcher";
 import {
   AIDashboardDesigner,
   type DashboardDesignerMode,
@@ -183,14 +186,32 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   });
   const [editingWidget, setEditingWidget] = useState<WidgetConfig | null>(null);
 
-  const saveDimensionLabel = useCallback(async (nextLabel: string) => {
-    if (!template) return;
-    const nextTemplate = { ...template, parameters: { ...template.parameters, dimensionLabel: nextLabel } };
-    await apiClient.put(`/api/projects/${projectId}/dashboards/${dashboard.id}`, { config: { ...dashboard.config, dashboardTemplate: nextTemplate } });
-    // `dimensionLabel` is derived from the persisted template, so the
-    // refetch triggered by onPersisted is what surfaces the new label.
-    onPersisted?.();
-  }, [dashboard.config, dashboard.id, onPersisted, projectId, template]);
+  // A dashboard can have more than one AI-discovered, full-coverage
+  // primary dimension assigned; the header's switch icon (only, no more
+  // inline label-edit pencil -- labels are now set once, during the AI
+  // designer's review step) toggles which one is active. Gated on
+  // hasBoundDimension since only a query-backed dimension can ever have
+  // assignments -- avoids the request on dashboards that never will.
+  const { data: primaryDimensionAssignments = [] } = useQuery({
+    queryKey: ["dashboard-primary-dimensions", projectId, dashboard.id],
+    queryFn: () =>
+      apiClient.get<Array<{ id: number; label: string; is_active: boolean }>>(
+        `/api/projects/${projectId}/dashboards/${dashboard.id}/primary-dimensions`,
+      ),
+    enabled: hasBoundDimension,
+  });
+  const dimensionSwitcherOptions: DimensionSwitcherOption[] = useMemo(
+    () => primaryDimensionAssignments.map((a) => ({ id: a.id, label: a.label, isActive: a.is_active })),
+    [primaryDimensionAssignments],
+  );
+  const activateDimensionMutation = useMutation({
+    mutationFn: (assignmentId: number) =>
+      apiClient.post(`/api/projects/${projectId}/dashboards/${dashboard.id}/primary-dimensions/${assignmentId}/activate`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["dashboard-primary-dimensions", projectId, dashboard.id] });
+      onPersisted?.();
+    },
+  });
 
   // Collect query IDs referenced by widgets that aren't in the provided savedQueries
   const missingQueryIds = useMemo(() => {
@@ -703,8 +724,13 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
                   <>
                     {/* Dimension type and dimension value are separate
                         controls, matching the ITSM header. */}
-                    <span className="flex h-8 items-center rounded-md border border-line-secondary bg-bg-primary px-2 text-xs font-medium text-ink-primary">
-                      <DimensionLabelEditor label={dimensionLabel} onSave={saveDimensionLabel} />
+                    <span className="flex h-8 items-center gap-1 rounded-md border border-line-secondary bg-bg-primary px-2 text-xs font-medium text-ink-primary">
+                      <span>{dimensionLabel}</span>
+                      <DimensionSwitcher
+                        options={dimensionSwitcherOptions}
+                        onSelect={(id) => activateDimensionMutation.mutate(id)}
+                        pending={activateDimensionMutation.isPending}
+                      />
                     </span>
                     <select
                       value={templateValue}
@@ -817,7 +843,12 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
             <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
               {template?.parameters && hasBoundDimension && (
                 <label className="flex items-center gap-1.5 text-[11px] font-medium text-ink-secondary">
-                  <DimensionLabelEditor label={dimensionLabel} onSave={saveDimensionLabel} />
+                  <span>{dimensionLabel}</span>
+                  <DimensionSwitcher
+                    options={dimensionSwitcherOptions}
+                    onSelect={(id) => activateDimensionMutation.mutate(id)}
+                    pending={activateDimensionMutation.isPending}
+                  />
                   <select
                     value={templateValue}
                     onChange={(event) => changeTemplateValue(event.target.value)}

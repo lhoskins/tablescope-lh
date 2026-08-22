@@ -9,6 +9,7 @@ applies the approved design through the canonical Operational Insight factory.
 from __future__ import annotations
 
 import re
+from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -21,6 +22,11 @@ from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.database import get_db
 from app.models.dashboard import Dashboard
+from app.models.dashboard_primary_dimension import (
+    DashboardPrimaryDimension,
+    DashboardPrimaryDimensionAssignment,
+    DashboardPrimaryDimensionBinding,
+)
 from app.models.file_source_meta import FileSourceMeta
 from app.models.saved_query import SavedQuery
 from app.routes.ai_proxy_dashboard_suggest import ai_suggest_dashboards
@@ -64,9 +70,19 @@ class DashboardDesignRequest(BaseModel):
     audience: str = "operational"
     emphasis: str = "balanced_operational_health"
     period: str = "1_year"
+    currency: Literal["USD", "EUR"] = "USD"
     dimension_label: str = "Site"
     dashboard_group_id: int | None = None
     chart_overrides: list[ChartOverride] = Field(default_factory=list)
+
+
+class PrimaryDimensionSelection(BaseModel):
+    """The AI-discovered dimension candidate a user picked on the review
+    screen (see _discover_primary_dimensions) -- ``field`` is the real,
+    validated column name; ``label`` is the AI-suggested label as the user
+    may have edited it. Never a manually typed Site/Region label."""
+    field: str
+    label: str
 
 
 class DashboardDesignApplyRequest(BaseModel):
@@ -79,12 +95,23 @@ class DashboardDesignApplyRequest(BaseModel):
     dashboard_title: str = ""
     # A saved query the user picked as the dimension's real value source
     # (must return exactly one column) -- None keeps today's decorative,
-    # unbound "manual" dimension label.
+    # unbound "manual" dimension label. Superseded by primary_dimensions for
+    # AI-discovered dimensions; kept for a query-backed manual pick.
     primary_dimension_query_id: int | None = None
+    # Every AI-discovered dimension candidate the user wants assigned to the
+    # dashboard (see PrimaryDimensionSelection) -- ordinarily every candidate
+    # that reached full coverage on the review screen, since the header's
+    # switch icon (not a separate pick step) is how a user with more than one
+    # full-coverage field chooses which is active. The first entry becomes
+    # the dashboard's initially active dimension. Empty keeps the
+    # pre-discovery fallback (primary_dimension_query_id or a decorative,
+    # unbound dimension_label).
+    primary_dimensions: list[PrimaryDimensionSelection] = Field(default_factory=list)
     audience: str = "operational"
     emphasis: str = "balanced_operational_health"
     period: str = "1_year"
-    dimension_label: str = "Site"
+    currency: Literal["USD", "EUR"] = "USD"
+    dimension_label: str = "Dimension"
     support_status: SupportStatus
     accept_partial: bool = False
     suggestion: dict[str, Any]
@@ -449,6 +476,68 @@ def _normalize_title(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
 
 
+def _dimension_label(field: str) -> str:
+    """AI-suggested starting label for a discovered field (e.g.
+    "business_unit" -> "Business Unit") -- editable by the user afterward,
+    both on the review screen and later from the dashboard header."""
+    return re.sub(r"[_\-]+", " ", field).strip().title() or field
+
+
+def _discover_primary_dimensions(suggestion: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Find categorical fields shared across the proposed widgets'
+    already-executed previews.
+
+    A "primary dimension" candidate is a real, validated column -- never a
+    manually typed Site/Region label -- found in at least two widgets'
+    result sets. Coverage is computed against every validated widget
+    (including KPIs, which rarely carry a categorical column and are
+    therefore usually the incompatible case the review screen must surface).
+    Widgets are identified by title, the same identity ``_apply_chart_overrides``
+    already uses to match a "Specific charts" request to a proposed widget --
+    the frontend removes an incompatible widget by title before re-submitting,
+    so apply-time recomputation must use the same key to see that removal.
+    """
+    widgets = _valid_suggestion_widgets(suggestion or {})
+    if len(widgets) < 2:
+        return []
+
+    widget_dims: dict[str, set[str]] = {}
+    field_widgets: dict[str, list[str]] = defaultdict(list)
+    for widget in widgets:
+        title = str(widget.get("title") or "")
+        if not title:
+            continue
+        preview = widget.get("previewData") or {}
+        cols = list(preview.get("columns") or [])
+        rows = list(preview.get("rows") or [])
+        if not cols or not rows:
+            widget_dims[title] = set()
+            continue
+        shape = derive_shape(cols, rows)
+        dims = {name for name in shape.dimensions if not _is_period_dimension(shape, name)}
+        widget_dims[title] = dims
+        for field in dims:
+            field_widgets[field].append(title)
+
+    all_titles = list(widget_dims.keys())
+    candidates: list[dict[str, Any]] = []
+    for field, compatible in field_widgets.items():
+        if len(compatible) < 2:
+            continue
+        incompatible = [title for title in all_titles if title not in compatible]
+        candidates.append({
+            "field": field,
+            "label": _dimension_label(field),
+            "compatibleCount": len(compatible),
+            "totalCount": len(all_titles),
+            "fullCoverage": len(incompatible) == 0,
+            "compatibleWidgets": list(compatible),
+            "incompatibleWidgets": [{"title": title} for title in incompatible],
+        })
+    candidates.sort(key=lambda c: (not c["fullCoverage"], -c["compatibleCount"], c["field"]))
+    return candidates
+
+
 def _apply_chart_overrides(
     suggestion: dict[str, Any], overrides: list[ChartOverride]
 ) -> None:
@@ -665,6 +754,7 @@ async def review_dashboard_design(
         "suggestion": suggestion,
         "domain": domain,
         "modelUsed": result.get("model_used", ""),
+        "primaryDimensionCandidates": _discover_primary_dimensions(suggestion),
     }
 
 
@@ -929,6 +1019,172 @@ async def _dimension_parameters(
     return {**params, "valueSource": "manual"}
 
 
+_SOURCE_VIEW_RE = re.compile(r'(?i)FROM\s+"([^"]+)"')
+
+
+def _widget_source_view(widget: dict[str, Any]) -> str | None:
+    """Best-effort extraction of the primary source view a widget's
+    generated SQL reads from -- the query-generation pipeline consistently
+    emits ``FROM "view_name"``, so the first quoted identifier after FROM is
+    the view. Used only to key the reusable DashboardPrimaryDimension record
+    and to build its distinct-values query; a chart that already validated
+    and ran is what determines coverage, not this string."""
+    match = _SOURCE_VIEW_RE.search(str(widget.get("sql") or ""))
+    return match.group(1) if match else None
+
+
+async def _apply_primary_dimension_selection(
+    session: AsyncSession,
+    *,
+    context: RequestContext,
+    project_id: int,
+    dashboard_id: int,
+    suggestion: dict[str, Any],
+    configs: list[dict[str, Any]],
+    selection: PrimaryDimensionSelection,
+    default_period: str,
+    make_active: bool = True,
+) -> dict[str, Any]:
+    """Validate an AI-discovered dimension against the FINAL widget list
+    (after any incompatible-chart removal) and persist it.
+
+    Recomputing here -- server-side, against the design that's actually
+    about to be saved -- rather than trusting the client's earlier review-
+    step coverage is what makes a stale or still-partial selection a 409
+    instead of a silently wrong dashboard: the review screen's coverage was
+    computed against the *proposed* widget list, which the client may have
+    since edited (a "Remove incompatible chart" click, another regenerate).
+
+    A dashboard can have more than one full-coverage dimension assigned (the
+    header's switch icon toggles between them); ``make_active=False`` for
+    every selection after the first keeps exactly one assignment active at
+    a time instead of every call in a batch clobbering the previous one.
+    """
+    candidates = {c["field"]: c for c in _discover_primary_dimensions(suggestion)}
+    candidate = candidates.get(selection.field)
+    if candidate is None or not candidate["fullCoverage"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"'{selection.field}' is no longer a fully-covered dimension for this "
+                "design. Remove the incompatible chart(s) or re-analyze before applying."
+            ),
+        )
+
+    widgets_by_title = {str(w.get("title") or ""): w for w in _valid_suggestion_widgets(suggestion)}
+    source_view = next(
+        (
+            view
+            for title in candidate["compatibleWidgets"]
+            if (view := _widget_source_view(widgets_by_title.get(title, {}))) is not None
+        ),
+        None,
+    )
+    if source_view is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Could not resolve a source view for dimension '{selection.field}'.",
+        )
+
+    dimension = await session.scalar(
+        select(DashboardPrimaryDimension).where(
+            DashboardPrimaryDimension.tenant_id == context.tenant_id,
+            DashboardPrimaryDimension.project_id == project_id,
+            DashboardPrimaryDimension.source_view == source_view,
+            DashboardPrimaryDimension.field == selection.field,
+        )
+    )
+    if dimension is None:
+        dimension = DashboardPrimaryDimension(
+            tenant_id=context.tenant_id,
+            project_id=project_id,
+            source_view=source_view,
+            field=selection.field,
+            default_label=_dimension_label(selection.field),
+        )
+        session.add(dimension)
+        await session.flush()
+
+    from app.services.dashboard_widget import find_or_create_saved_query
+
+    quoted_field = f'"{selection.field}"'
+    quoted_view = f'"{source_view}"'
+    distinct_query = await find_or_create_saved_query(
+        session,
+        project_id=project_id,
+        title=f"AI - {selection.label} values",
+        sql=f"SELECT DISTINCT {quoted_field} AS value FROM {quoted_view} ORDER BY 1",
+        user_id=context.user_id,
+        allowed_tables=[source_view],
+    )
+
+    existing_assignments = list(
+        await session.scalars(
+            select(DashboardPrimaryDimensionAssignment).where(
+                DashboardPrimaryDimensionAssignment.dashboard_id == dashboard_id,
+            )
+        )
+    )
+    if make_active:
+        for assignment in existing_assignments:
+            assignment.is_active = False
+
+    assignment = next(
+        (a for a in existing_assignments if a.dimension_id == dimension.id), None,
+    )
+    if assignment is None:
+        assignment = DashboardPrimaryDimensionAssignment(
+            tenant_id=context.tenant_id,
+            project_id=project_id,
+            dashboard_id=dashboard_id,
+            dimension_id=dimension.id,
+            label=selection.label,
+            is_active=make_active,
+            position=len(existing_assignments),
+        )
+        session.add(assignment)
+    else:
+        assignment.label = selection.label
+        if make_active:
+            assignment.is_active = True
+    await session.flush()
+
+    persisted_id_by_title = {
+        str(config.get("title") or ""): str(config.get("id"))
+        for config in configs
+        if config.get("id")
+    }
+    await session.execute(
+        DashboardPrimaryDimensionBinding.__table__.delete().where(
+            DashboardPrimaryDimensionBinding.assignment_id == assignment.id,
+        )
+    )
+    for title in candidate["compatibleWidgets"]:
+        widget_id = persisted_id_by_title.get(title)
+        if widget_id is None:
+            continue
+        session.add(
+            DashboardPrimaryDimensionBinding(
+                tenant_id=context.tenant_id,
+                project_id=project_id,
+                assignment_id=assignment.id,
+                widget_id=widget_id,
+                column_name=selection.field,
+            )
+        )
+
+    return await _dimension_parameters(
+        session,
+        project_id=project_id,
+        dimension_label=selection.label,
+        default_period=default_period,
+        query_id=distinct_query.id,
+    )
+
+
+_CURRENCY_SYMBOLS: dict[str, str] = {"USD": "$", "EUR": "€"}
+
+
 async def _widget_configs(
     *,
     session: AsyncSession,
@@ -936,6 +1192,7 @@ async def _widget_configs(
     project_id: int,
     suggestion: dict[str, Any],
     start_index: int,
+    currency: Literal["USD", "EUR"] = "USD",
 ) -> list[dict[str, Any]]:
     # Imported lazily because dashboard_widget intentionally consumes chart
     # mapping helpers re-exported by the ai_proxy aggregator.
@@ -1003,6 +1260,7 @@ async def _widget_configs(
         value_scale = widget.get("_valueScale")
         if value_scale:
             config["visualizationOptions"]["valueScale"] = value_scale
+        config["visualizationOptions"]["currencySymbol"] = _CURRENCY_SYMBOLS[currency]
         # A forced chart type/subtype from the designer's picker is already
         # the exact WidgetType + variant value the frontend registry uses --
         # _map_chart_type's narrower planner vocabulary (built for LLM-guessed
@@ -1067,6 +1325,7 @@ async def apply_dashboard_design(
             project_id=project.id,
             suggestion=suggestion,
             start_index=0,
+            currency=req.currency,
         )
         dashboard_name = (
             req.dashboard_title.strip()
@@ -1113,6 +1372,30 @@ async def apply_dashboard_design(
             ai_generated=True,
         )
         session.add(dashboard)
+        if req.primary_dimensions:
+            await session.flush()  # assigns dashboard.id
+            dimension_parameters = None
+            for index, selection in enumerate(req.primary_dimensions):
+                result = await _apply_primary_dimension_selection(
+                    session,
+                    context=context,
+                    project_id=project.id,
+                    dashboard_id=dashboard.id,
+                    suggestion=suggestion,
+                    configs=configs,
+                    selection=selection,
+                    default_period=req.period,
+                    make_active=(index == 0),
+                )
+                if index == 0:
+                    dimension_parameters = result
+            next_config = dict(dashboard.config)
+            metadata = dict(next_config.get("dashboardTemplate") or {})
+            metadata["parameters"] = dimension_parameters
+            next_config["dashboardTemplate"] = metadata
+            dashboard.config = operational_insight_config(
+                next_config, group=group, dashboard_name=dashboard_name,
+            )
     else:
         if req.dashboard_id is None:
             raise HTTPException(status_code=422, detail="dashboard_id is required")
@@ -1136,6 +1419,7 @@ async def apply_dashboard_design(
                 project_id=project.id,
                 suggestion=suggestion,
                 start_index=len(existing),
+                currency=req.currency,
             )
             next_widgets = [*existing, *additions[:1]]
         elif req.mode == "edit_insight":
@@ -1147,6 +1431,7 @@ async def apply_dashboard_design(
                 project_id=project.id,
                 suggestion=suggestion,
                 start_index=0,
+                currency=req.currency,
             )
             target = next((item for item in existing if item.get("id") == req.target_insight_id), None)
             if target is None:
@@ -1160,6 +1445,7 @@ async def apply_dashboard_design(
                 project_id=project.id,
                 suggestion=suggestion,
                 start_index=0,
+                currency=req.currency,
             )
 
         next_config = dict(dashboard.config or {})
@@ -1191,6 +1477,21 @@ async def apply_dashboard_design(
                 "defaultPeriod": req.period,
             }
         )
+        if req.mode == "edit_dashboard" and req.primary_dimensions:
+            for index, selection in enumerate(req.primary_dimensions):
+                result = await _apply_primary_dimension_selection(
+                    session,
+                    context=context,
+                    project_id=project.id,
+                    dashboard_id=dashboard.id,
+                    suggestion=suggestion,
+                    configs=next_widgets,
+                    selection=selection,
+                    default_period=req.period,
+                    make_active=(index == 0),
+                )
+                if index == 0:
+                    parameters = result
         metadata["parameters"] = parameters
         next_config["dashboardTemplate"] = metadata
         dashboard.config = operational_insight_config(

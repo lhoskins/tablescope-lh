@@ -111,7 +111,7 @@ export function buildBarOption(
     const wf = prepareWaterfallData(workingData, { nameKey: xKey, valueKey: yKey });
     series.push(
       { name: "Base", type: "bar", stack: "wf", data: wf.map((d) => d.base), itemStyle: { color: "transparent" }, silent: true },
-      { name: "Change", type: "bar", stack: "wf", data: wf.map((d) => d.delta), itemStyle: { color: (p: any) => (p.value >= 0 ? "#16a34a" : "#dc2626") }, label: { show: !!opts.showLabels, position: "top", fontSize: 9, color: colorsForChart.text, formatter: (p: any) => formatNumber(Number(wf[p.dataIndex]?.value ?? 0), opts.yAxisFormat, opts.valueScale) } }
+      { name: "Change", type: "bar", stack: "wf", data: wf.map((d) => d.delta), itemStyle: { color: (p: any) => (p.value >= 0 ? "#16a34a" : "#dc2626") }, label: { show: !!opts.showLabels, position: "top", fontSize: 9, color: colorsForChart.text, formatter: (p: any) => formatNumber(Number(wf[p.dataIndex]?.value ?? 0), opts.yAxisFormat, opts.valueScale, opts.currencySymbol) } }
     );
   } else if (sub === "population_pyramid") {
     const names = workingNames.length >= 2 ? [workingNames[0], workingNames[1]] : [yKey, workingNames[0] ?? yKey];
@@ -142,7 +142,7 @@ export function buildBarOption(
           },
           borderRadius: opts.roundedCorners === false ? 0 : horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0],
         },
-        label: { show: !tiny && !!opts.showLabels, position: horizontal ? "right" : "top", fontSize: 9, color: colorsForChart.text, formatter: (p: any) => formatNumber(Number(p.value ?? 0), opts.yAxisFormat, opts.valueScale) },
+        label: { show: !tiny && !!opts.showLabels, position: horizontal ? "right" : "top", fontSize: 9, color: colorsForChart.text, formatter: (p: any) => formatNumber(Number(p.value ?? 0), opts.yAxisFormat, opts.valueScale, opts.currencySymbol) },
         showBackground: !!opts.showBackground,
         backgroundStyle: { color: colorsForChart.grid },
         barMaxWidth: 48,
@@ -155,7 +155,7 @@ export function buildBarOption(
     aria: { enabled: true, description: `${widget.title || widget.type} chart` },
     color: colors,
     grid: commonGrid(tiny),
-    tooltip: opts.showTooltip === false || tiny ? { show: false } : { trigger: "axis", axisPointer: { type: "shadow" }, formatter: (params: any) => tooltipFormatter(params, opts.yAxisFormat, opts.valueScale) },
+    tooltip: opts.showTooltip === false || tiny ? { show: false } : { trigger: "axis", axisPointer: { type: "shadow" }, formatter: (params: any) => tooltipFormatter(params, opts.yAxisFormat, opts.valueScale, opts.currencySymbol) },
     legend: showLegend ? getLegendConfig(opts, isDark) : undefined,
     xAxis: horizontal
       ? { type: "value" as const, show: !tiny, name: axisScaleLabel(opts), nameLocation: "middle" as const, nameGap: 28, axisLabel: { formatter: (v: number) => formatAxisNumber(Math.abs(v), opts), fontSize: 10, color: colorsForChart.text }, splitLine: showGrid ? { lineStyle: { color: colorsForChart.grid } } : undefined }
