@@ -5,7 +5,9 @@ import { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
-import { UnifiedUploadDialog } from "@/components/uploads/unified-upload-dialog";import { KnowledgeGraphScreen } from "./DocumentsTab/knowledge-graph-screen";
+import { UnifiedUploadDialog } from "@/components/uploads/unified-upload-dialog";
+import { DocumentViewerDialog } from "./document-viewer-dialog";
+import { KnowledgeGraphScreen } from "./DocumentsTab/knowledge-graph-screen";
 import { FamilyDetailDrawer } from "./DocumentsTab/family-detail-drawer";
 import { ProjectDocument } from "./DocumentsTab/project-document";
 import { AITag } from "./DocumentsTab/aitag";
@@ -40,6 +42,7 @@ export function DocumentsTab({
   );
   const [uploadOpen, setUploadOpen] = useState(false);
   const [openFamilyId, setOpenFamilyId] = useState<number | null>(null);
+  const [viewingDoc, setViewingDoc] = useState<ProjectDocument | null>(null);
 
   type FamilyListItem = {
     family_node_id: number;
@@ -528,6 +531,13 @@ export function DocumentsTab({
 
                     {/* Actions */}
                     <div className="flex gap-2 pt-2 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => setViewingDoc(doc)}
+                        className="rounded-md bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900"
+                      >
+                        View Document
+                      </button>
                       {doc.ai_status !== "profiled" && doc.ai_status !== "profiling" && canEdit && (
                         <button
                           type="button"
@@ -582,6 +592,14 @@ export function DocumentsTab({
             onClose={() => setOpenFamilyId(null)}
           />
         </Suspense>
+      )}
+
+      {viewingDoc && (
+        <DocumentViewerDialog
+          projectId={projectId}
+          document={viewingDoc}
+          onClose={() => setViewingDoc(null)}
+        />
       )}
 
       <UnifiedUploadDialog
