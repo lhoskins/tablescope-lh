@@ -8,6 +8,7 @@ The LLM only sees the context package built by the context_builder.
 It never has direct access to files, databases, or vector collections.
 """
 
+import asyncio
 import logging
 from typing import Any
 
@@ -18,6 +19,37 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 TIMEOUT = httpx.Timeout(180.0, connect=10.0)
+
+# vLLM (observed with the muse-glimmer image's custom tool-call/reasoning
+# parser) intermittently drops the connection before writing any HTTP
+# response at all -- a plain curl reproduces it identically, so this is a
+# server-side connection drop, not something in how this client builds the
+# request. httpx surfaces that as a connection-level exception rather than
+# an HTTPStatusError (which is a real answer from the server and must not be
+# retried here -- e.g. a 400 for a too-long prompt). Retry the connection a
+# couple of times with a short backoff before surfacing a hard failure.
+_CONNECTION_DROPPED_EXCEPTIONS = (httpx.ConnectError, httpx.RemoteProtocolError, httpx.ReadError)
+_CONNECTION_RETRY_DELAYS_SECONDS = (1.0, 3.0)
+
+
+async def _post_json_with_retry(
+    client: httpx.AsyncClient, url: str, payload: dict[str, Any]
+) -> httpx.Response:
+    """POST with retries for a connection dropped before any response."""
+    last_exc: Exception | None = None
+    for attempt, delay in enumerate((0.0, *_CONNECTION_RETRY_DELAYS_SECONDS)):
+        if delay:
+            await asyncio.sleep(delay)
+        try:
+            return await client.post(url, json=payload)
+        except _CONNECTION_DROPPED_EXCEPTIONS as exc:
+            last_exc = exc
+            logger.warning(
+                "Connection to %s dropped before a response (attempt %d/%d): %s",
+                url, attempt + 1, len(_CONNECTION_RETRY_DELAYS_SECONDS) + 1, exc,
+            )
+    assert last_exc is not None
+    raise last_exc
 
 
 def _is_openai_target(target_url: str) -> bool:
@@ -55,10 +87,7 @@ async def _generate_openai(
         payload["response_format"] = {"type": "json_object"}
 
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        resp = await client.post(
-            f"{target_url}/chat/completions",
-            json=payload,
-        )
+        resp = await _post_json_with_retry(client, f"{target_url}/chat/completions", payload)
         try:
             resp.raise_for_status()
         except httpx.HTTPStatusError:
