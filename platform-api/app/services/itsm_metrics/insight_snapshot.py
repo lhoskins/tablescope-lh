@@ -35,12 +35,14 @@ SELECT sys_id, opened_at, resolved_at, resolution_minutes, major_incident,
        priority, state, category,
        CAST({dimension_code} AS string) AS dimension_code,
        CAST({dimension_name} AS string) AS dimension_name
-FROM "01_incidents_CSV""" ,
+FROM "01_incidents_CSV"
+""",
         "slas": """/*+ cache(pref_mem ttl:300000) */
 SELECT sys_id, task_type, "metric", has_breached, end_time,
        CAST({dimension_code} AS string) AS dimension_code,
        CAST({dimension_name} AS string) AS dimension_name
-FROM "02_task_slas_CSV""",
+FROM "02_task_slas_CSV"
+""",
     },
     "service_request_insights": {
         "requests": """/*+ cache(pref_mem ttl:300000) */
@@ -48,17 +50,20 @@ SELECT sys_id, requested_date, closed_at, request_fulfillment_minutes,
        fulfillment_sla_met, approval, stage, state,
        CAST({dimension_code} AS string) AS dimension_code,
        CAST({dimension_name} AS string) AS dimension_name
-FROM "07_requests_CSV""",
+FROM "07_requests_CSV"
+""",
         "items": """/*+ cache(pref_mem ttl:300000) */
 SELECT sys_id, opened_at, closed_at, price_usd, catalog_item_name,
        CAST({dimension_code} AS string) AS dimension_code,
        CAST({dimension_name} AS string) AS dimension_name
-FROM "08_requested_items_CSV""",
+FROM "08_requested_items_CSV"
+""",
         "tasks": """/*+ cache(pref_mem ttl:300000) */
 SELECT sys_id, request_item_sys_id, opened_at, closed_at, assignment_group_name,
        CAST({dimension_code} AS string) AS dimension_code,
        CAST({dimension_name} AS string) AS dimension_name
-FROM "09_catalog_tasks_CSV""",
+FROM "09_catalog_tasks_CSV"
+""",
     },
 }
 
