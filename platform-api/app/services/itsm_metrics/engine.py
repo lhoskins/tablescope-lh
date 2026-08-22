@@ -39,29 +39,13 @@ logger = logging.getLogger(__name__)
 
 CACHE_HINT = "/*+ cache(pref_mem ttl:300000) */"
 
-# Safety valve for the per-site warm expansion in warm_itsm_dashboards_for_project:
-# caps how many of a project's real sites get pre-warmed alongside the "all
-# sites" bucket, so a project with an unusually large number of distinct
-# sites can't turn one warm cycle into an unbounded number of Teiid queries.
-_MAX_SITES_TO_WARM = 15
-
 _DIMENSION_CODE_COLUMN: dict[str, str] = {
     "site": "site_code",
     "region": "region",
 }
 
-_DIMENSION_LABEL_COLUMN: dict[str, str] = {
-    "site": "site_name",
-    "region": "region_name",
-}
-
-
 def _dimension_column(dimension: str | None) -> str:
     return _DIMENSION_CODE_COLUMN.get((dimension or "").lower(), "site_code")
-
-
-def _dimension_label_column(dimension: str | None) -> str:
-    return _DIMENSION_LABEL_COLUMN.get((dimension or "").lower(), "site_name")
 
 
 _METRIC_COPY: dict[str, tuple[str, str]] = {
@@ -696,32 +680,20 @@ async def _fetch_period_rows(
     return current_rows, previous_rows
 
 
-async def compute_metric(
+def _assemble_metric_value(
     metric: MetricDefinition,
-    project_id: int,
-    session: AsyncSession,
-    tenant_id: int,
-    user_id: int,
+    current_raw: float | None,
+    previous_raw: float | None,
     current_period: PeriodBounds,
     previous_period: PeriodBounds,
-    site_code: str | None = None,
-    date_unit: str = "seconds",
-    duration_unit: str = "hours",
-    teiid_endpoint: tuple[str, str, int] | None = None,
-    site_column: str = "site_code",
+    duration_unit: str,
 ) -> MetricValue:
-    """Run a metric for current and previous month and assemble a KPI card value."""
-    if teiid_endpoint is None:
-        database, host, port = await _resolve_teiid(project_id, session, tenant_id, user_id)
-    else:
-        database, host, port = teiid_endpoint
-
-    current_rows, previous_rows = await _fetch_period_rows(
-        metric, current_period, previous_period, site_code, date_unit, site_column, database, host, port,
-    )
-
-    current_value = _convert_duration(_extract_metric_value(current_rows, metric), metric.unit, duration_unit)
-    previous_value = _convert_duration(_extract_metric_value(previous_rows, metric), metric.unit, duration_unit)
+    """Format a metric's already-extracted current/previous values into a KPI
+    card. Shared by the per-metric Teiid path (compute_metric) and the
+    in-process insight-snapshot path, so both produce identical MetricValue
+    shapes regardless of where the raw numbers came from."""
+    current_value = _convert_duration(current_raw, metric.unit, duration_unit)
+    previous_value = _convert_duration(previous_raw, metric.unit, duration_unit)
     unit = _display_unit(metric, duration_unit)
 
     comparison = compute_comparison(
@@ -753,6 +725,40 @@ async def compute_metric(
         description=_metric_description(metric),
         calculation=_metric_calculation(metric),
         target=metric.target,
+    )
+
+
+async def compute_metric(
+    metric: MetricDefinition,
+    project_id: int,
+    session: AsyncSession,
+    tenant_id: int,
+    user_id: int,
+    current_period: PeriodBounds,
+    previous_period: PeriodBounds,
+    site_code: str | None = None,
+    date_unit: str = "seconds",
+    duration_unit: str = "hours",
+    teiid_endpoint: tuple[str, str, int] | None = None,
+    site_column: str = "site_code",
+) -> MetricValue:
+    """Run a metric for current and previous month and assemble a KPI card value."""
+    if teiid_endpoint is None:
+        database, host, port = await _resolve_teiid(project_id, session, tenant_id, user_id)
+    else:
+        database, host, port = teiid_endpoint
+
+    current_rows, previous_rows = await _fetch_period_rows(
+        metric, current_period, previous_period, site_code, date_unit, site_column, database, host, port,
+    )
+
+    return _assemble_metric_value(
+        metric,
+        _extract_metric_value(current_rows, metric),
+        _extract_metric_value(previous_rows, metric),
+        current_period,
+        previous_period,
+        duration_unit,
     )
 
 
@@ -790,369 +796,6 @@ GROUP BY 1
 ORDER BY {order_by}"""
 
 
-def _row_text(row: dict[str, Any], key: str) -> str:
-    value = row.get(key, row.get(key.upper()))
-    return "Unspecified" if value is None or str(value).strip() == "" else str(value)
-
-
-def _row_number(row: dict[str, Any], key: str = "y") -> float:
-    value = row.get(key, row.get(key.upper()))
-    try:
-        return float(value or 0)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _bucket_expression(field: str, period_key: str | None) -> str:
-    width = 10 if period_key in _PERIOD_DAYS else 7
-    return f"SUBSTRING(CAST({_quote_identifier(field)} AS string), 1, {width})"
-
-
-def _aligned_series(
-    first_name: str,
-    first_rows: list[dict[str, Any]],
-    second_name: str,
-    second_rows: list[dict[str, Any]],
-) -> tuple[list[str], list[ChartSeries]]:
-    first = {_row_text(row, "x"): _row_number(row) for row in first_rows}
-    second = {_row_text(row, "x"): _row_number(row) for row in second_rows}
-    categories = sorted(set(first) | set(second))
-    return categories, [
-        ChartSeries(name=first_name, x=categories, y=[first.get(item, 0) for item in categories]),
-        ChartSeries(name=second_name, x=categories, y=[second.get(item, 0) for item in categories]),
-    ]
-
-
-async def _build_insight_charts(
-    *,
-    dashboard_key: str,
-    endpoint: tuple[str, str, int],
-    period: PeriodBounds,
-    period_key: str | None,
-    site_code: str | None,
-    warnings: list[str],
-    site_column: str = "site_code",
-) -> tuple[list[ChartResult], list[InsightSummary]]:
-    """Build the richer, live insight charts without changing the KPI pipeline."""
-    database, host, port = endpoint
-    start, end = _period_epoch(period)
-    site_filter = _site_filter(site_code, site_column)
-    site_group_col = _quote_identifier(site_column)
-    charts: list[ChartResult] = []
-
-    async def _safe(label: str, sql: str) -> list[dict[str, Any]]:
-        try:
-            return await _run_sql(database, host, port, f"{CACHE_HINT}\n{sql}")
-        except Exception as exc:
-            logger.warning("Insight chart %s failed: %s", label, exc)
-            warnings.append(f"{label}: supporting chart unavailable")
-            return []
-
-    if dashboard_key == "incident_insights":
-        opened_bucket = _bucket_expression("opened_at", period_key)
-        resolved_bucket = _bucket_expression("resolved_at", period_key)
-        opened_sql = f"""{CACHE_HINT}
-SELECT {opened_bucket} AS x, COUNT(*) AS y
-FROM "01_incidents_CSV"
-WHERE unix_timestamp(CAST(opened_at AS timestamp)) >= {start}
-  AND unix_timestamp(CAST(opened_at AS timestamp)) <= {end}
-  AND {site_filter}
-GROUP BY 1 ORDER BY 1"""
-        resolved_sql = f"""{CACHE_HINT}
-SELECT {resolved_bucket} AS x, COUNT(*) AS y
-FROM "01_incidents_CSV"
-WHERE unix_timestamp(CAST(resolved_at AS timestamp)) >= {start}
-  AND unix_timestamp(CAST(resolved_at AS timestamp)) <= {end}
-  AND {site_filter}
-GROUP BY 1 ORDER BY 1"""
-        age_sql = f"""{CACHE_HINT}
-SELECT CASE
-  WHEN ({end} - unix_timestamp(CAST(opened_at AS timestamp))) / 86400.0 <= 1 THEN '0-1 day'
-  WHEN ({end} - unix_timestamp(CAST(opened_at AS timestamp))) / 86400.0 <= 5 THEN '2-5 days'
-  WHEN ({end} - unix_timestamp(CAST(opened_at AS timestamp))) / 86400.0 <= 30 THEN '6-30 days'
-  WHEN ({end} - unix_timestamp(CAST(opened_at AS timestamp))) / 86400.0 <= 90 THEN '31-90 days'
-  ELSE '90+ days' END AS x,
-  COUNT(*) AS y
-FROM "01_incidents_CSV"
-WHERE unix_timestamp(CAST(opened_at AS timestamp)) <= {end}
-  AND (resolved_at IS NULL OR unix_timestamp(CAST(resolved_at AS timestamp)) > {end})
-  AND {site_filter}
-GROUP BY 1"""
-        sla_site_sql = f"""{CACHE_HINT}
-SELECT CAST({site_group_col} AS string) AS x, COUNT(*) AS y
-FROM "02_task_slas_CSV"
-WHERE task_type = 'Incident' AND "metric" = 'Resolution'
-  AND CAST(has_breached AS boolean) = true
-  AND unix_timestamp(CAST(end_time AS timestamp)) >= {start}
-  AND unix_timestamp(CAST(end_time AS timestamp)) <= {end}
-  AND {site_filter}
-GROUP BY 1 ORDER BY 2 DESC LIMIT 8"""
-        heat_sql = f"""{CACHE_HINT}
-SELECT CAST(priority AS string) AS priority, CAST(state AS string) AS state,
-  COUNT(*) AS y
-FROM "01_incidents_CSV"
-WHERE unix_timestamp(CAST(opened_at AS timestamp)) <= {end}
-  AND (resolved_at IS NULL OR unix_timestamp(CAST(resolved_at AS timestamp)) > {end})
-  AND {site_filter}
-GROUP BY 1, 2"""
-        category_sql = f"""{CACHE_HINT}
-SELECT CAST(category AS string) AS x, COUNT(*) AS y
-FROM "01_incidents_CSV"
-WHERE unix_timestamp(CAST(opened_at AS timestamp)) >= {start}
-  AND unix_timestamp(CAST(opened_at AS timestamp)) <= {end}
-  AND {site_filter}
-GROUP BY 1 ORDER BY 2 DESC LIMIT 7"""
-        opened_rows, resolved_rows, age_rows, sla_rows, heat_rows, category_rows = await asyncio.gather(
-            _safe("incident-flow-opened", opened_sql),
-            _safe("incident-flow-resolved", resolved_sql),
-            _safe("incident-backlog-age", age_sql),
-            _safe("incident-sla-sites", sla_site_sql),
-            _safe("incident-priority-state", heat_sql),
-            _safe("incident-categories", category_sql),
-        )
-        categories, flow_series = _aligned_series("Opened", opened_rows, "Resolved", resolved_rows)
-        charts.append(ChartResult(
-            chart_key="incident_insight_flow",
-            title="Demand vs. resolution flow",
-            chart_type="line",
-            x_axis_label="Reporting period",
-            y_axis_label="Incidents",
-            series=flow_series,
-            categories=categories,
-            unit="count",
-            description="Incident inflow compared with completed resolution work.",
-            calculation="Incidents opened and resolved, grouped by reporting interval.",
-            drilldown_metric_key="open_backlog",
-            drilldown_dimension="period",
-        ))
-
-        age_order = ["0-1 day", "2-5 days", "6-30 days", "31-90 days", "90+ days"]
-        age_values = {_row_text(row, "x"): _row_number(row) for row in age_rows}
-        charts.append(ChartResult(
-            chart_key="incident_insight_age",
-            title="Backlog age & SLA risk",
-            chart_type="skinny_bar",
-            y_axis_label="Open incidents",
-            series=[ChartSeries(name="Open incidents", x=age_order, y=[age_values.get(item, 0) for item in age_order])],
-            categories=age_order,
-            unit="count",
-            description="Age distribution for incidents unresolved at the reporting period end.",
-            calculation="Count of unresolved incidents grouped by age at period end.",
-            drilldown_metric_key="open_backlog",
-            drilldown_dimension="age_band",
-        ))
-
-        sla_categories = [_row_text(row, "x") for row in sla_rows]
-        sla_values = [_row_number(row) for row in sla_rows]
-        charts.append(ChartResult(
-            chart_key="incident_insight_sla_sites",
-            title="Where SLA risk originates",
-            chart_type="skinny_bar",
-            y_axis_label="Breached incidents",
-            series=[ChartSeries(name="Breaches", x=sla_categories, y=cast(list[float | None], sla_values))],
-            categories=sla_categories,
-            unit="count",
-            description="Sites contributing the most completed resolution SLA breaches.",
-            calculation="Breached incident resolution SLA records grouped by site.",
-            drilldown_metric_key="resolution_sla",
-            drilldown_dimension="site_code",
-        ))
-
-        states = sorted({_row_text(row, "state") for row in heat_rows})
-        priorities = sorted({_row_text(row, "priority") for row in heat_rows})
-        heat_values = {(_row_text(row, "priority"), _row_text(row, "state")): _row_number(row) for row in heat_rows}
-        charts.append(ChartResult(
-            chart_key="incident_insight_priority_state",
-            title="Priority \u00d7 status concentration",
-            chart_type="heatmap",
-            x_axis_label="Status",
-            y_axis_label="Priority",
-            series=[ChartSeries(name=priority, x=states, y=[heat_values.get((priority, state), 0) for state in states]) for priority in priorities],
-            categories=states,
-            unit="count",
-            description="Active workload concentration by incident priority and lifecycle state.",
-            calculation="Count of unresolved incidents grouped by priority and state.",
-            drilldown_metric_key="open_backlog",
-            drilldown_dimension="priority_state",
-        ))
-
-        category_names = [_row_text(row, "x") for row in category_rows]
-        category_values = [_row_number(row) for row in category_rows]
-        charts.append(ChartResult(
-            chart_key="incident_insight_categories",
-            title="Category contribution",
-            chart_type="skinny_bar",
-            y_axis_label="Incidents",
-            series=[ChartSeries(name="Incidents", x=category_names, y=cast(list[float | None], category_values))],
-            categories=category_names,
-            unit="count",
-            description="Highest-volume incident categories in the selected period.",
-            calculation="Count of incidents opened, grouped by category.",
-            drilldown_metric_key="open_backlog",
-            drilldown_dimension="category",
-        ))
-
-        stale = sum(age_values.get(item, 0) for item in age_order[2:])
-        breach_total = sum(sla_values)
-        top_site = sla_categories[0] if sla_categories else "No site"
-        top_site_share = round(100 * sla_values[0] / breach_total) if breach_total and sla_values else 0
-        top_category = category_names[0] if category_names else "No category"
-        return charts, [
-            InsightSummary("risk", "Backlog risk", f"{int(stale):,} open incidents are older than five days.", "critical", "open_backlog"),
-            InsightSummary("driver", "Primary driver", f"{top_site} contributes {top_site_share}% of resolution SLA breaches.", "warning", "resolution_sla"),
-            InsightSummary("action", "Recommended action", f"Review {top_category} demand and the highest-breach site before rebalancing work.", "positive", "open_backlog"),
-        ]
-
-    requested_bucket = _bucket_expression("requested_date", period_key)
-    completed_bucket = _bucket_expression("closed_at", period_key)
-    requested_sql = f"""{CACHE_HINT}
-SELECT {requested_bucket} AS x, COUNT(*) AS y
-FROM "07_requests_CSV"
-WHERE unix_timestamp(CAST(requested_date AS timestamp)) >= {start}
-  AND unix_timestamp(CAST(requested_date AS timestamp)) <= {end}
-  AND {site_filter}
-GROUP BY 1 ORDER BY 1"""
-    completed_sql = f"""{CACHE_HINT}
-SELECT {completed_bucket} AS x, COUNT(*) AS y
-FROM "07_requests_CSV"
-WHERE unix_timestamp(CAST(closed_at AS timestamp)) >= {start}
-  AND unix_timestamp(CAST(closed_at AS timestamp)) <= {end}
-  AND {site_filter}
-GROUP BY 1 ORDER BY 1"""
-    request_age_sql = f"""{CACHE_HINT}
-SELECT CASE
-  WHEN ({end} - unix_timestamp(CAST(requested_date AS timestamp))) / 86400.0 <= 1 THEN '0-1 day'
-  WHEN ({end} - unix_timestamp(CAST(requested_date AS timestamp))) / 86400.0 <= 5 THEN '2-5 days'
-  WHEN ({end} - unix_timestamp(CAST(requested_date AS timestamp))) / 86400.0 <= 14 THEN '6-14 days'
-  WHEN ({end} - unix_timestamp(CAST(requested_date AS timestamp))) / 86400.0 <= 30 THEN '15-30 days'
-  ELSE '31+ days' END AS x,
-  COUNT(*) AS y
-FROM "07_requests_CSV"
-WHERE unix_timestamp(CAST(requested_date AS timestamp)) <= {end}
-  AND (closed_at IS NULL OR unix_timestamp(CAST(closed_at AS timestamp)) > {end})
-  AND {site_filter}
-GROUP BY 1"""
-    friction_sql = f"""{CACHE_HINT}
-SELECT CASE
-  WHEN approval IS NULL OR approval NOT IN ('Approved', 'Not Required') THEN 'Pending approval'
-  WHEN stage = 'Fulfillment' THEN 'Fulfillment queue'
-  WHEN state = 'Open' THEN 'Intake queue'
-  ELSE COALESCE(stage, state) END AS x,
-  COUNT(*) AS y
-FROM "07_requests_CSV"
-WHERE unix_timestamp(CAST(requested_date AS timestamp)) <= {end}
-  AND (closed_at IS NULL OR unix_timestamp(CAST(closed_at AS timestamp)) > {end})
-  AND {site_filter}
-GROUP BY 1 ORDER BY 2 DESC"""
-    catalog_sql = f"""{CACHE_HINT}
-SELECT CAST(catalog_item_name AS string) AS x, COUNT(*) AS y
-FROM "08_requested_items_CSV"
-WHERE unix_timestamp(CAST(opened_at AS timestamp)) >= {start}
-  AND unix_timestamp(CAST(opened_at AS timestamp)) <= {end}
-  AND {site_filter}
-GROUP BY 1 ORDER BY 2 DESC LIMIT 7"""
-    queue_sql = f"""{CACHE_HINT}
-SELECT CAST(assignment_group_name AS string) AS x, COUNT(*) AS y
-FROM "09_catalog_tasks_CSV"
-WHERE unix_timestamp(CAST(opened_at AS timestamp)) <= {end}
-  AND (closed_at IS NULL OR unix_timestamp(CAST(closed_at AS timestamp)) > {end})
-  AND {site_filter}
-GROUP BY 1 ORDER BY 2 DESC LIMIT 7"""
-    requested_rows, completed_rows, request_age_rows, friction_rows, catalog_rows, queue_rows = await asyncio.gather(
-        _safe("request-flow-requested", requested_sql),
-        _safe("request-flow-completed", completed_sql),
-        _safe("request-backlog-age", request_age_sql),
-        _safe("request-friction", friction_sql),
-        _safe("request-catalog", catalog_sql),
-        _safe("request-queues", queue_sql),
-    )
-    categories, flow_series = _aligned_series("Requested", requested_rows, "Completed", completed_rows)
-    charts.append(ChartResult(
-        chart_key="request_insight_flow",
-        title="Demand vs. fulfillment flow",
-        chart_type="line",
-        x_axis_label="Reporting period",
-        y_axis_label="Requests",
-        series=flow_series,
-        categories=categories,
-        unit="count",
-        description="Service request demand compared with completed fulfillment work.",
-        calculation="Requests submitted and completed, grouped by reporting interval.",
-        drilldown_metric_key="request_backlog",
-        drilldown_dimension="period",
-    ))
-    request_age_order = ["0-1 day", "2-5 days", "6-14 days", "15-30 days", "31+ days"]
-    request_age_values = {_row_text(row, "x"): _row_number(row) for row in request_age_rows}
-    charts.append(ChartResult(
-        chart_key="request_insight_age",
-        title="Open work by age & state",
-        chart_type="skinny_bar",
-        y_axis_label="Open requests",
-        series=[ChartSeries(name="Open requests", x=request_age_order, y=[request_age_values.get(item, 0) for item in request_age_order])],
-        categories=request_age_order,
-        unit="count",
-        description="Age distribution for requests that remain unfulfilled at period end.",
-        calculation="Unfulfilled requests grouped by age at reporting period end.",
-        drilldown_metric_key="request_backlog",
-        drilldown_dimension="age_band",
-    ))
-    friction_names = [_row_text(row, "x") for row in friction_rows]
-    friction_values = [_row_number(row) for row in friction_rows]
-    charts.append(ChartResult(
-        chart_key="request_insight_friction",
-        title="Delay source",
-        chart_type="skinny_bar",
-        y_axis_label="Open requests",
-        series=[ChartSeries(name="Open requests", x=friction_names, y=cast(list[float | None], friction_values))],
-        categories=friction_names,
-        unit="count",
-        description="Current workflow states contributing to request fulfillment delay.",
-        calculation="Open requests grouped by approval and fulfillment stage.",
-        drilldown_metric_key="request_backlog",
-        drilldown_dimension="workflow_stage",
-    ))
-    catalog_names = [_row_text(row, "x") for row in catalog_rows]
-    catalog_values = [_row_number(row) for row in catalog_rows]
-    charts.append(ChartResult(
-        chart_key="request_insight_catalog",
-        title="Catalog demand",
-        chart_type="skinny_bar",
-        y_axis_label="Requested items",
-        series=[ChartSeries(name="Requested items", x=catalog_names, y=cast(list[float | None], catalog_values))],
-        categories=catalog_names,
-        unit="count",
-        description="Catalog items generating the most demand in the selected period.",
-        calculation="Count of requested items grouped by catalog item.",
-        drilldown_metric_key="request_backlog",
-        drilldown_dimension="catalog_item",
-    ))
-    queue_names = [_row_text(row, "x") for row in queue_rows]
-    queue_values = [_row_number(row) for row in queue_rows]
-    charts.append(ChartResult(
-        chart_key="request_insight_queues",
-        title="Queue load",
-        chart_type="skinny_bar",
-        y_axis_label="Open tasks",
-        series=[ChartSeries(name="Open catalog tasks", x=queue_names, y=cast(list[float | None], queue_values))],
-        categories=queue_names,
-        unit="count",
-        description="Assignment groups carrying the largest active catalog-task workload.",
-        calculation="Open catalog tasks grouped by assignment group.",
-        drilldown_metric_key="request_backlog",
-        drilldown_dimension="assignment_group",
-    ))
-    friction_total = sum(friction_values)
-    top_friction = friction_names[0] if friction_names else "No workflow state"
-    friction_share = round(100 * friction_values[0] / friction_total) if friction_total and friction_values else 0
-    top_catalog = catalog_names[0] if catalog_names else "No catalog item"
-    top_queue = queue_names[0] if queue_names else "No assignment group"
-    return charts, [
-        InsightSummary("risk", "Fulfillment risk", f"{top_friction} represents {friction_share}% of open request delay.", "critical", "request_backlog"),
-        InsightSummary("driver", "Demand driver", f"{top_catalog} is the highest-volume catalog item in the selected period.", "warning", "request_backlog"),
-        InsightSummary("action", "Recommended action", f"Review automation and capacity for {top_queue} before adding headcount.", "positive", "automated_fulfillment_rate"),
-    ]
-
-
 async def compute_dashboard(
     dashboard_key: str,
     project_id: int,
@@ -1165,19 +808,80 @@ async def compute_dashboard(
     duration_unit: str = "hours",
     period_key: str | None = None,
     dimension: str = "site",
+    force_refresh: bool = False,
 ) -> DashboardResult:
     """Compute all KPIs and charts for an ITSM dashboard preset.
 
-    Metric queries are executed concurrently, and each metric's current and
-    previous periods are combined into a single query when the metric's
-    shape allows it (see _build_combined_metric_sql) to halve the number of
-    full-table-scan Teiid round trips.
+    The two interactive insight presets (incident_insights,
+    service_request_insights) load their source CSVs once per
+    project/dashboard/dimension into an in-process snapshot and derive every
+    Period/Site/Region combination from it in Python (see
+    insight_snapshot.py) -- the ServiceNow VDB is CSV-backed and Teiid cannot
+    push predicates into those files, so issuing one SQL statement per
+    card/chart re-read the same file for every filter change. The remaining
+    five KPI presets keep the per-metric Teiid path below, with metric
+    queries executed concurrently and each metric's current and previous
+    periods combined into a single query when the metric's shape allows it
+    (see _build_combined_metric_sql).
     """
     site_column = _dimension_column(dimension)
-    site_label_column = _dimension_label_column(dimension)
     metrics = get_dashboard_metrics(dashboard_key)
     current_period, previous_period = _reporting_bounds(period_key, as_of)
     teiid_endpoint = await _resolve_teiid(project_id, session, tenant_id, user_id)
+    is_insight_dashboard = dashboard_key in {"incident_insights", "service_request_insights"}
+
+    if is_insight_dashboard:
+        from .insight_snapshot import aggregate_insight_snapshot, load_insight_snapshot
+
+        snapshot_key = f"{tenant_id}:{project_id}:{dashboard_key}:{dimension}"
+        tables = await load_insight_snapshot(
+            key=snapshot_key,
+            dashboard_key=dashboard_key,
+            dimension=dimension,
+            run_sql=lambda sql: _run_sql(*teiid_endpoint, sql),
+            force_refresh=force_refresh,
+        )
+        aggregation = aggregate_insight_snapshot(
+            dashboard_key=dashboard_key,
+            tables=tables,
+            current_period=current_period,
+            previous_period=previous_period,
+            period_key=period_key,
+            dimension=dimension,
+            dimension_value=site_code,
+        )
+        values = [
+            _assemble_metric_value(
+                metric,
+                *aggregation.metric_values[metric.key],
+                current_period,
+                previous_period,
+                duration_unit,
+            )
+            for metric in metrics
+        ]
+        return DashboardResult(
+            dashboard=dashboard_key,
+            as_of=utc_now_iso(),
+            filters={
+                "site": site_code or "all",
+                "dimension": dimension,
+                "date_unit": date_unit,
+                "durationUnit": duration_unit,
+                "period": period_key or "latest_month",
+            },
+            metrics=values,
+            charts=aggregation.charts,
+            data_quality={
+                "latestCompleteMonth": _month_bounds(as_of)[0].label,
+                "reportingPeriod": current_period.label,
+                "availableSites": aggregation.dimension_options,
+                "missingMetrics": [m.key for m in metrics if m.status == "not_implemented"],
+                "warnings": [],
+                "executionMode": "snapshot",
+            },
+            insights=aggregation.insights,
+        )
 
     # Mutated concurrently by the three phases below (asyncio is
     # single-threaded/cooperative, so concurrent list.append calls across
@@ -1208,10 +912,9 @@ async def compute_dashboard(
                 site_column=site_column,
             )
 
-    # Insight presets use purpose-built multi-series and skinny-bar charts. The
-    # original five KPI presets retain their existing chart pipeline.
+    # The remaining five KPI presets keep their existing two-metric mini
+    # chart pipeline (insight presets returned above via the snapshot path).
     chart_metrics = [m for m in metrics if m.group_by]
-    is_insight_dashboard = dashboard_key in {"incident_insights", "service_request_insights"}
 
     async def _metrics_phase() -> list[MetricValue]:
         metric_tasks = [_compute_metric(metric) for metric in metrics]
@@ -1241,16 +944,6 @@ async def compute_dashboard(
         return out
 
     async def _charts_phase() -> tuple[list[ChartResult], list[InsightSummary]]:
-        if is_insight_dashboard:
-            return await _build_insight_charts(
-                dashboard_key=dashboard_key,
-                endpoint=teiid_endpoint,
-                period=current_period,
-                period_key=period_key,
-                site_code=site_code,
-                warnings=warnings,
-                site_column=site_column,
-            )
         if len(chart_metrics) < 2:
             return [], []
 
@@ -1295,38 +988,14 @@ async def compute_dashboard(
                 warnings.append(f"chart: {chart_exc}")
         return out_charts, []
 
-    async def _site_options_phase() -> list[dict[str, str]]:
-        if not is_insight_dashboard:
-            return []
-        site_table = "01_incidents_CSV" if dashboard_key == "incident_insights" else "07_requests_CSV"
-        try:
-            site_rows = await _run_sql(
-                *teiid_endpoint,
-                f"""{CACHE_HINT}
-SELECT CAST({_quote_identifier(site_column)} AS string) AS code, MAX(CAST({_quote_identifier(site_label_column)} AS string)) AS name
-FROM {_quote_identifier(site_table)}
-WHERE {_quote_identifier(site_column)} IS NOT NULL
-GROUP BY {_quote_identifier(site_column)}
-ORDER BY 2""",
-            )
-            return [
-                {"code": _row_text(row, "code"), "name": _row_text(row, "name")}
-                for row in site_rows
-            ]
-        except Exception as exc:
-            logger.warning("ITSM insight site options failed: %s", exc)
-            warnings.append("site-filter: site options unavailable")
-            return []
-
-    # Run all three phases concurrently instead of strictly sequentially --
-    # metrics, charts and site-options are otherwise independent Teiid
-    # round-trips, and serializing them (await phase 1 fully, then phase 2,
-    # then phase 3) roughly triples wall-clock time for no correctness
+    # Run both phases concurrently instead of strictly sequentially --
+    # metrics and charts are otherwise independent Teiid round-trips, and
+    # serializing them roughly doubles wall-clock time for no correctness
     # reason. Each phase still bounds its own sub-query concurrency via its
-    # own semaphore.
-    values, (charts, insights), site_options = await asyncio.gather(
-        _metrics_phase(), _charts_phase(), _site_options_phase()
-    )
+    # own semaphore. (Insight presets never reach here -- see the snapshot
+    # path above, which has no site-options phase of its own since dimension
+    # options come back from the same in-process aggregation as the charts.)
+    values, (charts, insights) = await asyncio.gather(_metrics_phase(), _charts_phase())
 
     return DashboardResult(
         dashboard=dashboard_key,
@@ -1343,9 +1012,10 @@ ORDER BY 2""",
         data_quality={
             "latestCompleteMonth": _month_bounds(as_of)[0].label,
             "reportingPeriod": current_period.label,
-            "availableSites": site_options,
+            "availableSites": [],
             "missingMetrics": [m.key for m in metrics if m.status == "not_implemented"],
             "warnings": warnings,
+            "executionMode": "query",
         },
         insights=insights,
     )
@@ -1362,21 +1032,19 @@ async def warm_itsm_dashboards_for_project(
     duration_unit: str = "hours",
     dimension: str = "site",
 ) -> None:
-    """Pre-compute all ITSM dashboard presets for a project to populate Teiid caches.
+    """Pre-compute all ITSM dashboard presets for a project to populate caches.
 
     This is best-effort: any failures are logged and ignored so the warm never
     blocks user traffic. Dashboards are warmed concurrently up to the limit
     supported by the Teiid connection pool, and each completed dashboard also
     populates the assembled-response cache.
 
-    For the insight presets (the ones the ITSM dashboard UI actually opens),
-    the "all sites" warm result already carries the project's real site list
-    (``data_quality.availableSites``) -- switching to one of those sites was
-    otherwise a guaranteed cache miss, since only the "all sites" bucket was
-    ever warmed. When ``site_code`` is not already pinned by the caller, warm
-    each real site too so a user picking a specific site also gets a cache
-    hit. Capped at ``_MAX_SITES_TO_WARM`` sites per project as a safety valve
-    against a project with an unusually large number of distinct sites.
+    For the two insight presets, a single warm call is all that's needed:
+    compute_dashboard's snapshot path (see insight_snapshot.py) loads every
+    source CSV for the project/dashboard/dimension once and keeps it for five
+    minutes, so every Period/Site/Region combination a user can pick is
+    already covered by that one load -- there is no longer a per-site or
+    per-period matrix to expand into.
     """
     presets = presets or list(list_dashboards())
     sem = asyncio.Semaphore(max(1, min(2, pool_manager.max_size // 8)))
@@ -1426,21 +1094,6 @@ async def warm_itsm_dashboards_for_project(
 
     async def _warm_one(preset: str) -> None:
         period_key = "1_year" if preset in {"incident_insights", "service_request_insights"} else "latest_month"
-        result = await _warm_dashboard(preset, site_code, period_key)
-        if (
-            site_code is not None
-            or result is None
-            or preset not in {"incident_insights", "service_request_insights"}
-        ):
-            return
-        real_sites = [
-            entry.get("code")
-            for entry in result.data_quality.get("availableSites", [])
-            if entry.get("code")
-        ][:_MAX_SITES_TO_WARM]
-        await asyncio.gather(
-            *[_warm_dashboard(preset, code, period_key) for code in real_sites],
-            return_exceptions=True,
-        )
+        await _warm_dashboard(preset, site_code, period_key)
 
     await asyncio.gather(*[_warm_one(preset) for preset in presets], return_exceptions=True)

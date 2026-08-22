@@ -77,19 +77,22 @@ async def test_dashboard_phases_run_concurrently_not_sequentially(monkeypatch):
     assert elapsed < 0.12, f"phases appear to run sequentially: {elapsed:.3f}s"
 
 
-async def test_warm_expands_to_every_real_site_for_insight_presets(monkeypatch):
-    """warm_itsm_dashboards_for_project must warm each of the project's
-    real sites for the insight presets (not just the "all sites" bucket),
-    since a user picking a specific site was previously always a cache
-    miss. Non-insight presets and an explicitly-pinned site_code must NOT
-    trigger the per-site expansion."""
+async def test_warm_makes_exactly_one_call_per_preset(monkeypatch):
+    """warm_itsm_dashboards_for_project no longer expands into a per-site or
+    per-period matrix: compute_dashboard's snapshot path (see
+    insight_snapshot.py) loads every source CSV for a project/dashboard/
+    dimension once and derives every Period/Site/Region combination from it
+    in-process, so a single warm call at (site=None/"all", default period)
+    is all that's needed to cover every combination a user can pick for the
+    life of that snapshot. Non-insight presets are unaffected -- they never
+    had a per-site expansion to begin with."""
     from app.services.itsm_metrics.cache import _get_entry, clear_dashboard_cache, make_cache_key
 
     clear_dashboard_cache()
-    warmed_sites: list[tuple[str, str | None]] = []
+    warmed: list[tuple[str, str | None, str]] = []
 
-    async def fake_compute_dashboard(*, dashboard_key, site_code, **kwargs):
-        warmed_sites.append((dashboard_key, site_code))
+    async def fake_compute_dashboard(*, dashboard_key, site_code, period_key, **kwargs):
+        warmed.append((dashboard_key, site_code, period_key))
         from app.services.itsm_metrics.models import DashboardResult
 
         return DashboardResult(
@@ -98,16 +101,7 @@ async def test_warm_expands_to_every_real_site_for_insight_presets(monkeypatch):
             filters={"site": site_code or "all"},
             metrics=[],
             charts=[],
-            data_quality={
-                "latestCompleteMonth": "Jul 2026",
-                "missingMetrics": [],
-                "warnings": [],
-                "availableSites": (
-                    [{"code": "US01", "name": "United States"}, {"code": "PLZ", "name": "Plzen"}]
-                    if site_code is None
-                    else []
-                ),
-            },
+            data_quality={"latestCompleteMonth": "Jul 2026", "missingMetrics": [], "warnings": []},
         )
 
     monkeypatch.setattr(engine, "compute_dashboard", fake_compute_dashboard)
@@ -120,26 +114,22 @@ async def test_warm_expands_to_every_real_site_for_insight_presets(monkeypatch):
         presets=["incident_insights", "incident"],
     )
 
-    # incident_insights: warmed "all" plus both real sites.
-    incident_insights_sites = {site for key, site in warmed_sites if key == "incident_insights"}
-    assert incident_insights_sites == {None, "US01", "PLZ"}
-    # incident (not an insight preset): only the "all sites" bucket, unchanged.
-    incident_sites = {site for key, site in warmed_sites if key == "incident"}
-    assert incident_sites == {None}
+    assert warmed == [("incident_insights", None, "1_year"), ("incident", None, "latest_month")]
 
     cached = _get_entry(
         make_cache_key(
             tenant_id=1, project_id=1, dashboard_key="incident_insights",
-            site_code="PLZ", as_of=None, duration_unit="hours", period_key="1_year", dimension="site",
+            site_code=None, as_of=None, duration_unit="hours", period_key="1_year", dimension="site",
         )
     )
     assert cached is not None
 
 
 async def test_warm_does_not_expand_sites_when_site_code_already_pinned(monkeypatch):
-    """When the caller already scoped the warm to one site (e.g. a live
-    request warming its own cache entry), the per-site expansion must not
-    fire -- it only applies to the top-level "warm everything" call."""
+    """A caller that already scoped the warm to one site (e.g. a live
+    request warming its own cache entry) gets exactly that one call, same as
+    the top-level "warm everything" call -- there is no per-site expansion
+    to trigger any more now that the insight snapshot covers every site."""
     warmed_sites: list[tuple[str, str | None]] = []
 
     async def fake_compute_dashboard(*, dashboard_key, site_code, **kwargs):
@@ -167,3 +157,85 @@ async def test_warm_does_not_expand_sites_when_site_code_already_pinned(monkeypa
     )
 
     assert warmed_sites == [("incident_insights", "US01")]
+
+
+def _snapshot_run_sql_stub(calls: list[str]):
+    async def fake_run_sql(database, host, port, sql):
+        calls.append(sql)
+        if "01_incidents_CSV" in sql:
+            return [{
+                "sys_id": "INC1", "opened_at": "2026-07-05T00:00:00Z", "resolved_at": None,
+                "resolution_minutes": None, "major_incident": False, "priority": "P2",
+                "state": "Open", "category": "Software",
+                "dimension_code": "US01", "dimension_name": "United States",
+            }]
+        return []
+
+    return fake_run_sql
+
+
+async def test_insight_dashboard_loads_snapshot_once_and_reuses_it(monkeypatch):
+    """compute_dashboard's snapshot path (see insight_snapshot.py) must load
+    each source CSV exactly once via _run_sql -- a second call for the SAME
+    dashboard/project/dimension with a DIFFERENT period and site must be
+    served entirely from the in-process snapshot, issuing no further Teiid
+    queries."""
+    from app.services.itsm_metrics.insight_snapshot import clear_insight_snapshot_cache
+
+    clear_insight_snapshot_cache()
+    calls: list[str] = []
+    monkeypatch.setattr(engine, "_run_sql", _snapshot_run_sql_stub(calls))
+
+    first = await engine.compute_dashboard(
+        dashboard_key="incident_insights", project_id=1, session=None, tenant_id=1, user_id=1,
+        site_code=None, period_key="1_year",
+    )
+    second = await engine.compute_dashboard(
+        dashboard_key="incident_insights", project_id=1, session=None, tenant_id=1, user_id=1,
+        site_code="US01", period_key="30_days",
+    )
+
+    assert len(calls) == 2  # incidents + slas, loaded exactly once total
+    assert first.data_quality["executionMode"] == "snapshot"
+    assert second.data_quality["executionMode"] == "snapshot"
+    assert [m.metric_key for m in first.metrics] == [
+        "open_backlog", "resolution_sla", "median_resolution", "major_incidents",
+    ]
+
+
+async def test_insight_dashboard_force_refresh_reloads_the_snapshot(monkeypatch):
+    """The manual Refresh action must invalidate and reload the source
+    snapshot, not just the assembled-dashboard response cache."""
+    from app.services.itsm_metrics.insight_snapshot import clear_insight_snapshot_cache
+
+    clear_insight_snapshot_cache()
+    calls: list[str] = []
+    monkeypatch.setattr(engine, "_run_sql", _snapshot_run_sql_stub(calls))
+
+    await engine.compute_dashboard(
+        dashboard_key="incident_insights", project_id=1, session=None, tenant_id=1, user_id=1,
+        period_key="1_year",
+    )
+    assert len(calls) == 2
+
+    await engine.compute_dashboard(
+        dashboard_key="incident_insights", project_id=1, session=None, tenant_id=1, user_id=1,
+        period_key="1_year", force_refresh=True,
+    )
+    assert len(calls) == 4
+
+
+async def test_non_insight_dashboard_keeps_the_per_metric_query_path(monkeypatch):
+    """The five original KPI presets are unaffected by the snapshot path --
+    they keep issuing per-metric Teiid queries and report executionMode
+    "query" rather than "snapshot"."""
+
+    async def fake_run_sql(database, host, port, sql):
+        return [{"x": "US01", "y": 1, "metric_value": 1, "current_value": 1, "previous_value": 1}]
+
+    monkeypatch.setattr(engine, "_run_sql", fake_run_sql)
+
+    result = await engine.compute_dashboard(
+        dashboard_key="incident", project_id=1, session=None, tenant_id=1, user_id=1,
+    )
+    assert result.data_quality["executionMode"] == "query"

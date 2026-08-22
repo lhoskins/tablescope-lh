@@ -247,6 +247,7 @@ async def get_itsm_dashboard(
                 duration_unit=duration_unit,
                 period_key=period_key,
                 dimension=dimension,
+                force_refresh=refresh,
             )
 
         result, cache_status, cache_age = await get_or_compute_dashboard(
