@@ -16,16 +16,19 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
-from app.auth.rbac import Role, require_role
+from app.auth.rbac import Role, has_role, require_role
 from app.database import get_db
 from app.models.project import Project
 from app.models.project_asset import ProjectAsset
+from app.routes.ai_proxy_shared import _check_project_access
+from app.services import document_preview
 from app.services.presentation_engine import PresentationMode
 from app.services.response_envelope import attach_envelope
 
@@ -130,6 +133,51 @@ def _store_file_locally(
     file_path = dir_path / unique_name
     file_path.write_bytes(data)
     return str(file_path)
+
+
+def _check_asset_read_access(asset: ProjectAsset, context: RequestContext) -> None:
+    """Private-document authorization, independent of general project
+    access: a document with visibility="private" is readable only by its
+    owner (or a tenant admin), even though the caller already passed
+    _check_project_access for the project as a whole."""
+    if asset.visibility == "private" and asset.owner_user_id != context.user_id:
+        if not has_role(context.role, Role.TENANT_ADMIN):
+            raise HTTPException(status_code=403, detail="This document is private")
+
+
+def _resolve_asset_path(asset: ProjectAsset) -> Path:
+    """Resolve the asset's on-disk path, rejecting anything outside the
+    configured storage root -- defense in depth against a storage_location
+    value that (however it got there) doesn't stay inside LOCAL_STORAGE_BASE."""
+    if asset.storage_provider != "local" or not asset.storage_location:
+        raise HTTPException(status_code=404, detail="Document content is not available")
+    root = Path(LOCAL_STORAGE_BASE).resolve()
+    try:
+        resolved = Path(asset.storage_location).resolve()
+        resolved.relative_to(root)
+    except (OSError, ValueError):
+        raise HTTPException(status_code=404, detail="Document content is not available") from None
+    if not resolved.is_file():
+        raise HTTPException(status_code=404, detail="Document content is not available")
+    return resolved
+
+
+async def _get_readable_asset(
+    project_id: int,
+    asset_id: int,
+    session: AsyncSession,
+    context: RequestContext,
+) -> ProjectAsset:
+    """Shared gate for the preview/content endpoints: real project
+    membership (not just tenant match -- see _check_project_access, which
+    also honors private, non-shared projects), then the asset's own
+    visibility check."""
+    await _check_project_access(session, context, project_id)
+    asset = await session.get(ProjectAsset, asset_id)
+    if not asset or asset.project_id != project_id or asset.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    _check_asset_read_access(asset, context)
+    return asset
 
 
 # ── Background processing ────────────────────────────────────────────
@@ -483,3 +531,56 @@ async def get_asset_ai_profile(
         status=asset.ai_status or None,
     )
     return profile
+
+
+@router.get("/{asset_id}/content")
+async def get_asset_content(
+    project_id: int,
+    asset_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> FileResponse:
+    """Stream a document's original bytes for native viewing (PDF/image) or
+    download. Never returns the on-disk path -- only the bytes themselves,
+    with headers that keep the browser from caching or sniffing them."""
+    asset = await _get_readable_asset(project_id, asset_id, session, context)
+    path = _resolve_asset_path(asset)
+    return FileResponse(
+        path,
+        media_type=asset.content_type or "application/octet-stream",
+        filename=asset.original_filename or asset.filename,
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@router.get("/{asset_id}/preview")
+async def get_asset_preview(
+    project_id: int,
+    asset_id: int,
+    response: Response,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict:
+    """Bounded, structured preview of a document's content -- see
+    app.services.document_preview for the per-format size limits and the
+    "kind" values the frontend viewer switches on. Never proxies the file to
+    an external preview service; everything is parsed locally."""
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    asset = await _get_readable_asset(project_id, asset_id, session, context)
+
+    def _read_bytes() -> bytes:
+        return _resolve_asset_path(asset).read_bytes()
+
+    result = document_preview.build_preview(
+        file_extension=asset.file_extension,
+        file_size_bytes=asset.file_size_bytes,
+        read_bytes=_read_bytes,
+    )
+    return {
+        "assetId": asset.id,
+        "filename": asset.original_filename or asset.filename,
+        "contentType": asset.content_type,
+        "fileSizeBytes": asset.file_size_bytes,
+        **result,
+    }
