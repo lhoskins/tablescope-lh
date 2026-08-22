@@ -1093,7 +1093,13 @@ async def warm_itsm_dashboards_for_project(
                 return None
 
     async def _warm_one(preset: str) -> None:
-        period_key = "1_year" if preset in {"incident_insights", "service_request_insights"} else "latest_month"
-        await _warm_dashboard(preset, site_code, period_key)
+        # "1_year" is every ITSM dashboard's actual frontend default (see
+        # ItsmDashboardContent.tsx and ItsmInsightsDashboardContent.tsx, both
+        # `useState<PeriodKey>("1_year")`) -- warming the 5 KPI presets at
+        # "latest_month" here instead was a cache-key mismatch that made
+        # every KPI dashboard load a guaranteed miss (full CSV scan) despite
+        # the warm cycle running every 240s, since no request ever actually
+        # asked for "latest_month".
+        await _warm_dashboard(preset, site_code, "1_year")
 
     await asyncio.gather(*[_warm_one(preset) for preset in presets], return_exceptions=True)

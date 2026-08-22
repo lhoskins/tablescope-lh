@@ -84,8 +84,10 @@ async def test_warm_makes_exactly_one_call_per_preset(monkeypatch):
     dimension once and derives every Period/Site/Region combination from it
     in-process, so a single warm call at (site=None/"all", default period)
     is all that's needed to cover every combination a user can pick for the
-    life of that snapshot. Non-insight presets are unaffected -- they never
-    had a per-site expansion to begin with."""
+    life of that snapshot. Non-insight presets are unaffected by the
+    per-site expansion (they never had one), but they DO warm at "1_year"
+    too -- that's every ITSM dashboard's actual frontend default, not just
+    the insight presets'."""
     from app.services.itsm_metrics.cache import _get_entry, clear_dashboard_cache, make_cache_key
 
     clear_dashboard_cache()
@@ -114,7 +116,7 @@ async def test_warm_makes_exactly_one_call_per_preset(monkeypatch):
         presets=["incident_insights", "incident"],
     )
 
-    assert warmed == [("incident_insights", None, "1_year"), ("incident", None, "latest_month")]
+    assert warmed == [("incident_insights", None, "1_year"), ("incident", None, "1_year")]
 
     cached = _get_entry(
         make_cache_key(
