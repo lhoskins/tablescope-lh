@@ -1022,6 +1022,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
         mode={designerMode ?? "add_insight"}
         dashboardId={dashboard.id}
         targetInsightId={designerMode === "edit_insight" ? editingWidget?.id : undefined}
+        existingWidgets={designerMode === "edit_dashboard" ? widgets : undefined}
         dashboardGroupId={template?.dashboardGroupId}
         dashboardGroupName={template?.groupName}
         initialPrompt={designerMode === "edit_insight" && editingWidget ? `Change “${editingWidget.title}” to show ` : ""}

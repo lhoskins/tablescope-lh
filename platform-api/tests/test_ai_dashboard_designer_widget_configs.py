@@ -113,6 +113,33 @@ async def test_forced_combo_variant_and_value_scale_reach_the_saved_config(db_se
     assert config["type"] == "combo"
     assert config["chartSubtype"] == "dual_line"
     assert config["visualizationOptions"]["valueScale"] == "millions"
+    # The explicit "Millions" unit picked in the designer must also drive
+    # the chart's Y-AXIS scale, not just the KPI-style valueScale suffix --
+    # otherwise a chart's axis renders raw (e.g. "8,000,000") while its KPI
+    # cards correctly show "$8.0M", the exact split production surfaced.
+    assert config["visualizationOptions"]["yAxisScale"] == "millions"
+
+
+async def test_hundreds_unit_sets_value_scale_but_not_axis_scale(db_session) -> None:
+    """yAxisScale has no "hundreds" division option (see
+    components/dashboard/types.ts) -- a "Hundreds" unit pick must still
+    reach valueScale (used for KPI/tooltip/label suffixing) but must not be
+    forwarded to yAxisScale, which would be silently ignored/invalid."""
+    tenant, user, project = await _seed(db_session)
+    context = _context(tenant.id, user.id)
+
+    suggestion = {"widgets": [_combo_widget("Monthly Revenue vs Backlog")]}
+    _apply_chart_overrides(
+        suggestion,
+        [ChartOverride(label="Monthly Revenue vs Backlog", unit="hundreds")],
+    )
+
+    configs = await _widget_configs(
+        session=db_session, context=context, project_id=project.id,
+        suggestion=suggestion, start_index=0,
+    )
+    assert configs[0]["visualizationOptions"]["valueScale"] == "hundreds"
+    assert "yAxisScale" not in configs[0]["visualizationOptions"]
 
 
 async def test_dimension_parameters_binds_to_a_real_query_when_picked(db_session) -> None:

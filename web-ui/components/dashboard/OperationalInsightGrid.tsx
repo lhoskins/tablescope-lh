@@ -141,6 +141,7 @@ export function toOperationalChartData(
     series,
     categories,
     unit: null,
+    visualizationOptions: widget.visualizationOptions,
   };
 }
 

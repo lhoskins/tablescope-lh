@@ -15,6 +15,9 @@ import {
 import { CanvasRenderer } from "echarts/renderers";
 import { cn } from "@/lib/cn";
 import { OPERATIONAL_INSIGHT_THEME } from "@/components/dashboard/operational-insight-theme";
+import { formatNumber } from "@/components/dashboard/EChartsWidget/format-number";
+import { formatAxisNumber } from "@/components/dashboard/EChartsWidget/axis-scale";
+import { tooltipFormatter } from "@/components/dashboard/EChartsWidget/tooltip-formatter";
 
 echarts.use([
   BarChart,
@@ -44,6 +47,10 @@ export function ItsmChart({ chart, onElementClick, className }: ItsmChartProps) 
     const instance = echarts.init(containerRef.current, undefined, { renderer: "canvas" });
     const data = chart.series[0]?.y ?? [];
     const categories = chart.categories.length ? chart.categories : chart.series[0]?.x ?? [];
+    // Only set for AI-Designer widgets (see toOperationalChartData) -- kept
+    // undefined for the ITSM presets so their existing (unformatted-count)
+    // axis/label rendering is unchanged.
+    const opts = chart.visualizationOptions;
 
     let option: echarts.EChartsCoreOption;
     if (chart.chartType === "pie" || chart.chartType === "doughnut") {
@@ -83,13 +90,18 @@ export function ItsmChart({ chart, onElementClick, className }: ItsmChartProps) 
       };
     } else if (chart.chartType === "bar" || chart.chartType === "skinny_bar") {
       option = {
-        tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+        tooltip: {
+          trigger: "axis",
+          axisPointer: { type: "shadow" },
+          ...(opts ? { formatter: (params: unknown) => tooltipFormatter(params, opts.yAxisFormat, opts.valueScale, opts.currencySymbol) } : {}),
+        },
         grid: { left: 8, right: 42, bottom: 8, top: 8, containLabel: true },
         xAxis: {
           type: "value",
           name: chart.chartType === "skinny_bar" ? undefined : chart.yAxisLabel ?? undefined,
           nameGap: 10,
           splitLine: { lineStyle: { color: "#e8edf3" } },
+          ...(opts ? { axisLabel: { formatter: (v: number) => formatAxisNumber(v, opts) } } : {}),
         },
         yAxis: {
           type: "category",
@@ -104,7 +116,13 @@ export function ItsmChart({ chart, onElementClick, className }: ItsmChartProps) 
           data: series.y,
           barMaxWidth: chart.chartType === "skinny_bar" ? 10 : 16,
           itemStyle: { color: OPERATIONAL_INSIGHT_THEME.palette[index % OPERATIONAL_INSIGHT_THEME.palette.length], borderRadius: [0, 5, 5, 0] },
-          label: { show: true, position: "right", fontSize: 10, color: "#475569" },
+          label: {
+            show: true,
+            position: "right",
+            fontSize: 10,
+            color: "#475569",
+            ...(opts ? { formatter: (p: { value?: unknown }) => formatNumber(Number(p.value ?? 0), opts.yAxisFormat, opts.valueScale, opts.currencySymbol) } : {}),
+          },
         })),
       };
     } else if (chart.chartType === "combo" && chart.series.length >= 2) {
@@ -114,7 +132,10 @@ export function ItsmChart({ chart, onElementClick, className }: ItsmChartProps) 
       // looks the same whether it renders through the generic dashboard
       // grid or this operational-insight one.
       option = {
-        tooltip: { trigger: "axis" },
+        tooltip: {
+          trigger: "axis",
+          ...(opts ? { formatter: (params: unknown) => tooltipFormatter(params, opts.yAxisFormat, opts.valueScale, opts.currencySymbol) } : {}),
+        },
         legend: { top: 0, right: 4 },
         grid: { left: 10, right: 16, bottom: 12, top: 34, containLabel: true },
         xAxis: {
@@ -129,6 +150,7 @@ export function ItsmChart({ chart, onElementClick, className }: ItsmChartProps) 
           name: chart.yAxisLabel ?? undefined,
           nameGap: 12,
           splitLine: { lineStyle: { color: "#e8edf3" } },
+          ...(opts ? { axisLabel: { formatter: (v: number) => formatAxisNumber(v, opts) } } : {}),
         },
         series: [
           {
@@ -152,7 +174,10 @@ export function ItsmChart({ chart, onElementClick, className }: ItsmChartProps) 
       };
     } else {
       option = {
-        tooltip: { trigger: "axis" },
+        tooltip: {
+          trigger: "axis",
+          ...(opts ? { formatter: (params: unknown) => tooltipFormatter(params, opts.yAxisFormat, opts.valueScale, opts.currencySymbol) } : {}),
+        },
         legend: chart.series.length > 1 ? { top: 0, right: 4 } : undefined,
         grid: { left: 10, right: 16, bottom: 12, top: chart.series.length > 1 ? 34 : 12, containLabel: true },
         xAxis: {
@@ -167,6 +192,7 @@ export function ItsmChart({ chart, onElementClick, className }: ItsmChartProps) 
           name: chart.yAxisLabel ?? undefined,
           nameGap: 12,
           splitLine: { lineStyle: { color: "#e8edf3" } },
+          ...(opts ? { axisLabel: { formatter: (v: number) => formatAxisNumber(v, opts) } } : {}),
         },
         series: chart.series.map((series, index) => ({
           type: "line",

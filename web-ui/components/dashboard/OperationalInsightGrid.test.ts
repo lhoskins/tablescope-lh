@@ -72,4 +72,23 @@ describe("toOperationalChartData", () => {
 
     expect(chart.series).toEqual([{ name: "Revenue Actual vs Forecast", x: ["2026-01"], y: [7] }]);
   });
+
+  it("carries the widget's visualizationOptions through so ItsmChart can scale/format its axis", () => {
+    const widget = baseWidget({
+      yColumn: "count",
+      visualizationOptions: { valueScale: "millions", currencySymbol: "€" },
+    });
+
+    const chart = toOperationalChartData(widget, [{ month: "2026-01", count: 7 }]);
+
+    expect(chart.visualizationOptions).toEqual({ valueScale: "millions", currencySymbol: "€" });
+  });
+
+  it("leaves visualizationOptions undefined when the widget has none", () => {
+    const widget = baseWidget({ yColumn: "count" });
+
+    const chart = toOperationalChartData(widget, [{ month: "2026-01", count: 7 }]);
+
+    expect(chart.visualizationOptions).toBeUndefined();
+  });
 });
