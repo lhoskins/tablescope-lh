@@ -554,6 +554,17 @@ def _ai_prompt(req: DashboardDesignRequest, domain: str = "generic") -> str:
             req.prompt.strip(),
             "Use the Tablescope Operational Insight presentation.",
             f"Domain context: {narrative}",
+            (
+                "Match the ITSM dashboard hierarchy: shared header controls, full-width "
+                "operational brief, KPI row, balanced chart grid, and improvement "
+                "opportunities at bottom-right."
+            ),
+            "Never recommend a full-width horizontal bar chart.",
+            (
+                "When the user requests display units such as thousands, millions or "
+                "billions, return yAxisScale using that exact plural value; do not divide "
+                "the SQL result."
+            ),
             "Choose charts only when the available data shape supports them.",
             "Use compact KPI cards with correct units and prior-period direction when supported.",
             "Ground every calculation in governed project data; never invent fields or values.",
@@ -670,6 +681,19 @@ def _operational_widgets(prompt: str, suggestion: dict[str, Any]) -> list[dict[s
         ],
     ]
     now = datetime.now(UTC).isoformat()
+    summary = str(
+        suggestion.get("businessPurpose")
+        or suggestion.get("description")
+        or "AI-grounded operational summary."
+    )
+    driver = next(
+        (
+            str(widget.get("businessQuestion") or widget.get("title"))
+            for widget in suggestion.get("widgets", [])
+            if isinstance(widget, dict) and (widget.get("businessQuestion") or widget.get("title"))
+        ),
+        summary,
+    )
     return [
         {
             "id": "operational-brief",
@@ -678,8 +702,18 @@ def _operational_widgets(prompt: str, suggestion: dict[str, Any]) -> list[dict[s
             "editable": True,
             "aiManaged": True,
             "prompt": prompt,
-            "summary": suggestion.get("businessPurpose") or suggestion.get("description") or "AI-grounded operational summary.",
-            "items": risks[:3],
+            "summary": summary,
+            "items": [
+                {"label": "Backing risk", "detail": risks[0] if risks else summary, "tone": "critical"},
+                {"label": "Primary driver", "detail": driver, "tone": "warning"},
+                {
+                    "label": "Recommended action",
+                    "detail": opportunities[0]
+                    if opportunities
+                    else "Review the highest-impact validated measure and act on its leading contributor.",
+                    "tone": "positive",
+                },
+            ],
             "updatedAt": now,
             "layout": {"position": 0, "width": "wide"},
         },
@@ -690,11 +724,85 @@ def _operational_widgets(prompt: str, suggestion: dict[str, Any]) -> list[dict[s
             "editable": True,
             "aiManaged": True,
             "prompt": prompt,
-            "items": opportunities[:5] or ["Continue monitoring the validated measures for the highest-impact change."],
+            "items": opportunities[:5]
+            or ["Continue monitoring the validated measures for the highest-impact change."],
             "updatedAt": now,
-            "layout": {"position": 1, "width": "standard"},
+            "layout": {
+                "position": 1,
+                "width": "standard",
+                "gridX": 9,
+                "gridY": 5,
+                "gridW": 3,
+                "gridH": 3,
+            },
         },
     ]
+
+
+def _requested_axis_scale(widget: dict[str, Any]) -> str | None:
+    """Normalize scale hints supplied by the AI design contract."""
+    candidates = [
+        widget.get("yAxisScale"),
+        widget.get("axisScale"),
+        widget.get("numberScale"),
+        widget.get("displayScale"),
+        widget.get("valueFormat"),
+    ]
+    text = " ".join(str(value).lower() for value in candidates if value)
+    for scale in ("thousands", "millions", "billions"):
+        if scale in text or scale[:-1] in text:
+            return scale
+    return None
+
+
+def _apply_operational_layout(configs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Give new AI dashboards the same visual hierarchy as ITSM Insights.
+
+    KPIs occupy a single top row, then charts fill a balanced grid. A
+    horizontal ranking bar is capped at half width so it never stretches the
+    full page (see the ITSM Insights shell, which does the same), leaving the
+    bottom-right cell free for the "Best Improvement Opportunities" panel that
+    ``_operational_widgets`` pins there.
+    """
+    kpis = [config for config in configs if config.get("type") == "kpi"]
+    charts = [config for config in configs if config.get("type") != "kpi"]
+    kpi_width = 6 if len(kpis) <= 2 else 4 if len(kpis) == 3 else 3
+    for index, config in enumerate(kpis):
+        config.update({"gridX": (index * kpi_width) % 12, "gridY": 0, "gridW": kpi_width, "gridH": 2})
+
+    placements = [
+        {"gridX": 0, "gridY": 2, "gridW": 6, "gridH": 6},
+        {"gridX": 6, "gridY": 2, "gridW": 6, "gridH": 3},
+        {"gridX": 6, "gridY": 5, "gridW": 3, "gridH": 3},
+    ]
+    for index, config in enumerate(charts):
+        placement = placements[index] if index < len(placements) else {
+            "gridX": (index - len(placements)) % 2 * 6,
+            "gridY": 8 + ((index - len(placements)) // 2) * 4,
+            "gridW": 6,
+            "gridH": 4,
+        }
+        horizontal = config.get("chartSubtype") in {
+            "horizontal_bar",
+            "stacked_horizontal",
+            "population_pyramid",
+        } or (config.get("visualizationOptions") or {}).get("barLayout") == "horizontal"
+        if horizontal:
+            placement = {**placement, "gridW": min(int(placement["gridW"]), 6)}
+        config.update(placement)
+    ordered = [*kpis, *charts]
+    # ``build_widget_config`` stamped ``position`` from the pre-layout index;
+    # re-stamp it so the persisted order matches the grid hierarchy above.
+    # Counting from the lowest position already present (rather than 0) keeps
+    # ``_widget_configs``' ``start_index`` offset intact -- "add_insight"
+    # appends after the dashboard's existing widgets and must not renumber
+    # itself back to the front.
+    positions = [config["position"] for config in ordered if "position" in config]
+    base = min(positions) if positions else 0
+    for index, config in enumerate(ordered):
+        if "position" in config:
+            config["position"] = base + index
+    return ordered
 
 
 def _grounded_chart_selection(
@@ -860,6 +968,9 @@ async def _widget_configs(
             existing_by_sql=existing_by_sql,
         )
         chart_type, label_column, value_column, value_column_2 = _grounded_chart_selection(widget)
+        # A display-unit request ("thousands") only divides the rendered axis
+        # tick labels; the widget's SQL and raw values are left untouched.
+        axis_scale = _requested_axis_scale(widget)
         config = build_widget_config(
             title=str(widget.get("title") or widget.get("businessQuestion") or "Dashboard insight"),
             query_id=query.id,
@@ -874,6 +985,7 @@ async def _widget_configs(
                 "showGrid": True,
                 "roundedCorners": True,
                 "barLayout": "horizontal" if chart_type == "horizontal_bar" else "vertical",
+                **({"yAxisScale": axis_scale} if axis_scale else {}),
             },
             index=index,
             widget_id=f"ai_insight_{int(datetime.now(UTC).timestamp() * 1000)}_{index}",
@@ -901,7 +1013,7 @@ async def _widget_configs(
             config["type"] = chart_type
             config["chartSubtype"] = widget.get("_forcedChartSubtype") or ""
         configs.append(config)
-    return configs
+    return _apply_operational_layout(configs)
 
 
 def _history_entry(dashboard: Dashboard, prompt: str, mode: str) -> dict[str, Any]:
@@ -973,6 +1085,7 @@ async def apply_dashboard_design(
                 "globalFilters": [],
                 "dashboardTemplate": {"parameters": dimension_parameters},
                 "operationalWidgets": _operational_widgets(req.prompt, suggestion),
+                "operationalLayoutVersion": 2,
                 "aiDesign": {
                     "version": 1,
                     "mode": req.mode,
@@ -1056,6 +1169,7 @@ async def apply_dashboard_design(
                 "operationalWidgets": _operational_widgets(req.prompt, suggestion)
                 if req.mode == "edit_dashboard"
                 else next_config.get("operationalWidgets") or _operational_widgets(req.prompt, suggestion),
+                "operationalLayoutVersion": 2,
                 "aiDesign": {
                     "version": int((next_config.get("aiDesign") or {}).get("version") or 0) + 1,
                     "mode": req.mode,

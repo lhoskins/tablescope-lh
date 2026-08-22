@@ -7,12 +7,15 @@ from app.models.file_source_meta import FileSourceMeta
 from app.routes.ai_proxy_dashboard_designer import (
     ChartOverride,
     _apply_chart_overrides,
+    _apply_operational_layout,
     _chart_recommendations,
     _concept_supported,
     _engine_chart_recommendations,
     _grounded_chart_selection,
     _infer_domain,
     _missing_concepts,
+    _operational_widgets,
+    _requested_axis_scale,
     _support_status,
     _widget_date_field,
 )
@@ -537,3 +540,49 @@ async def test_chart_candidates_requires_project_access(
         headers=headers,
     )
     assert r.status_code in (403, 404)
+
+
+def test_operational_sections_match_the_itsm_story_and_bottom_right_layout() -> None:
+    widgets = _operational_widgets(
+        "Show sales health",
+        {
+            "businessPurpose": "Monitor delivery and forecast alignment.",
+            "knowledgeGraphContext": {
+                "risks": ["Backlog is rising"],
+                "opportunities": ["Rebalance the highest-volume region"],
+            },
+            "widgets": [{"businessQuestion": "Which region drives the backlog?"}],
+        },
+    )
+    brief, improvements = widgets
+    assert [item["label"] for item in brief["items"]] == [
+        "Backing risk",
+        "Primary driver",
+        "Recommended action",
+    ]
+    assert improvements["layout"] == {
+        "position": 1,
+        "width": "standard",
+        "gridX": 9,
+        "gridY": 5,
+        "gridW": 3,
+        "gridH": 3,
+    }
+
+
+def test_ai_layout_caps_horizontal_rankings_at_half_width() -> None:
+    configs = _apply_operational_layout(
+        [
+            {"id": "revenue", "type": "kpi"},
+            {"id": "backlog", "type": "kpi"},
+            {
+                "id": "ranking",
+                "type": "bar",
+                "chartSubtype": "horizontal_bar",
+                "visualizationOptions": {"barLayout": "horizontal"},
+            },
+        ]
+    )
+    ranking = next(item for item in configs if item["id"] == "ranking")
+    assert ranking["gridW"] <= 6
+    assert _requested_axis_scale({"valueFormat": "Thousands"}) == "thousands"

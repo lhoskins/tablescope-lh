@@ -71,6 +71,7 @@ import { addAnalyticalLayers } from "../add-analytical-layers";
 import { categorySeries } from "../category-series";
 import { tooltipFormatter } from "../tooltip-formatter";
 import { tooltipScatterFormatter } from "../tooltip-scatter-formatter";import { buildReferenceLines } from "./build-reference-lines";
+import { axisScaleLabel, formatAxisNumber } from "../axis-scale";
 
 
 
@@ -102,7 +103,7 @@ export function buildLineOption(
   const signedPercentAxis = opts.yAxisFormat === "percent" && opts.signedPercentAxis;
   const yAxisFormatter = signedPercentAxis
     ? signedPercent
-    : (v: number) => formatNumber(v, opts.yAxisFormat, opts.valueScale);
+    : (v: number) => formatAxisNumber(v, opts);
   const tooltipFormatterFn = opts.percentChangeTooltip
     ? (params: any) => percentChangeTooltipFormatter(params)
     : (params: any) => tooltipFormatter(params, opts.yAxisFormat, opts.valueScale);
@@ -136,8 +137,8 @@ export function buildLineOption(
     legend: showLegend ? getLegendConfig(opts, isDark) : undefined,
     xAxis: { type: "category" as const, data: chartData.map((r) => String(r[xKey] ?? "")), show: !tiny, axisLabel: { rotate: opts.xAxisLabelRotate ?? (chartData.length > 8 ? -30 : 0), fontSize: 10, color: colorsForChart.text }, axisLine: { lineStyle: { color: colorsForChart.line } }, splitLine: { show: false } },
     yAxis: [
-      { type: "value" as const, show: !tiny, axisLabel: { formatter: yAxisFormatter, fontSize: 10, color: colorsForChart.text }, splitLine: showGrid ? { lineStyle: { color: colorsForChart.grid } } : undefined },
-      ...(dualAxis && !tiny ? [{ type: "value" as const, show: true, position: "right" as const, axisLabel: { formatter: yAxisFormatter, fontSize: 10, color: colorsForChart.text }, splitLine: { show: false } }] : []),
+      { type: "value" as const, show: !tiny, name: axisScaleLabel(opts), nameLocation: "middle" as const, nameGap: 44, axisLabel: { formatter: yAxisFormatter, fontSize: 10, color: colorsForChart.text }, splitLine: showGrid ? { lineStyle: { color: colorsForChart.grid } } : undefined },
+      ...(dualAxis && !tiny ? [{ type: "value" as const, show: true, position: "right" as const, name: axisScaleLabel(opts), nameLocation: "middle" as const, nameGap: 44, axisLabel: { formatter: yAxisFormatter, fontSize: 10, color: colorsForChart.text }, splitLine: { show: false } }] : []),
     ],
     series,
     dataZoom: !tiny && opts.dataZoom ? [{ type: "inside" as const }, { type: "slider" as const, start: 0, end: 100, height: 16, bottom: 0 }] : undefined,

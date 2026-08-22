@@ -92,7 +92,7 @@ export function OperationalInsightWidgets({
     }));
     await persist(next);
   };
-  const resize = (id: string) => persist(widgets.map((item) => item.id === id ? { ...item, layout: { position: item.layout?.position ?? 0, width: item.layout?.width === "wide" ? "standard" : "wide" } } : item));
+  const resize = (id: string) => persist(widgets.map((item) => item.id === id ? { ...item, layout: { ...item.layout, position: item.layout?.position ?? 0, width: item.layout?.width === "wide" ? "standard" : "wide" } } : item));
 
   return (
     <div className="mb-3">
@@ -134,7 +134,7 @@ export function OperationalInsightWidgets({
               {widget.summary && <p className="text-small leading-5 text-ink-secondary">{widget.summary}</p>}
               {(widget.items ?? []).length > 0 && (
                 <ol className="mt-3 space-y-2">
-                  {(widget.items ?? []).map((item, index) => <li key={`${widget.id}-${index}`} className="flex gap-2 text-small text-ink-secondary"><span className="font-semibold text-brand-600">{index + 1}.</span><span>{item}</span></li>)}
+                  {(widget.items ?? []).map((item, index) => <li key={`${widget.id}-${index}`} className="flex gap-2 text-small text-ink-secondary"><span className="font-semibold text-brand-600">{index + 1}.</span><span>{typeof item === "string" ? item : item.detail || item.label}</span></li>)}
                 </ol>
               )}
             </div>

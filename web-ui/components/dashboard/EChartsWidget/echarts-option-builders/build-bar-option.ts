@@ -71,6 +71,7 @@ import { addAnalyticalLayers } from "../add-analytical-layers";
 import { categorySeries } from "../category-series";
 import { tooltipFormatter } from "../tooltip-formatter";
 import { tooltipScatterFormatter } from "../tooltip-scatter-formatter";import { buildReferenceLines } from "./build-reference-lines";
+import { axisScaleLabel, formatAxisNumber } from "../axis-scale";
 
 
 
@@ -157,11 +158,11 @@ export function buildBarOption(
     tooltip: opts.showTooltip === false || tiny ? { show: false } : { trigger: "axis", axisPointer: { type: "shadow" }, formatter: (params: any) => tooltipFormatter(params, opts.yAxisFormat, opts.valueScale) },
     legend: showLegend ? getLegendConfig(opts, isDark) : undefined,
     xAxis: horizontal
-      ? { type: "value" as const, show: !tiny, axisLabel: { formatter: (v: number) => formatNumber(Math.abs(v), opts.yAxisFormat, opts.valueScale), fontSize: 10, color: colorsForChart.text }, splitLine: showGrid ? { lineStyle: { color: colorsForChart.grid } } : undefined }
+      ? { type: "value" as const, show: !tiny, name: axisScaleLabel(opts), nameLocation: "middle" as const, nameGap: 28, axisLabel: { formatter: (v: number) => formatAxisNumber(Math.abs(v), opts), fontSize: 10, color: colorsForChart.text }, splitLine: showGrid ? { lineStyle: { color: colorsForChart.grid } } : undefined }
       : { type: "category" as const, data: categoryData, show: !tiny, axisLabel: { rotate: opts.xAxisLabelRotate ?? (categoryData.length > 8 ? -30 : 0), fontSize: 10, color: colorsForChart.text }, axisLine: { lineStyle: { color: colorsForChart.line } }, splitLine: { show: false } },
     yAxis: horizontal
       ? { type: "category" as const, data: categoryData, show: !tiny, axisLabel: { fontSize: 10, color: colorsForChart.text }, axisLine: { lineStyle: { color: colorsForChart.line } }, splitLine: { show: false } }
-      : { type: "value" as const, show: !tiny, axisLabel: { formatter: (v: number) => formatNumber(v, opts.yAxisFormat, opts.valueScale), fontSize: 10, color: colorsForChart.text }, splitLine: showGrid ? { lineStyle: { color: colorsForChart.grid } } : undefined },
+      : { type: "value" as const, show: !tiny, name: axisScaleLabel(opts), nameLocation: "middle" as const, nameGap: 44, axisLabel: { formatter: (v: number) => formatAxisNumber(v, opts), fontSize: 10, color: colorsForChart.text }, splitLine: showGrid ? { lineStyle: { color: colorsForChart.grid } } : undefined },
     series,
     dataZoom: !tiny && opts.dataZoom ? [{ type: "inside" as const }, { type: "slider" as const, start: 0, end: 100, height: 16, bottom: 0 }] : undefined,
     animation: animate,

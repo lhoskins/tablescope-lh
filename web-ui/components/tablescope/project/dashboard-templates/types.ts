@@ -76,9 +76,16 @@ export interface OperationalInsightWidgetConfig {
   aiManaged: boolean;
   prompt: string;
   summary?: string;
-  items?: string[];
+  items?: Array<string | { label?: string; detail?: string; tone?: "critical" | "warning" | "positive" | "neutral" }>;
   updatedAt?: string;
-  layout?: { position: number; width: "standard" | "wide" };
+  layout?: {
+    position: number;
+    width: "standard" | "wide";
+    gridX?: number;
+    gridY?: number;
+    gridW?: number;
+    gridH?: number;
+  };
 }
 
 export interface TemplateBindingDraft {
