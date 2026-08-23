@@ -120,6 +120,10 @@ class SubmitCanonicalTurnRequest(BaseModel):
     data_source_id: int | None = Field(default=None)
     attachment_ids: list[int] = Field(default_factory=list)
     client_request_id: str = Field(..., max_length=64)
+    # Project workspace only: the resource type/id the user currently has open
+    # in the workspace tab strip, used to ground the assistant's answer.
+    active_resource_type: str | None = Field(default=None, max_length=32)
+    active_resource_id: int | None = Field(default=None)
 
 
 class SubmitCanonicalTurnResponse(BaseModel):
@@ -158,6 +162,8 @@ async def submit_canonical_turn(
             data_source_id=req.data_source_id,
             attachment_ids=req.attachment_ids,
             client_request_id=req.client_request_id,
+            active_resource_type=req.active_resource_type,
+            active_resource_id=req.active_resource_id,
         )
     except CanonicalProjectError as exc:
         raise HTTPException(

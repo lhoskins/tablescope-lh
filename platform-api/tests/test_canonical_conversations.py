@@ -309,6 +309,160 @@ async def test_manual_ai_assistant_conversations_remain_independent(client, serv
     assert c2["canonical_key"] is None
 
 
+async def test_project_workspace_appends_to_one_conversation_per_project(client, service_headers):
+    _, _, project, headers = await _setup(client, service_headers, "pw-canonical")
+
+    r1 = await client.post(
+        "/api/conversational-analytics/canonical-turns",
+        json={
+            "surface": "project_workspace",
+            "project_id": project["id"],
+            "message": "first",
+            "client_request_id": "req-1",
+        },
+        headers=headers,
+    )
+    assert r1.status_code == 200, r1.text
+    body1 = r1.json()
+    assert body1["surface"] == "project_workspace"
+    assert body1["project_id"] == project["id"]
+    assert body1["conversation_created"] is True
+
+    r2 = await client.post(
+        "/api/conversational-analytics/canonical-turns",
+        json={
+            "surface": "project_workspace",
+            "project_id": project["id"],
+            "message": "second",
+            "client_request_id": "req-2",
+        },
+        headers=headers,
+    )
+    assert r2.status_code == 200, r2.text
+    body2 = r2.json()
+    assert body2["conversation_id"] == body1["conversation_id"]
+    assert body2["conversation_created"] is False
+    assert body2["turn"]["sequence"] == 2
+
+
+async def test_project_workspace_grounds_on_active_table(
+    client, db_session, service_headers, monkeypatch
+):
+    _, _, project, headers = await _setup(client, service_headers, "pw-grounding")
+
+    from app.models import SavedQuery
+
+    query = SavedQuery(
+        project_id=project["id"],
+        name="Monthly Revenue",
+        description="Revenue by month",
+        sql_text='SELECT * FROM "sales"',
+    )
+    db_session.add(query)
+    await db_session.commit()
+    await db_session.refresh(query)
+
+    captured: dict = {}
+
+    async def _fake_capture(*args, **kwargs):
+        captured["question"] = kwargs.get("question", "")
+        return {
+            "question": kwargs.get("question", ""),
+            "sql": "SELECT 1",
+            "columns": ["x"],
+            "rows": [{"x": 1}],
+            "suggestedVisualization": {"type": "bar", "title": "x"},
+            "explanation": "ok",
+            "dataSourcesUsed": ["sales"],
+            "status": "success",
+            "error": None,
+        }
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core", _fake_capture
+    )
+
+    r = await client.post(
+        "/api/conversational-analytics/canonical-turns",
+        json={
+            "surface": "project_workspace",
+            "project_id": project["id"],
+            "message": "How is this trending?",
+            "client_request_id": "req-1",
+            "active_resource_type": "table",
+            "active_resource_id": query.id,
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert "Monthly Revenue" in captured["question"]
+    assert "Active workspace item" in captured["question"]
+
+
+async def test_project_workspace_active_resource_from_another_project_is_ignored(
+    client, db_session, service_headers, monkeypatch
+):
+    """A dashboard id from a project the user isn't currently working in must
+    never leak its name/config into another project's workspace grounding."""
+    tenant, _, project, headers = await _setup(client, service_headers, "pw-cross-project")
+
+    other_r = await client.post(
+        "/api/projects",
+        json={"name": "Other Secret Project", "description": "x", "is_shared": False},
+        headers=headers,
+    )
+    assert other_r.status_code == 201
+    other_project = other_r.json()
+
+    from app.models import Dashboard
+
+    other_dashboard = Dashboard(
+        project_id=other_project["id"],
+        tenant_id=tenant["id"],
+        name="Secret Executive Dashboard",
+        config={"widgets": []},
+    )
+    db_session.add(other_dashboard)
+    await db_session.commit()
+    await db_session.refresh(other_dashboard)
+
+    captured: dict = {}
+
+    async def _fake_capture(*args, **kwargs):
+        captured["question"] = kwargs.get("question", "")
+        return {
+            "question": kwargs.get("question", ""),
+            "sql": "SELECT 1",
+            "columns": ["x"],
+            "rows": [{"x": 1}],
+            "suggestedVisualization": {"type": "bar", "title": "x"},
+            "explanation": "ok",
+            "dataSourcesUsed": [],
+            "status": "success",
+            "error": None,
+        }
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core", _fake_capture
+    )
+
+    r = await client.post(
+        "/api/conversational-analytics/canonical-turns",
+        json={
+            "surface": "project_workspace",
+            "project_id": project["id"],
+            "message": "What's on this dashboard?",
+            "client_request_id": "req-1",
+            "active_resource_type": "dashboard",
+            "active_resource_id": other_dashboard.id,
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert "Secret Executive Dashboard" not in captured["question"]
+    assert "Active workspace item" not in captured["question"]
+
+
 async def test_list_conversations_excludes_merged_rows(client, service_headers, db_session):
     _, _, project, headers = await _setup(client, service_headers, "merged-list")
 

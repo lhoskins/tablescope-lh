@@ -20,6 +20,7 @@ from app.auth.context import RequestContext
 from app.auth.rbac import Role
 from app.models import AnalyticsConversation, AnalyticsConversationTurn, Project
 from app.services.conversational_analytics import execute_turn
+from app.services.workspace_context import resolve_active_resource_context
 
 
 def _is_conversation_reader(context: RequestContext, conversation: AnalyticsConversation) -> bool:
@@ -33,6 +34,7 @@ def _is_conversation_reader(context: RequestContext, conversation: AnalyticsConv
 class CanonicalConversationSurface(str, Enum):
     BUSINESS_INSIGHTS = "business_insights"
     PROJECT_INSIGHTS = "project_insights"
+    PROJECT_WORKSPACE = "project_workspace"
 
 
 class CanonicalSurfaceError(Exception):
@@ -50,6 +52,10 @@ def canonical_scope_key(surface: str, project_id: int | None) -> str:
         if project_id is None:
             raise CanonicalProjectError("project_id is required for project_insights")
         return f"project_insights:{project_id}"
+    if surface == CanonicalConversationSurface.PROJECT_WORKSPACE.value:
+        if project_id is None:
+            raise CanonicalProjectError("project_id is required for project_workspace")
+        return f"project_workspace:{project_id}"
     raise CanonicalSurfaceError(f"Unsupported canonical surface: {surface}")
 
 
@@ -130,6 +136,8 @@ async def append_canonical_turn(
     client_request_id: str,
     data_source_id: int | None = None,
     attachment_ids: list[int] | None = None,
+    active_resource_type: str | None = None,
+    active_resource_id: int | None = None,
 ) -> CanonicalTurnResult:
     """Append one turn to the canonical Insight thread for this scope.
 
@@ -151,6 +159,13 @@ async def append_canonical_turn(
         if project is None or project.tenant_id != context.tenant_id:
             raise CanonicalProjectError("Project not found")
         title = f"Project Insights — {project.name}"
+    elif surface == CanonicalConversationSurface.PROJECT_WORKSPACE:
+        if project_id is None:
+            raise CanonicalProjectError("project_id is required for project_workspace")
+        project = await session.get(Project, project_id)
+        if project is None or project.tenant_id != context.tenant_id:
+            raise CanonicalProjectError("Project not found")
+        title = f"Workspace — {project.name}"
     else:
         raise CanonicalSurfaceError(f"Unsupported canonical surface: {surface}")
 
@@ -214,6 +229,15 @@ async def append_canonical_turn(
     session.add(turn)
     await session.flush()
 
+    active_resource = None
+    if surface == CanonicalConversationSurface.PROJECT_WORKSPACE and project_id is not None:
+        active_resource = await resolve_active_resource_context(
+            session,
+            project_id=project_id,
+            resource_type=active_resource_type,
+            resource_id=active_resource_id,
+        )
+
     await execute_turn(
         session,
         context,
@@ -221,6 +245,7 @@ async def append_canonical_turn(
         turn,
         datasource_id=data_source_id,
         attachment_ids=attachment_ids or [],
+        active_resource=active_resource,
     )
 
     if turn.status == "success":

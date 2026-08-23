@@ -112,13 +112,17 @@ export interface SubmitTurnRequest {
   client_request_id?: string;
 }
 
+export type WorkspaceResourceType = "table" | "dashboard" | "document" | "data_source";
+
 export interface SubmitCanonicalTurnRequest {
-  surface: "business_insights" | "project_insights";
+  surface: "business_insights" | "project_insights" | "project_workspace";
   project_id?: number;
   message: string;
   data_source_id?: number;
   attachment_ids?: number[];
   client_request_id: string;
+  active_resource_type?: WorkspaceResourceType;
+  active_resource_id?: number;
 }
 
 export interface SubmitCanonicalTurnResponse {

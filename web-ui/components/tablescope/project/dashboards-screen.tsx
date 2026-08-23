@@ -218,6 +218,17 @@ export function DashboardsScreen({
       activeNav="project-dashboards"
       breadcrumbLabel="Dashboards"
       showProjectHeader={!viewing}
+      workspaceItem={
+        viewing && viewing.id > 0
+          ? {
+              type: "dashboard",
+              id: String(viewing.id),
+              numericId: viewing.id,
+              label: viewing.name,
+              href: `/projects/${projectId}/dashboards/${viewing.id}`,
+            }
+          : null
+      }
       headerActions={
         !viewing ? (
           <>

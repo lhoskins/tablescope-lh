@@ -75,12 +75,27 @@ export function DocumentsScreen({
     },
   ];
 
+  const activeDocument = documentId
+    ? rows.find((d) => d.id === Number(documentId)) ?? null
+    : null;
+
   return (
     <ProjectShell
       projectId={projectId}
       activeNav="project-documents"
       breadcrumbLabel="Documents"
       showProjectHeader
+      workspaceItem={
+        activeDocument
+          ? {
+              type: "document",
+              id: String(activeDocument.id),
+              numericId: activeDocument.id,
+              label: activeDocument.title,
+              href: `/projects/${projectId}/documents/${activeDocument.id}`,
+            }
+          : null
+      }
     >
       <div className="space-y-4">
         <StatBar items={statItems} />

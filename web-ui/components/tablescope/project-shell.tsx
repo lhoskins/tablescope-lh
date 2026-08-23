@@ -6,6 +6,9 @@ import { AppShell } from "./app-shell";
 import { ProjectResourceTabs } from "./project/project-resource-tabs";
 import { ProjectHeader } from "./project/overview-screen/project-header";
 import { MembersDialog } from "./project/members-dialog";
+import { WorkspaceTabsBar } from "./project/workspace/workspace-tabs-bar";
+import { WorkspaceAssistantPanel } from "./project/workspace/workspace-assistant-panel";
+import type { WorkspaceTab } from "./project/workspace/workspace-tabs-storage";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
 import { getUserMeta } from "@/lib/auth";
 import { useProjectShell, useProjectMembers } from "@/lib/ui/use-project-data";
@@ -20,6 +23,7 @@ export function ProjectShell({
   showResourceTabs = true,
   showProjectHeader = false,
   headerActions,
+  workspaceItem = null,
   children,
 }: {
   projectId: string;
@@ -39,6 +43,10 @@ export function ProjectShell({
   showProjectHeader?: boolean;
   /** Actions placed in the right side of the project title header. */
   headerActions?: ReactNode;
+  /** The specific table/dashboard/document/data source this page currently
+   *  has open, if any. Feeds the project workspace tab strip and grounds the
+   *  docked AI Assistant. */
+  workspaceItem?: WorkspaceTab | null;
   children: ReactNode;
 }) {
   const router = useRouter();
@@ -50,6 +58,12 @@ export function ProjectShell({
   }, [router]);
 
   const renderHeader = showProjectHeader && activeNav !== "overview";
+  const resourceTabs = (
+    <>
+      <ProjectResourceTabs projectId={projectId} />
+      <WorkspaceTabsBar projectId={projectId} activeItem={workspaceItem} />
+    </>
+  );
 
   return (
     <AppShell
@@ -64,11 +78,14 @@ export function ProjectShell({
       subHeader={
         activeNav === "overview" || !showResourceTabs || renderHeader
           ? undefined
-          : (
-              <ProjectResourceTabs projectId={projectId} />
-            )
+          : resourceTabs
       }
-      contextPanel={contextPanel}
+      contextPanel={
+        <>
+          {contextPanel}
+          <WorkspaceAssistantPanel projectId={projectId} activeItem={workspaceItem} />
+        </>
+      }
       scrollable={scrollable}
     >
       {renderHeader ? (
@@ -76,6 +93,7 @@ export function ProjectShell({
           projectId={projectId}
           project={project}
           headerActions={headerActions}
+          resourceTabs={resourceTabs}
         >
           {children}
         </ProjectPageHeader>
@@ -90,11 +108,13 @@ function ProjectPageHeader({
   projectId,
   project,
   headerActions,
+  resourceTabs,
   children,
 }: {
   projectId: string;
   project: ProjectSummary | null;
   headerActions?: ReactNode;
+  resourceTabs: ReactNode;
   children: ReactNode;
 }) {
   const { data: members } = useProjectMembers(projectId);
@@ -112,9 +132,7 @@ function ProjectPageHeader({
         onToast={push}
         actions={headerActions}
       />
-      <div className="-mx-5">
-        <ProjectResourceTabs projectId={projectId} />
-      </div>
+      <div className="-mx-5">{resourceTabs}</div>
       {children}
       <MembersDialog
         open={showMembers}

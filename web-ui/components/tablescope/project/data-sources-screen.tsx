@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -184,6 +184,17 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
     rows.find((s) => keyFor(s) === selectedKey) ?? rows[0] ?? null;
   const detail = rows.find((s) => keyFor(s) === detailKey) ?? null;
 
+  // ── Deep-link: open a specific data source via ?ds=<lifecycleId> ────
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ds = params.get("ds");
+    if (ds) {
+      setDetailKey(ds);
+      setSelectedKey(ds);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     const pool = filter === "archive" ? archivedRows : rows;
@@ -246,6 +257,17 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
       activeNav="project-data-sources"
       breadcrumbLabel="Data Sources"
       showProjectHeader={!inDetail}
+      workspaceItem={
+        detail
+          ? {
+              type: "data_source",
+              id: keyFor(detail),
+              numericId: typeof detail.id === "number" ? detail.id : undefined,
+              label: detail.fileName,
+              href: `/projects/${projectId}/data-sources?ds=${encodeURIComponent(keyFor(detail))}`,
+            }
+          : null
+      }
       headerActions={
         !inDetail ? (
           <>

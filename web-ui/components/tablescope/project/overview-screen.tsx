@@ -13,6 +13,7 @@ import { Card } from "@/components/ui/card";
 import { AskAnythingComposer } from "@/components/ai/ask-anything-composer";
 import { TurnBubble } from "@/components/tablescope/conversation/conversation-turn";
 import { ProjectResourceTabs } from "@/components/tablescope/project/project-resource-tabs";
+import { WorkspaceTabsBar } from "@/components/tablescope/project/workspace/workspace-tabs-bar";
 import { recentConversationsKey } from "@/components/tablescope/project/ai-conversations-card";
 import {
   createConversation,
@@ -205,6 +206,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
 
         <div className="-mx-5">
           <ProjectResourceTabs projectId={projectId} />
+          <WorkspaceTabsBar projectId={projectId} activeItem={null} />
         </div>
 
         {/* Scrollable content — the composer below never moves with it. */}

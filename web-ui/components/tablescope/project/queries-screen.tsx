@@ -199,6 +199,17 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
       activeNav="project-queries"
       breadcrumbLabel="Tables"
       showProjectHeader={listMode}
+      workspaceItem={
+        detailQuery
+          ? {
+              type: "table",
+              id: String(detailQuery.id),
+              numericId: detailQuery.id,
+              label: detailQuery.name,
+              href: `/projects/${projectId}/queries?q=${detailQuery.id}`,
+            }
+          : null
+      }
       headerActions={
         listMode ? (
           <>

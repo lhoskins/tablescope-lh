@@ -1,0 +1,309 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  IconChevronRight,
+  IconChevronLeft,
+  IconArrowUp,
+  IconSparkles,
+  IconPlus,
+} from "@tabler/icons-react";
+import { cn } from "@/lib/cn";
+import { Button } from "@/components/ui/button";
+import { TurnBubble } from "@/components/tablescope/conversation/conversation-turn";
+import {
+  getConversation,
+  listConversations,
+  submitCanonicalTurn,
+  type Conversation,
+} from "@/lib/api/conversational-analytics";
+import {
+  ASSISTANT_MAX_WIDTH,
+  ASSISTANT_MIN_WIDTH,
+  clampAssistantWidth,
+  loadAssistantCollapsed,
+  loadAssistantWidth,
+  saveAssistantCollapsed,
+  saveAssistantWidth,
+} from "./workspace-assistant-storage";
+import type { WorkspaceTab } from "./workspace-tabs-storage";
+
+function newRequestId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `req-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+export function WorkspaceAssistantPanel({
+  projectId,
+  activeItem,
+}: {
+  projectId: string;
+  activeItem: WorkspaceTab | null;
+}) {
+  const projectIdNum = Number(projectId);
+  const [collapsed, setCollapsed] = useState(true);
+  const [width, setWidth] = useState(ASSISTANT_MIN_WIDTH);
+  const [conversation, setConversation] = useState<Conversation | null>(null);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const resizingRef = useRef(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setCollapsed(loadAssistantCollapsed());
+    setWidth(loadAssistantWidth());
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function resume() {
+      try {
+        const list = await listConversations(projectIdNum);
+        const workspace = list.find((c) => c.surface === "project_workspace");
+        if (!workspace || cancelled) return;
+        const full = await getConversation(workspace.id);
+        if (!cancelled) setConversation(full);
+      } catch {
+        // No prior workspace conversation to resume -- start fresh silently.
+      }
+    }
+    if (Number.isFinite(projectIdNum)) void resume();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectIdNum]);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [conversation?.turns, busy]);
+
+  const toggleCollapsed = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      saveAssistantCollapsed(next);
+      return next;
+    });
+  };
+
+  const onResizeStart = useCallback(
+    (event: React.MouseEvent) => {
+      event.preventDefault();
+      resizingRef.current = true;
+      const startX = event.clientX;
+      const startWidth = width;
+
+      const onMove = (moveEvent: MouseEvent) => {
+        if (!resizingRef.current) return;
+        // The handle sits on the panel's left edge, so dragging left (negative
+        // delta) should widen the panel.
+        const delta = startX - moveEvent.clientX;
+        setWidth(clampAssistantWidth(startWidth + delta));
+      };
+      const onUp = () => {
+        resizingRef.current = false;
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        setWidth((current) => {
+          saveAssistantWidth(current);
+          return current;
+        });
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [width],
+  );
+
+  async function send(raw: string) {
+    const message = raw.trim();
+    if (!message || busy || !Number.isFinite(projectIdNum)) return;
+    setPendingMessage(message);
+    setInput("");
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await submitCanonicalTurn({
+        surface: "project_workspace",
+        project_id: projectIdNum,
+        message,
+        client_request_id: newRequestId(),
+        active_resource_type: activeItem?.type,
+        active_resource_id: activeItem?.numericId,
+      });
+      setConversation((prev) => {
+        if (!prev || prev.id !== result.conversation_id) {
+          return {
+            id: result.conversation_id,
+            project_id: result.project_id,
+            surface: result.surface,
+            title: "Workspace",
+            status: "active",
+            active_datasource_id: null,
+            canonical_key: null,
+            merged_into_conversation_id: null,
+            turns: [result.turn],
+            updated_at: new Date().toISOString(),
+          };
+        }
+        return { ...prev, turns: [...prev.turns, result.turn], updated_at: new Date().toISOString() };
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setPendingMessage(null);
+      setBusy(false);
+    }
+  }
+
+  function startNew() {
+    setConversation(null);
+    setInput("");
+    setError(null);
+  }
+
+  if (collapsed) {
+    return (
+      <div className="flex w-[54px] shrink-0 flex-col items-center gap-3 border-l border-line-tertiary bg-bg-primary py-3">
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          title="Open AI Assistant"
+          aria-label="Open AI Assistant"
+          className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-500 hover:bg-brand-100"
+        >
+          <IconSparkles size={16} />
+        </button>
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          title="Expand"
+          aria-label="Expand AI Assistant panel"
+          className="flex h-7 w-7 items-center justify-center rounded text-ink-tertiary hover:bg-bg-secondary hover:text-ink-primary"
+        >
+          <IconChevronLeft size={14} />
+        </button>
+      </div>
+    );
+  }
+
+  const pendingQuestion = busy ? pendingMessage : null;
+
+  return (
+    <div
+      className="relative flex shrink-0 flex-col border-l border-line-tertiary bg-bg-primary"
+      style={{ width, minWidth: ASSISTANT_MIN_WIDTH, maxWidth: ASSISTANT_MAX_WIDTH }}
+    >
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+      <div
+        onMouseDown={onResizeStart}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize AI Assistant panel"
+        className="absolute left-0 top-0 h-full w-1.5 -translate-x-1/2 cursor-col-resize"
+      />
+      <div className="flex items-center justify-between gap-2 border-b border-line-tertiary px-3 py-2.5">
+        <div className="flex items-center gap-2">
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-50 text-brand-500">
+            <IconSparkles size={14} />
+          </div>
+          <div>
+            <p className="text-[13px] font-medium text-ink-primary">AI Assistant</p>
+            {activeItem && (
+              <p className="max-w-[14rem] truncate text-caption text-ink-tertiary">
+                Grounded on: {activeItem.label}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="icon" title="New chat" aria-label="New chat" onClick={startNew}>
+            <IconPlus size={14} />
+          </Button>
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            title="Collapse"
+            aria-label="Collapse AI Assistant panel"
+            className="flex h-7 w-7 items-center justify-center rounded text-ink-tertiary hover:bg-bg-secondary hover:text-ink-primary"
+          >
+            <IconChevronRight size={14} />
+          </button>
+        </div>
+      </div>
+
+      <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-3 py-3">
+        {(!conversation || conversation.turns.length === 0) && !pendingQuestion && (
+          <p className="text-[13px] text-ink-tertiary">
+            Ask about {activeItem ? `"${activeItem.label}"` : "this project"} or anything else in
+            this workspace.
+          </p>
+        )}
+        {conversation?.turns.map((t, i) => (
+          <TurnBubble
+            key={t.id}
+            turn={t}
+            isLast={i === conversation.turns.length - 1}
+            onFollowUp={(text) => void send(text)}
+          />
+        ))}
+        {pendingQuestion && (
+          <div className="flex justify-end">
+            <div className="max-w-[85%] rounded-lg bg-brand px-3 py-2 text-[13px] leading-relaxed text-brand-fg">
+              {pendingQuestion}
+            </div>
+          </div>
+        )}
+        {busy && (
+          <div className="flex gap-2">
+            <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-500">
+              <IconSparkles size={13} />
+            </div>
+            <div className="max-w-[85%] rounded-lg border border-line-tertiary bg-bg-secondary px-3 py-2 text-[13px] text-ink-tertiary">
+              Thinking…
+            </div>
+          </div>
+        )}
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[13px] text-red-700">
+            {error}
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-end gap-2 border-t border-line-tertiary px-3 py-2">
+        <textarea
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              void send(input);
+            }
+          }}
+          rows={2}
+          placeholder="Ask anything…"
+          aria-label="Ask the AI Assistant"
+          disabled={busy}
+          className={cn(
+            "max-h-32 min-h-[36px] flex-1 resize-none bg-transparent text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:outline-none",
+          )}
+        />
+        <button
+          type="button"
+          onClick={() => void send(input)}
+          disabled={busy || !input.trim()}
+          aria-label="Send"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-brand text-brand-fg hover:bg-brand-700 disabled:opacity-40"
+        >
+          <IconArrowUp size={15} />
+        </button>
+      </div>
+    </div>
+  );
+}
