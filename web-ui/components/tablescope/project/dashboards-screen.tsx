@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IconChartBar,
-  IconFolders,
   IconLayoutDashboard,
   IconPlus,
   IconSparkles,
@@ -95,14 +94,6 @@ export function DashboardsScreen({
         queryKey: ["project", projectId, "dashboards"],
       }),
   });
-
-  const createGroupMutation = useMutation({ mutationFn: (name: string) => apiClient.post(`/api/projects/${projectId}/dashboard-groups`, { name, icon: "activity", collapsed_default: true }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["project", projectId, "dashboard-groups"] }) });
-  const renameGroupMutation = useMutation({ mutationFn: ({ group, name }: { group: DashboardGroup; name: string }) => apiClient.put(`/api/projects/${projectId}/dashboard-groups/${group.persistentId}`, { name }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["project", projectId, "dashboard-groups"] }) });
-  const addDashboardToGroup = useCallback(async (group: DashboardGroup) => {
-    let groupId = group.persistentId;
-    if (!groupId) groupId = (await apiClient.post<{ id: number }>(`/api/projects/${projectId}/dashboard-groups`, { name: group.name, icon: group.icon, template_id: group.templateId, collapsed_default: true })).id;
-    setDesigner({ open: true, dashboardGroupId: groupId, dashboardGroupName: group.name });
-  }, [projectId]);
 
   // A draft becomes "kept" the moment the user persists any change in the editor.
   const handlePersisted = useCallback(() => {
@@ -204,13 +195,6 @@ export function DashboardsScreen({
         label: "Total dashboards",
       },
       {
-        key: "groups",
-        icon: IconFolders,
-        iconClass: "bg-ai-bg text-ai",
-        value: groups.length,
-        label: "Groups",
-      },
-      {
         key: "ai-generated",
         icon: IconSparkles,
         iconClass: "bg-warning-bg text-warning",
@@ -225,7 +209,7 @@ export function DashboardsScreen({
         label: "Widgets",
       },
     ],
-    [groups, rows],
+    [rows],
   );
 
   return (
@@ -270,11 +254,7 @@ export function DashboardsScreen({
             loading={isLoading}
             onOpenDashboard={setViewingId}
             onAddTemplate={() => setTemplateOpen(true)}
-            onNewDashboard={() => setDesigner({ open: true, dashboardGroupName: "Operational Dashboards" })}
             onDeleteDashboard={handleDeleteDashboard}
-            onCreateGroup={(name) => createGroupMutation.mutate(name)}
-            onRenameGroup={(group, name) => renameGroupMutation.mutate({ group, name })}
-            onAddDashboardToGroup={(group) => { void addDashboardToGroup(group); }}
           />
         </>
       )}
