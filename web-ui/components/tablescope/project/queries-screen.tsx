@@ -2,6 +2,7 @@
 
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   IconSparkles,
@@ -46,6 +47,7 @@ import { ArchiveCard } from "./queries-screen/archive-card";
 
 
 export function QueriesScreen({ projectId }: { projectId: string }) {
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const { data, isLoading } = useProjectQueries(projectId);
   const { data: archivedData } = useProjectArchivedQueries(projectId);
@@ -95,17 +97,20 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
         : null;
 
   // ── Deep-link: open a specific query via ?q=<id> ────────────────────
+  // Reads the reactive searchParams (not window.location) so that switching
+  // tables from the workspace tab strip -- a same-page router.push that
+  // updates only the query string -- actually opens the newly selected
+  // table instead of silently no-op'ing on an already-mounted screen.
+  const searchParamsQ = searchParams.get("q");
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const q = params.get("q");
-    if (q) {
-      const id = Number(q);
+    if (searchParamsQ) {
+      const id = Number(searchParamsQ);
       if (!Number.isNaN(id)) {
         setDetailId(id);
         setSelectedId(id);
       }
     }
-  }, []);
+  }, [searchParamsQ]);
 
   // ── "Create Query with AI" dialog ────────────────────────────────────
   // Mirrors the AI Dashboard Designer's flow: a parameterized dialog

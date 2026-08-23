@@ -58,7 +58,16 @@ export function WorkspaceAssistantPanel({
     setWidth(loadAssistantWidth());
   }, []);
 
+  // Resume conversation history only once the panel is actually opened, and
+  // only once per mount -- this panel is present on every project page, so
+  // fetching eagerly on every navigation (most of which never open it) added
+  // an extra request/DB round trip to pages that have nothing to do with the
+  // assistant, which is exactly the kind of avoidable load the docked panel
+  // was meant to avoid.
+  const hasResumedRef = useRef(false);
   useEffect(() => {
+    if (collapsed || hasResumedRef.current || !Number.isFinite(projectIdNum)) return;
+    hasResumedRef.current = true;
     let cancelled = false;
     async function resume() {
       try {
@@ -71,11 +80,11 @@ export function WorkspaceAssistantPanel({
         // No prior workspace conversation to resume -- start fresh silently.
       }
     }
-    if (Number.isFinite(projectIdNum)) void resume();
+    void resume();
     return () => {
       cancelled = true;
     };
-  }, [projectIdNum]);
+  }, [collapsed, projectIdNum]);
 
   useEffect(() => {
     if (scrollRef.current) {

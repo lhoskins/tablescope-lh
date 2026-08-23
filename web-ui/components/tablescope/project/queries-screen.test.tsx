@@ -13,6 +13,7 @@ import type { ReactNode } from "react";
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   usePathname: () => "/projects/42/queries",
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 vi.mock("@/lib/ui/use-project-data", async (importOriginal) => {

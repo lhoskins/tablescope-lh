@@ -71,6 +71,13 @@ export function DashboardsScreen({
   const [viewingId, setViewingId] = useState<number | null>(
     dashboardId ? Number(dashboardId) : null,
   );
+  // Sync to the dashboardId prop on every change, not just the initial
+  // mount -- switching dashboards from the workspace tab strip pushes a new
+  // /dashboards/<id> URL without necessarily remounting this component, so
+  // the useState initializer above only covers the very first dashboard.
+  useEffect(() => {
+    setViewingId(dashboardId ? Number(dashboardId) : null);
+  }, [dashboardId]);
   const viewing = rows.find((d) => d.id === viewingId) ?? null;
   const [designer, setDesigner] = useState<{
     open: boolean;

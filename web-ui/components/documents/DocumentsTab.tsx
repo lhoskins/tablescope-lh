@@ -68,13 +68,18 @@ export function DocumentsTab({
   const docs = docsQuery.data ?? [];
 
   // When deep-linked to a specific document, expand it and scroll into view
-  // once the list has loaded.
-  const scrolledRef = useRef(false);
+  // once the list has loaded. Tracks the last-applied id (rather than a
+  // fires-once boolean) so switching to a *different* deep-linked document --
+  // e.g. from the workspace tab strip, a same-page navigation that does not
+  // remount this component -- re-expands and re-scrolls instead of silently
+  // no-op'ing after the first document.
+  const appliedExpandedIdRef = useRef<number | null>(null);
   useEffect(() => {
-    if (initialExpandedId == null || scrolledRef.current) return;
+    if (initialExpandedId == null) return;
+    if (appliedExpandedIdRef.current === initialExpandedId) return;
     if (!docs.some((d) => d.id === initialExpandedId)) return;
     setExpandedId(initialExpandedId);
-    scrolledRef.current = true;
+    appliedExpandedIdRef.current = initialExpandedId;
     requestAnimationFrame(() => {
       document
         .getElementById(`doc-${initialExpandedId}`)

@@ -29,12 +29,16 @@ export function saveAssistantWidth(width: number): void {
   }
 }
 
+/** Defaults to collapsed: an unopened panel should never cost a network
+ *  round trip, and most project pages (Tables, Data Sources, ...) are
+ *  navigated far more often than the assistant is actually used. */
 export function loadAssistantCollapsed(): boolean {
-  if (typeof window === "undefined") return false;
+  if (typeof window === "undefined") return true;
   try {
-    return window.localStorage.getItem(ASSISTANT_COLLAPSED_KEY) === "true";
+    const stored = window.localStorage.getItem(ASSISTANT_COLLAPSED_KEY);
+    return stored === null ? true : stored === "true";
   } catch {
-    return false;
+    return true;
   }
 }
 

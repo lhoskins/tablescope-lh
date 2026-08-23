@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   IconRefresh,
@@ -46,6 +46,7 @@ import { DeleteSourceDialog } from "./data-sources-screen/delete-source-dialog";
 
 export function DataSourcesScreen({ projectId }: { projectId: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { data: allData, isLoading } = useProjectDataSources(projectId, true);
   const queryClient = useQueryClient();
   const rows = useMemo(
@@ -185,15 +186,17 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
   const detail = rows.find((s) => keyFor(s) === detailKey) ?? null;
 
   // ── Deep-link: open a specific data source via ?ds=<lifecycleId> ────
+  // Reads the reactive searchParams (not window.location) so switching data
+  // sources from the workspace tab strip -- a same-page router.push that
+  // only updates the query string -- actually opens the new selection
+  // instead of silently no-op'ing on an already-mounted screen.
+  const searchParamsDs = searchParams.get("ds");
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const ds = params.get("ds");
-    if (ds) {
-      setDetailKey(ds);
-      setSelectedKey(ds);
+    if (searchParamsDs) {
+      setDetailKey(searchParamsDs);
+      setSelectedKey(searchParamsDs);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParamsDs]);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();

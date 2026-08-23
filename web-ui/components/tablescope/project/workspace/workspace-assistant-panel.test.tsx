@@ -42,7 +42,16 @@ describe("WorkspaceAssistantPanel", () => {
     expect(screen.queryByLabelText("Ask the AI Assistant")).toBeNull();
   });
 
-  it("resumes the existing project_workspace conversation on mount", async () => {
+  it("defaults to collapsed and never fetches conversation history when nothing was persisted", () => {
+    render(<WorkspaceAssistantPanel projectId="7" activeItem={null} />);
+    expect(screen.getByLabelText("Open AI Assistant")).toBeTruthy();
+    // The panel is present on every project page, so an unopened default
+    // must not add a request to pages that never touch the assistant.
+    expect(listConversations).not.toHaveBeenCalled();
+  });
+
+  it("resumes the existing project_workspace conversation once expanded", async () => {
+    window.localStorage.setItem("tablescope:workspace-assistant-collapsed", "false");
     listConversations.mockResolvedValue([
       { id: 42, project_id: 7, surface: "project_workspace", title: "Workspace", status: "active", canonical_key: "project_workspace:7", merged_into_conversation_id: null, updated_at: "" },
     ]);
@@ -65,6 +74,7 @@ describe("WorkspaceAssistantPanel", () => {
   });
 
   it("sends a turn grounded on the active workspace tab", async () => {
+    window.localStorage.setItem("tablescope:workspace-assistant-collapsed", "false");
     submitCanonicalTurn.mockResolvedValue({
       conversation_id: 42,
       conversation_created: true,
@@ -95,6 +105,7 @@ describe("WorkspaceAssistantPanel", () => {
   });
 
   it("collapsing the panel persists the collapsed state", () => {
+    window.localStorage.setItem("tablescope:workspace-assistant-collapsed", "false");
     render(<WorkspaceAssistantPanel projectId="7" activeItem={null} />);
     fireEvent.click(screen.getByLabelText("Collapse AI Assistant panel"));
     expect(window.localStorage.getItem("tablescope:workspace-assistant-collapsed")).toBe("true");

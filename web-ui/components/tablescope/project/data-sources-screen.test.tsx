@@ -13,6 +13,7 @@ import type { ReactNode } from "react";
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   usePathname: () => "/projects/42/data-sources",
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 import { DataSourcesScreen } from "./data-sources-screen";
