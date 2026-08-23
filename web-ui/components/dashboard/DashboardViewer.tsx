@@ -57,7 +57,8 @@ import {
 import { ToastViewport, useToasts } from "@/components/ui/toast";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Button } from "@/components/ui/button";
-import { IconRefresh, IconSparkles } from "@tabler/icons-react";
+import { IconCheck, IconLayoutGrid, IconRefresh, IconSparkles } from "@tabler/icons-react";
+import { DashboardTitleEditor } from "@/components/tablescope/project/dashboard-templates/dashboard-title-editor";
 // The brief strip itself is rendered by OperationalInsightGrid (the CSS-grid
 // operational renderer), so only the header shell is needed here.
 import {
@@ -181,6 +182,14 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
       setDashboardStatus(newStatus);
       onPersisted?.();
       queryClient.invalidateQueries({ queryKey: ["dashboards", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project", String(projectId), "dashboards"] });
+    },
+  });
+  const renameMutation = useMutation({
+    mutationFn: (name: string) =>
+      apiClient.put(`/api/projects/${projectId}/dashboards/${dashboard.id}`, { name }),
+    onSuccess: () => {
+      onPersisted?.();
       queryClient.invalidateQueries({ queryKey: ["project", String(projectId), "dashboards"] });
     },
   });
@@ -618,9 +627,15 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   const narratives = useMemo(() => operationalNarratives(dashboard), [dashboard]);
   const improvements = narratives.find((item) => item.type === "improvement_opportunities");
   const headerDashboards = dashboardOptions?.length ? dashboardOptions : [{ id: dashboard.id, name: dashboard.name }];
-  // The CSS-grid operational renderer owns its own layout, so the drag-based
-  // "Edit layout" affordance only applies to the react-grid-layout path.
-  const gridLayoutEditable = operational && operationalWidgets.length === 0;
+  // Every operational dashboard can enter layout-editing mode: the
+  // react-grid-layout path (below) already renders the improvement-
+  // opportunities panel and gates drag/resize on `editingLayout` for
+  // exactly this case. While editing, it's used instead of
+  // OperationalInsightGrid's curated CSS-grid rendering even when
+  // `operationalWidgets` are present (see the render branch below) --
+  // the "Operational brief" strip is intentionally not draggable and is
+  // hidden only for the duration of the edit.
+  const gridLayoutEditable = operational;
 
   // ── react-grid-layout ────────────────────────────────────────────
   const colSpanToGridW = (span: number) => Math.min(12, Math.max(2, span));
@@ -690,7 +705,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   );
 
   return (
-    <div className={operational ? "bg-bg-primary text-ink-primary" : "min-h-screen bg-gray-50"}>
+    <div className={operational ? "bg-bg-secondary text-ink-primary" : "min-h-screen bg-gray-50"}>
       {operational ? (
         // ── ITSM-style header ───────────────────────────────────────
         // AI-generated dashboards are live the moment they're created (no
@@ -701,7 +716,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
         // instead of the ITSM presets' fixed Site/Region data.
         <div className="px-2 py-2">
           <OperationalDashboardHeader
-            title={dashboard.name}
+            title={<DashboardTitleEditor name={dashboard.name} onSave={(name) => renameMutation.mutate(name)} />}
             subtitle={`${dashboard.description ? `${dashboard.description} · ` : ""}${widgets.length} insight${widgets.length !== 1 ? "s" : ""}`}
             live={dashboardStatus === "published"}
             onBack={onBack}
@@ -756,15 +771,33 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
                   </select>
                 )}
                 {gridLayoutEditable && (
-                  <Button variant="secondary" size="sm" onClick={() => setEditingLayout((value) => !value)}>
-                    {editingLayout ? "Done" : "Edit layout"}
+                  <Button
+                    variant="secondary"
+                    size="icon"
+                    title={editingLayout ? "Done" : "Edit Layout"}
+                    aria-label={editingLayout ? "Done editing layout" : "Edit Layout"}
+                    onClick={() => setEditingLayout((value) => !value)}
+                  >
+                    {editingLayout ? <IconCheck size={14} /> : <IconLayoutGrid size={14} />}
                   </Button>
                 )}
-                <Button variant="secondary" size="sm" onClick={() => { setEditingWidget(null); setDesignerMode("edit_dashboard"); }}>
-                  <IconSparkles size={14} /> Edit with AI
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  title="Edit Dashboard"
+                  aria-label="Edit Dashboard"
+                  onClick={() => { setEditingWidget(null); setDesignerMode("edit_dashboard"); }}
+                >
+                  <IconSparkles size={14} />
                 </Button>
-                <Button variant="secondary" size="sm" onClick={() => void refreshAllWidgets()}>
-                  <IconRefresh size={14} /> Refresh
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  title="Refresh dashboard"
+                  aria-label="Refresh dashboard"
+                  onClick={() => void refreshAllWidgets()}
+                >
+                  <IconRefresh size={14} />
                 </Button>
                 <button
                   onClick={() => { setEditingWidget(null); setDesignerMode("add_insight"); }}
@@ -890,7 +923,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
             <p className="mt-1 text-xs text-slate-400">{operational ? "AI will select, validate and wire the appropriate KPI cards and charts." : "Click + Add Widget to start building your dashboard"}</p>
             {operational && <button type="button" onClick={() => setDesignerMode("edit_dashboard")} className="mt-3 rounded-md bg-brand-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-brand-700">Design with AI</button>}
           </div>
-        ) : operational && operationalWidgets.length > 0 ? (
+        ) : operational && operationalWidgets.length > 0 && !editingLayout ? (
           <OperationalInsightGrid
             widgets={widgets}
             widgetData={widgetData}

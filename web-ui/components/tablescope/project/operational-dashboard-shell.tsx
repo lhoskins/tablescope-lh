@@ -74,7 +74,7 @@ export function OperationalDashboardHeader({
   onBack,
   controls,
 }: {
-  title: string;
+  title: ReactNode;
   subtitle: string;
   live?: boolean;
   onBack: () => void;

@@ -5,7 +5,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   IconCheck,
   IconLoader2,
-  IconPencil,
   IconUsers,
   IconX,
 } from "@tabler/icons-react";
@@ -125,20 +124,14 @@ export function ProjectHeader({
                 </Button>
               </div>
             ) : (
-              <>
-                <h1 className="text-h1 text-ink-primary">
-                  {project?.name ?? "Project"}
-                </h1>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label="Rename project"
-                  className="h-7 w-7 text-ink-tertiary"
-                  onClick={() => setEditing(true)}
-                >
-                  <IconPencil size={14} />
-                </Button>
-              </>
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                title="Click to rename"
+                className="-mx-1 rounded px-1 text-left text-h1 text-ink-primary hover:bg-bg-secondary"
+              >
+                {project?.name ?? "Project"}
+              </button>
             )}
             <Badge tone={statusTone} title={`Project status: ${statusLabel}`}>
               {statusLabel}
