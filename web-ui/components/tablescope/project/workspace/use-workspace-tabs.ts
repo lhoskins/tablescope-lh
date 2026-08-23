@@ -42,6 +42,12 @@ export function useWorkspaceTabs(projectId: string, activeItem: WorkspaceTab | n
   const activeKey = activeItem ? `${activeItem.type}:${activeItem.id}` : null;
 
   function activate(tab: WorkspaceTab) {
+    const key = `${tab.type}:${tab.id}`;
+    // Re-pushing the already-active tab's URL was re-triggering the target
+    // screen's data view (resetting pagination back to page 1) even though
+    // nothing about the selection actually changed -- skip navigation
+    // entirely when the tab clicked is already the one showing.
+    if (key === activeKey) return;
     router.push(tab.href);
   }
 

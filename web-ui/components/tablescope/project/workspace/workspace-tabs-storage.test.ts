@@ -30,16 +30,26 @@ describe("workspace tabs storage", () => {
     expect(loadWorkspaceTabs("7")).toEqual([]);
   });
 
-  it("upsert dedupes by type+id and moves the tab to the end", () => {
+  it("upsert appends a newly opened tab at the end", () => {
     const t1 = tab("table", "1");
     const t2 = tab("dashboard", "2");
     let tabs = upsertWorkspaceTab([], t1);
     tabs = upsertWorkspaceTab(tabs, t2);
+
+    expect(tabs.map((t) => t.id)).toEqual(["1", "2"]);
+  });
+
+  it("re-activating an already-open tab updates it in place without moving it", () => {
+    const t1 = tab("table", "1");
+    const t2 = tab("dashboard", "2");
+    let tabs = upsertWorkspaceTab([], t1);
+    tabs = upsertWorkspaceTab(tabs, t2);
+    // Switching back to the first tab must not reorder the strip -- it
+    // should stay exactly where the user left it, just with fresh data.
     tabs = upsertWorkspaceTab(tabs, { ...t1, label: "renamed" });
 
-    expect(tabs).toHaveLength(2);
-    expect(tabs[tabs.length - 1].id).toBe("1");
-    expect(tabs[tabs.length - 1].label).toBe("renamed");
+    expect(tabs.map((t) => t.id)).toEqual(["1", "2"]);
+    expect(tabs[0].label).toBe("renamed");
   });
 
   it("caps the tab list at WORKSPACE_TABS_MAX", () => {

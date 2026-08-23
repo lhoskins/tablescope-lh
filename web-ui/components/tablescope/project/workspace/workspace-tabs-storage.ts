@@ -56,11 +56,20 @@ export function saveWorkspaceTabs(projectId: string, tabs: WorkspaceTab[]): void
   }
 }
 
-/** Add or move-to-most-recent a tab, capped at WORKSPACE_TABS_MAX. */
+/** Add a newly opened tab at the end, or update an already-open tab's
+ *  label/href in place -- switching to a tab that's already open must never
+ *  move it, or every click reshuffles the strip out from under the user. */
 export function upsertWorkspaceTab(tabs: WorkspaceTab[], tab: WorkspaceTab): WorkspaceTab[] {
-  const next = tabs.filter((t) => !(t.type === tab.type && t.id === tab.id));
-  next.push(tab);
-  return next.slice(-WORKSPACE_TABS_MAX);
+  const index = tabs.findIndex((t) => t.type === tab.type && t.id === tab.id);
+  if (index !== -1) {
+    const next = tabs.slice();
+    next[index] = tab;
+    return next;
+  }
+  const next = [...tabs, tab];
+  return next.length > WORKSPACE_TABS_MAX
+    ? next.slice(next.length - WORKSPACE_TABS_MAX)
+    : next;
 }
 
 export function closeWorkspaceTab(

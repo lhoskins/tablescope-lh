@@ -50,6 +50,37 @@ describe("WorkspaceTabsBar", () => {
     expect(push).toHaveBeenCalledWith("/projects/7/dashboards/2");
   });
 
+  it("clicking the already-active tab does not navigate", () => {
+    const activeItem = {
+      type: "table" as const,
+      id: "1",
+      numericId: 1,
+      label: "Monthly Revenue",
+      href: "/projects/7/queries?q=1",
+    };
+    render(<WorkspaceTabsBar projectId="7" activeItem={activeItem} />);
+    fireEvent.click(screen.getByRole("button", { name: "Monthly Revenue" }));
+    // Re-pushing the same URL was re-triggering the underlying data view
+    // (resetting pagination) even though nothing about the selection
+    // changed -- clicking the tab you're already on must be a no-op.
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("switching to a different open tab does not reorder the strip", () => {
+    saveWorkspaceTabs("7", [
+      { type: "table", id: "1", label: "Left Tab", href: "/projects/7/queries?q=1" },
+      { type: "table", id: "2", label: "Right Tab", href: "/projects/7/queries?q=2" },
+    ]);
+    render(
+      <WorkspaceTabsBar
+        projectId="7"
+        activeItem={{ type: "table", id: "2", numericId: 2, label: "Right Tab", href: "/projects/7/queries?q=2" }}
+      />,
+    );
+    const labels = screen.getAllByText(/^(Left Tab|Right Tab)$/).map((el) => el.textContent);
+    expect(labels).toEqual(["Left Tab", "Right Tab"]);
+  });
+
   it("closing the active tab navigates to the project overview when no tabs remain", () => {
     render(
       <WorkspaceTabsBar

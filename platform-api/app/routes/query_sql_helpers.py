@@ -368,6 +368,17 @@ async def _execute_sql_with_repair(
             r"TEIID30498",
             r"TEIID30492",
             r"TEIID30496",
+            # Function-dialect mismatches (e.g. the model reaching for
+            # DATEADD/DATE_FORMAT, which Teiid does not implement) and hard
+            # parse errors: a production trace showed these recurring
+            # unchanged across repair attempts against the same data
+            # sources, each attempt paying a full Teiid round trip plus a
+            # fix-sql LLM call before giving up -- multiplying a single
+            # slow, unfixable query into a much slower one.
+            r"TEIID30068",
+            r"TEIID30328",
+            r"TEIID30384",
+            r"TEIID31100",
             r"Group does not exist",
             r"is not defined by any relevant group",
             r"Table .* does not exist",
