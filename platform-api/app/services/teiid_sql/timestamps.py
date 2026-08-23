@@ -149,6 +149,194 @@ def _cleanup_stray_string_literals(sql: str) -> str:
     )
 
 
+# SQL Server/MySQL-style DATEADD unit -> Teiid TIMESTAMPADD interval constant.
+# Teiid has no DATEADD function at all (TEIID30068 "unknown form"), so a
+# generated query using it fails outright regardless of the amount/expr --
+# this is the single most common non-Teiid date function the model reaches
+# for in production.
+_DATEADD_UNIT_MAP = {
+    "year": "SQL_TSI_YEAR",
+    "years": "SQL_TSI_YEAR",
+    "yy": "SQL_TSI_YEAR",
+    "yyyy": "SQL_TSI_YEAR",
+    "quarter": "SQL_TSI_QUARTER",
+    "quarters": "SQL_TSI_QUARTER",
+    "qq": "SQL_TSI_QUARTER",
+    "q": "SQL_TSI_QUARTER",
+    "month": "SQL_TSI_MONTH",
+    "months": "SQL_TSI_MONTH",
+    "mm": "SQL_TSI_MONTH",
+    "week": "SQL_TSI_WEEK",
+    "weeks": "SQL_TSI_WEEK",
+    "wk": "SQL_TSI_WEEK",
+    "ww": "SQL_TSI_WEEK",
+    "day": "SQL_TSI_DAY",
+    "days": "SQL_TSI_DAY",
+    "dd": "SQL_TSI_DAY",
+    "d": "SQL_TSI_DAY",
+    "hour": "SQL_TSI_HOUR",
+    "hours": "SQL_TSI_HOUR",
+    "hh": "SQL_TSI_HOUR",
+    "minute": "SQL_TSI_MINUTE",
+    "minutes": "SQL_TSI_MINUTE",
+    "mi": "SQL_TSI_MINUTE",
+    "second": "SQL_TSI_SECOND",
+    "seconds": "SQL_TSI_SECOND",
+    "ss": "SQL_TSI_SECOND",
+    "s": "SQL_TSI_SECOND",
+}
+
+_DATEADD_RE = re.compile(r"DATEADD\s*\(", re.IGNORECASE)
+
+
+def _split_top_level_args(argstr: str) -> list[str]:
+    """Split a function-call argument string on top-level commas only,
+    respecting nested parens and quoted string literals."""
+    args: list[str] = []
+    depth = 0
+    in_quote: str | None = None
+    current: list[str] = []
+    for ch in argstr:
+        if in_quote:
+            current.append(ch)
+            if ch == in_quote:
+                in_quote = None
+            continue
+        if ch in ("'", '"'):
+            in_quote = ch
+            current.append(ch)
+        elif ch == "(":
+            depth += 1
+            current.append(ch)
+        elif ch == ")":
+            depth -= 1
+            current.append(ch)
+        elif ch == "," and depth == 0:
+            args.append("".join(current))
+            current = []
+        else:
+            current.append(ch)
+    if current:
+        args.append("".join(current))
+    return [a.strip() for a in args]
+
+
+def _find_matching_close_paren(sql: str, open_paren_index: int) -> int | None:
+    """Return the index just past the ``)`` matching the ``(`` at
+    ``open_paren_index - 1``, or ``None`` if the call is unbalanced."""
+    depth = 1
+    j = open_paren_index
+    in_quote: str | None = None
+    while j < len(sql) and depth > 0:
+        ch = sql[j]
+        if in_quote:
+            if ch == in_quote:
+                in_quote = None
+        elif ch in ("'", '"'):
+            in_quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        j += 1
+    return j if depth == 0 else None
+
+
+def _rewrite_dateadd(sql: str) -> str:
+    """Rewrite ``DATEADD(unit, amount, expr)`` to Teiid's
+    ``TIMESTAMPADD(SQL_TSI_<UNIT>, amount, expr)``.
+
+    Uses manual paren/quote-aware scanning (not a single regex) because the
+    third argument routinely contains its own parens, e.g.
+    ``DATEADD(year, -1, CURRENT_DATE())``.
+    """
+    result: list[str] = []
+    i = 0
+    while True:
+        m = _DATEADD_RE.search(sql, i)
+        if not m:
+            result.append(sql[i:])
+            break
+        result.append(sql[i:m.start()])
+        close = _find_matching_close_paren(sql, m.end())
+        if close is None:
+            # Unbalanced -- leave the rest untouched rather than risk
+            # mangling a query we can't safely parse.
+            result.append(sql[m.start():])
+            i = len(sql)
+            break
+        argstr = sql[m.end():close - 1]
+        args = _split_top_level_args(argstr)
+        if len(args) != 3:
+            result.append(sql[m.start():close])
+            i = close
+            continue
+        raw_unit = args[0].strip().strip("'\"").lower()
+        teiid_unit = _DATEADD_UNIT_MAP.get(raw_unit)
+        if teiid_unit is None:
+            result.append(sql[m.start():close])
+            i = close
+            continue
+        amount, expr = args[1], args[2]
+        result.append(f"TIMESTAMPADD({teiid_unit}, {amount}, {expr})")
+        i = close
+    return "".join(result)
+
+
+# MySQL DATE_FORMAT mask tokens -> Java SimpleDateFormat (Teiid's mask
+# dialect for FORMATTIMESTAMP). Ordered longest-first isn't needed since
+# every token here is exactly two characters (%X).
+_MYSQL_MASK_TOKENS = {
+    "%Y": "yyyy",
+    "%y": "yy",
+    "%m": "MM",
+    "%c": "M",
+    "%d": "dd",
+    "%e": "d",
+    "%H": "HH",
+    "%h": "hh",
+    "%I": "hh",
+    "%i": "mm",
+    "%s": "ss",
+    "%S": "ss",
+    "%p": "a",
+    "%M": "MMMM",
+    "%b": "MMM",
+    "%W": "EEEE",
+    "%a": "EEE",
+}
+
+_MYSQL_MASK_RE = re.compile("|".join(re.escape(k) for k in _MYSQL_MASK_TOKENS))
+
+_DATE_FORMAT_RE = re.compile(
+    r"DATE_FORMAT\s*\(\s*([^,]+?)\s*,\s*('(?:[^']|'')*')\s*\)",
+    re.IGNORECASE,
+)
+
+
+def _translate_mysql_mask(mask: str) -> str:
+    return _MYSQL_MASK_RE.sub(lambda m: _MYSQL_MASK_TOKENS[m.group(0)], mask)
+
+
+def _rewrite_date_format(sql: str) -> str:
+    """Rewrite MySQL-style ``DATE_FORMAT(expr, 'mask')`` to Teiid's
+    ``FORMATTIMESTAMP(expr, 'javaMask')``. Teiid has no DATE_FORMAT function
+    (TEIID30068 "unknown form"), so a generated query using it fails
+    outright regardless of the expr/mask.
+
+    Only matches a simple (non-comma, non-nested-call) first argument --
+    the common case of a bare or qualified/quoted column reference -- and
+    leaves anything else alone rather than risk mangling it.
+    """
+
+    def _repl(m: re.Match[str]) -> str:
+        expr = m.group(1)
+        mask = _translate_mysql_mask(_extract_string(m.group(2)))
+        return f"FORMATTIMESTAMP({expr}, '{mask}')"
+
+    return _DATE_FORMAT_RE.sub(_repl, sql)
+
+
 _DATE_TYPES = frozenset({"date", "datetime", "timestamp"})
 
 
@@ -258,6 +446,12 @@ def normalize_teiid_timestamps(
 
     # Clean duplicated string-literal fragments before parsing functions.
     sql = _cleanup_stray_string_literals(sql)
+
+    # Non-Teiid dialect functions the model reaches for that have no Teiid
+    # equivalent under the same name at all -- rewrite before the
+    # mask-inference passes below so their arguments are left untouched.
+    sql = _rewrite_dateadd(sql)
+    sql = _rewrite_date_format(sql)
 
     def _replace_to_timestamp(m: re.Match[str]) -> str:
         value = _extract_string(m.group(1))

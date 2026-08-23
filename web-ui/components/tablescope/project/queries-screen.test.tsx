@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
@@ -10,18 +10,22 @@ import type { ReactNode } from "react";
  * Builder must remain reachable as a clearly secondary/legacy action.
  */
 
+const router = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
+
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => router,
   usePathname: () => "/projects/42/queries",
   useSearchParams: () => new URLSearchParams(),
 }));
+
+const queriesData = vi.hoisted(() => ({ rows: [] as unknown[] }));
 
 vi.mock("@/lib/ui/use-project-data", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/lib/ui/use-project-data")>();
   return {
     ...actual,
-    useProjectQueries: () => ({ data: [], isLoading: false }),
+    useProjectQueries: () => ({ data: queriesData.rows, isLoading: false }),
     useProjectArchivedQueries: () => ({ data: [] }),
     useProjectDataSources: () => ({ data: [] }),
   };
@@ -74,6 +78,41 @@ function renderScreen() {
   );
 }
 
+function savedQuery(id: number, name: string) {
+  return {
+    id,
+    project_id: 42,
+    owner_id: null,
+    name,
+    description: null,
+    left_datasource: null,
+    right_datasource: null,
+    join_type: null,
+    left_column: null,
+    right_column: null,
+    sql_text: "SELECT 1",
+    ai_generated: false,
+    is_shared: false,
+    run_count: 0,
+    last_run_at: null,
+    avg_runtime_ms: null,
+    is_archived: false,
+    archived_at: null,
+    created_at: "2026-08-01T00:00:00Z",
+    updated_at: "2026-08-01T00:00:00Z",
+    owner_name: null,
+    origin: "manual",
+    origin_label: "Manual",
+    source_name: null,
+    has_outgoing_scope: false,
+    outgoing_scope_count: 0,
+    has_incoming_scope: false,
+    incoming_scope_count: 0,
+    has_active_scope: false,
+    active_scope_count: 0,
+  };
+}
+
 describe("QueriesScreen", () => {
   it("opens the AI Query Designer dialog instead of a single-line prompt bar", () => {
     renderScreen();
@@ -101,5 +140,22 @@ describe("QueriesScreen", () => {
     );
 
     expect(screen.getByTestId("query-builder-create")).toBeInTheDocument();
+  });
+
+  it("keeps the URL in sync when a table is opened by clicking its row", async () => {
+    queriesData.rows = [savedQuery(7, "Monthly Revenue")];
+    router.replace.mockClear();
+    renderScreen();
+
+    fireEvent.click(screen.getByText("Monthly Revenue"));
+
+    await waitFor(() =>
+      expect(router.replace).toHaveBeenCalledWith(
+        "/projects/42/queries?q=7",
+        { scroll: false },
+      ),
+    );
+
+    queriesData.rows = [];
   });
 });

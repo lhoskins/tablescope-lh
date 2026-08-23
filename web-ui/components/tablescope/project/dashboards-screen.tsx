@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IconChartBar,
@@ -41,6 +42,7 @@ export function DashboardsScreen({
   projectId: string;
   dashboardId?: string;
 }) {
+  const router = useRouter();
   const { data, isLoading } = useProjectDashboards(projectId);
   const { data: queries } = useProjectQueries(projectId);
   const { data: sources } = useProjectDataSources(projectId);
@@ -78,6 +80,29 @@ export function DashboardsScreen({
   useEffect(() => {
     setViewingId(dashboardId ? Number(dashboardId) : null);
   }, [dashboardId]);
+  // ── Keep the URL in sync with viewingId for any OTHER way it changes
+  // (a row click, "back to list") ────────────────────────────────────
+  // Those call setViewingId directly without touching the URL, so the URL
+  // can go stale relative to what's actually shown. If the user then
+  // clicks a workspace tab whose href happens to equal that stale URL,
+  // router.push sees no change and silently no-ops -- which looks like
+  // "the tab won't respond until I go back to the list first." Mirroring
+  // viewingId into the URL (via replace, so this never adds history
+  // entries) keeps it always accurate. Skipped on the very first render so
+  // a fresh /dashboards/<id> deep link isn't briefly overwritten.
+  const hasMountedRef = useRef(false);
+  useEffect(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return;
+    }
+    const target =
+      viewingId != null && viewingId > 0
+        ? `/projects/${projectId}/dashboards/${viewingId}`
+        : `/projects/${projectId}/dashboards`;
+    router.replace(target, { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewingId, projectId]);
   const viewing = rows.find((d) => d.id === viewingId) ?? null;
   const [designer, setDesigner] = useState<{
     open: boolean;

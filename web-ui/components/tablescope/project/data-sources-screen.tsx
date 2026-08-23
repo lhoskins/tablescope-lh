@@ -198,6 +198,30 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
     }
   }, [searchParamsDs]);
 
+  // ── Keep the URL in sync with detailKey for any OTHER way it changes
+  // (a row click, "back to list") ────────────────────────────────────
+  // Those change detailKey directly without touching the URL, so the URL
+  // can go stale relative to what's actually shown. If the user then
+  // clicks a workspace tab whose href happens to equal that stale URL,
+  // router.push sees no change and silently no-ops -- which looks like
+  // "the tab won't respond until I go back to the list first." Mirroring
+  // detailKey into the URL (via replace, so this never adds history
+  // entries) keeps it always accurate, so a tab click is always a real
+  // navigation. Skipped on the very first render so a fresh ?ds= deep link
+  // isn't briefly overwritten.
+  const hasMountedRef = useRef(false);
+  useEffect(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return;
+    }
+    const target = detailKey
+      ? `/projects/${projectId}/data-sources?ds=${encodeURIComponent(detailKey)}`
+      : `/projects/${projectId}/data-sources`;
+    router.replace(target, { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailKey, projectId]);
+
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     const pool = filter === "archive" ? archivedRows : rows;

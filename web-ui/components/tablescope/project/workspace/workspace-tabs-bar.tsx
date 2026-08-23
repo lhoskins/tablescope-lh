@@ -61,7 +61,7 @@ export function WorkspaceTabsBar({
               type="button"
               onClick={() => closeTab(tab)}
               aria-label={`Close ${tab.label}`}
-              className="rounded p-0.5 opacity-0 hover:bg-bg-tertiary group-hover:opacity-100"
+              className="rounded p-0.5 hover:bg-bg-tertiary"
             >
               <IconX size={11} />
             </button>

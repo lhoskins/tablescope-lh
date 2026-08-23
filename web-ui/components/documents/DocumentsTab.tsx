@@ -2,6 +2,7 @@
 
 
 import { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
@@ -32,6 +33,7 @@ export function DocumentsTab({
   canEdit: boolean;
   initialExpandedId?: number;
 }) {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const { toasts, push, dismiss } = useToasts();
 
@@ -86,6 +88,30 @@ export function DocumentsTab({
         ?.scrollIntoView({ behavior: "smooth", block: "center" });
     });
   }, [initialExpandedId, docs]);
+
+  // ── Keep the URL in sync with expandedId for any OTHER way it changes
+  // (clicking a row to expand/collapse it) ────────────────────────────
+  // That calls setExpandedId directly without touching the URL, so the URL
+  // can go stale relative to what's actually shown. If the user then
+  // clicks a workspace tab whose href happens to equal that stale URL,
+  // router.push sees no change and silently no-ops -- which looks like
+  // "the tab won't respond until I collapse the document first." Mirroring
+  // expandedId into the URL (via replace, so this never adds history
+  // entries) keeps it always accurate. Skipped on the very first render so
+  // a fresh /documents/<id> deep link isn't briefly overwritten.
+  const hasMountedRef = useRef(false);
+  useEffect(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return;
+    }
+    const target =
+      expandedId != null
+        ? `/projects/${projectId}/documents/${expandedId}`
+        : `/projects/${projectId}/documents`;
+    router.replace(target, { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedId, projectId]);
 
   // ── Upload ─────────────────────────────────────────────────────
   // Uploads run through the unified AI-Assisted Upload intake, which

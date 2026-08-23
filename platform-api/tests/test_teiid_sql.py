@@ -56,6 +56,58 @@ def test_normalize_timestamp_literals(sql: str, expected_substr: str) -> None:
     assert expected_substr in out
 
 
+@pytest.mark.parametrize(
+    ("sql", "expected_substr"),
+    [
+        (
+            # The exact query reported failing in production.
+            'SELECT COUNT(*) AS value_column FROM "it_change_requests_CSV" '
+            "WHERE \"RiskLevel\" = 'High' AND \"Status\" <> 'Closed' "
+            'AND "SubmittedDate" >= DATEADD(year, -1, CURRENT_DATE)',
+            "TIMESTAMPADD(SQL_TSI_YEAR, -1, CURRENT_DATE)",
+        ),
+        (
+            "SELECT DATEADD('month', -12, CURRENT_DATE()) FROM t",
+            "TIMESTAMPADD(SQL_TSI_MONTH, -12, CURRENT_DATE())",
+        ),
+        (
+            "SELECT DATEADD(day, 7, \"DueDate\") FROM t",
+            'TIMESTAMPADD(SQL_TSI_DAY, 7, "DueDate")',
+        ),
+    ],
+)
+def test_normalize_rewrites_dateadd_to_timestampadd(sql: str, expected_substr: str) -> None:
+    out = normalize_teiid_timestamps(sql)
+    assert expected_substr in out
+    assert "DATEADD" not in out.upper()
+
+
+def test_normalize_dateadd_unknown_unit_left_unchanged() -> None:
+    sql = "SELECT DATEADD(fortnight, 1, CURRENT_DATE) FROM t"
+    assert normalize_teiid_timestamps(sql) == sql
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected_substr"),
+    [
+        (
+            "SELECT DATE_FORMAT(A.RenewalMonth, '%Y-%m') FROM t",
+            "FORMATTIMESTAMP(A.RenewalMonth, 'yyyy-MM')",
+        ),
+        (
+            'SELECT DATE_FORMAT("SubmittedDate", \'%Y-%m-%d\') FROM t',
+            'FORMATTIMESTAMP("SubmittedDate", \'yyyy-MM-dd\')',
+        ),
+    ],
+)
+def test_normalize_rewrites_date_format_to_formattimestamp(
+    sql: str, expected_substr: str
+) -> None:
+    out = normalize_teiid_timestamps(sql)
+    assert expected_substr in out
+    assert "DATE_FORMAT" not in out.upper()
+
+
 def test_normalize_unknown_literal_left_unchanged() -> None:
     sql = "SELECT * FROM t WHERE d > CAST('not-a-date' AS timestamp)"
     assert normalize_teiid_timestamps(sql) == sql

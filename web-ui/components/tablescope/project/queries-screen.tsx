@@ -1,8 +1,8 @@
 "use client";
 
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   IconSparkles,
@@ -47,6 +47,7 @@ import { ArchiveCard } from "./queries-screen/archive-card";
 
 
 export function QueriesScreen({ projectId }: { projectId: string }) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const { data, isLoading } = useProjectQueries(projectId);
@@ -111,6 +112,30 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
       }
     }
   }, [searchParamsQ]);
+
+  // ── Keep the URL in sync with detailId for any OTHER way it changes
+  // (a row click, "back to list") ────────────────────────────────────
+  // Those change detailId directly without touching the URL, so the URL can
+  // go stale relative to what's actually shown. If the user then clicks a
+  // workspace tab whose href happens to equal that stale URL, router.push
+  // sees no change and silently no-ops -- which looks like "the tab won't
+  // respond until I go back to the list first." Mirroring detailId into the
+  // URL (via replace, so this never adds history entries) keeps it always
+  // accurate, so a tab click is always a real navigation. Skipped on the
+  // very first render so a fresh ?q= deep link isn't briefly overwritten.
+  const hasMountedRef = useRef(false);
+  useEffect(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return;
+    }
+    const target =
+      detailId != null
+        ? `/projects/${projectId}/queries?q=${detailId}`
+        : `/projects/${projectId}/queries`;
+    router.replace(target, { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailId, projectId]);
 
   // ── "Create Query with AI" dialog ────────────────────────────────────
   // Mirrors the AI Dashboard Designer's flow: a parameterized dialog
