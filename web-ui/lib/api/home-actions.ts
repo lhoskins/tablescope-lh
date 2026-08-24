@@ -21,6 +21,10 @@ export interface HomeActionSummary {
   };
   assigned: HomeActionItem[];
   updates: HomeActionItem[];
+  /** True when `updates` was filtered down to items matching the user's
+   *  "My Focus" topics; false when no focus is set or nothing matched, in
+   *  which case `updates` falls back to plain recency. */
+  updates_matched_focus: boolean;
 }
 
 export function getHomeActionSummary(): Promise<HomeActionSummary> {

@@ -23,10 +23,12 @@ from app.models.project import Project, ProjectMember
 from app.models.project_action import ProjectAction
 from app.models.project_asset import ProjectAsset
 from app.models.saved_query import SavedQuery
+from app.models.user import User
 from app.routes.projects_shared import (
     _derive_ai_status,
     _home_context,
     _owner,
+    _ProjectMeta,
     _shared_by,
 )
 from app.schemas.project import (
@@ -55,6 +57,29 @@ def _action_home_item(action: ProjectAction, project: Project) -> dict:
     }
 
 
+def _home_focus_terms(user: User | None) -> list[str]:
+    """The user's "My Focus" phrases, lowercased for substring matching."""
+    if user is None:
+        return []
+    intelligence = (user.preferences or {}).get("intelligence") or {}
+    terms = intelligence.get("home_focus") or []
+    return [term.strip().lower() for term in terms if isinstance(term, str) and term.strip()]
+
+
+def _matches_focus(action: ProjectAction, project: _ProjectMeta, focus_terms: list[str]) -> bool:
+    """True if the action's title or project name mentions a focus phrase.
+
+    A lightweight substring match rather than an AI call -- cheap enough to
+    run over every candidate update on every Home load, and good enough to
+    turn "Revenue vs backlog" into a real filter instead of a stored,
+    never-read preference.
+    """
+    if not focus_terms:
+        return False
+    haystack = f"{action.title} {project.name}".lower()
+    return any(term in haystack for term in focus_terms)
+
+
 @router.get("/actions-home")
 async def get_home_action_summary(
     session: AsyncSession = Depends(get_db),
@@ -75,7 +100,10 @@ async def get_home_action_summary(
             },
             "assigned": [],
             "updates": [],
+            "updates_matched_focus": False,
         }
+
+    focus_terms = _home_focus_terms(await session.get(User, context.user_id))
 
     now = datetime.now(UTC)
     week_end = now + timedelta(days=7)
@@ -130,14 +158,26 @@ async def get_home_action_summary(
             .limit(6)
         )
     )
-    update_rows = list(
+    # Pull a wider candidate window than we return so a focus match further
+    # back in time can still surface -- then fall back to the plain recency
+    # order (the pre-focus behavior) whenever nothing matches, so users who
+    # haven't set a focus, or whose focus doesn't hit anything recent, still
+    # see their most recent updates instead of an empty list.
+    update_candidates = list(
         await session.scalars(
             select(ProjectAction)
             .where(*visible)
             .order_by(ProjectAction.updated_at.desc())
-            .limit(5)
+            .limit(20)
         )
     )
+    focus_matches = [
+        action
+        for action in update_candidates
+        if _matches_focus(action, projects[action.project_id], focus_terms)
+    ]
+    updates_matched_focus = bool(focus_matches)
+    update_rows = (focus_matches or update_candidates)[:5]
 
     return {
         "highlights": {
@@ -153,6 +193,7 @@ async def get_home_action_summary(
             _action_home_item(action, projects[action.project_id])
             for action in update_rows
         ],
+        "updates_matched_focus": updates_matched_focus,
     }
 
 

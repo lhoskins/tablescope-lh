@@ -168,7 +168,14 @@ export function PersonalizedHome({
           </div>
         </div>
         <div>
-          <div className="mb-3"><h2 className="text-h3 text-ink-primary">Updates for you</h2><p className="mt-0.5 text-small text-ink-tertiary">Recent changes across your project actions.</p></div>
+          <div className="mb-3">
+            <h2 className="text-h3 text-ink-primary">Updates for you</h2>
+            <p className="mt-0.5 text-small text-ink-tertiary">
+              {actionSummary?.updates_matched_focus
+                ? "Only changes connected to your focus."
+                : "Recent changes across your project actions."}
+            </p>
+          </div>
           <div className="overflow-hidden rounded-xl border border-line-tertiary bg-bg-primary px-4 shadow-sm">
             {actionSummary?.updates.length ? actionSummary.updates.slice(0, 4).map((action) => (
               <Link key={action.id} href={`/projects/${action.project_id}/actions`} className="flex gap-3 border-b border-line-tertiary py-3 last:border-b-0">

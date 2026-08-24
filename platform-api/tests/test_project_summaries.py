@@ -177,6 +177,79 @@ async def test_home_action_summary_is_cross_project_and_user_scoped(
     assert len(body["assigned"]) == 1
     assert body["assigned"][0]["title"] == "Resolve blocked rollout"
     assert body["assigned"][0]["project_name"] == "Home Operations"
+    assert body["updates_matched_focus"] is False
+
+
+async def test_home_action_summary_updates_prioritize_the_users_focus(
+    client, service_headers
+) -> None:
+    """Setting a "My Focus" topic should filter Home's Updates feed down to
+    actions connected to it, instead of the plain-recency list every user
+    (focus set or not) got before."""
+    _tenant, user, headers = await _setup(client, service_headers)
+
+    r = await client.post(
+        "/api/projects", json={"name": "Sales Operations"}, headers=headers
+    )
+    assert r.status_code == 201
+    revenue_project_id = r.json()["id"]
+
+    r = await client.post(
+        "/api/projects", json={"name": "Support Desk"}, headers=headers
+    )
+    assert r.status_code == 201
+    support_project_id = r.json()["id"]
+
+    r = await client.post(
+        f"/api/projects/{revenue_project_id}/actions",
+        json={
+            "title": "Approve monthly backlog recovery plan",
+            "status": "in_progress",
+            "priority": "high",
+            "owner_user_id": user["id"],
+            "source_type": "manual",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+
+    r = await client.post(
+        f"/api/projects/{support_project_id}/actions",
+        json={
+            "title": "Rotate on-call schedule",
+            "status": "in_progress",
+            "priority": "low",
+            "owner_user_id": user["id"],
+            "source_type": "manual",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+
+    # No focus set yet -- Updates falls back to plain recency (both actions).
+    r = await client.get("/api/projects/actions-home", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["updates_matched_focus"] is False
+    assert {u["title"] for u in body["updates"]} == {
+        "Approve monthly backlog recovery plan",
+        "Rotate on-call schedule",
+    }
+
+    r = await client.patch(
+        "/api/users/preferences",
+        json={"intelligence": {"home_focus": ["backlog"]}},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+
+    r = await client.get("/api/projects/actions-home", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["updates_matched_focus"] is True
+    assert [u["title"] for u in body["updates"]] == [
+        "Approve monthly backlog recovery plan"
+    ]
 
 
 async def test_route_prompt_targets_existing_project(

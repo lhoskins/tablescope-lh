@@ -37,7 +37,7 @@ vi.mock("@/components/tablescope/home/save-insight-to-dashboard-modal", () => ({
   SaveInsightToDashboardModal: vi.fn(() => <div data-testid="save-modal" />),
 }));
 
-import { QuerySuggestionPreviewModal } from "./query-suggestion-preview-modal";
+import { QuerySuggestionPreviewModal, evaluateChartQuality } from "./query-suggestion-preview-modal";
 
 function renderModal() {
   const client = new QueryClient({
@@ -128,5 +128,37 @@ describe("QuerySuggestionPreviewModal", () => {
         }),
       ),
     );
+  });
+});
+
+describe("evaluateChartQuality", () => {
+  const columns = ["month", "revenue"];
+  const rows = [{ month: "Jan", revenue: 10 }, { month: "Feb", revenue: null }];
+
+  it("passes compatibility when every required field is a real column", () => {
+    const { compatibility } = evaluateChartQuality({ type: "bar", xField: "month", yField: "revenue" }, columns, rows);
+    expect(compatibility).toEqual({ ok: true, label: "All required fields" });
+  });
+
+  it("fails compatibility and names the missing field", () => {
+    const { compatibility } = evaluateChartQuality({ type: "bar", xField: "month", yField: "profit" }, columns, rows);
+    expect(compatibility.ok).toBe(false);
+    expect(compatibility.label).toContain("profit");
+  });
+
+  it("reports how many rows actually carry the measured value", () => {
+    const { dataQuality } = evaluateChartQuality({ type: "bar", xField: "month", yField: "revenue" }, columns, rows);
+    expect(dataQuality).toEqual({ ok: true, label: "1/2 rows with data" });
+  });
+
+  it("flags data quality as failing when no row has the measured value", () => {
+    const allNull = [{ month: "Jan", revenue: null }, { month: "Feb", revenue: null }];
+    const { dataQuality } = evaluateChartQuality({ type: "bar", xField: "month", yField: "revenue" }, columns, allNull);
+    expect(dataQuality.ok).toBe(false);
+  });
+
+  it("flags an empty preview as failing data quality", () => {
+    const { dataQuality } = evaluateChartQuality({ type: "bar", xField: "month", yField: "revenue" }, columns, []);
+    expect(dataQuality).toEqual({ ok: false, label: "No preview rows returned" });
   });
 });

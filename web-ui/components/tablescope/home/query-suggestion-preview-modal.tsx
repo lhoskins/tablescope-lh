@@ -5,7 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   IconAlertTriangle, IconChartBar, IconCheck, IconChevronDown,
   IconChevronRight, IconDatabase, IconDeviceFloppy, IconLayoutDashboard,
-  IconLoader2, IconPin, IconSparkles,
+  IconLoader2, IconPin, IconSparkles, IconX,
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { useToasts } from "@/components/ui/toast";
@@ -77,6 +77,45 @@ function buildCandidates(columns: string[], rows: Record<string, unknown>[], pre
     };
     return { id: `${viz.type}-${primary}-${secondary ?? ""}`, label: labelText, description: descriptions[viz.type] ?? "A compatible view of the generated result.", fit: index === 0 ? "Best fit" : index === 1 ? "Strong" : "Compatible", viz };
   });
+}
+
+type QualityCheck = { ok: boolean; label: string };
+
+/**
+ * Real checks against the selected chart's actual fields and rows, replacing
+ * three indicators that previously always rendered a green check regardless
+ * of whether the data behind them supported it. Compatibility gates "Add
+ * selected chart to Home" -- data quality and layout are informational.
+ */
+export function evaluateChartQuality(
+  viz: SuggestedVisualization,
+  columns: string[],
+  rows: Record<string, unknown>[],
+): { compatibility: QualityCheck; dataQuality: QualityCheck; layout: QualityCheck } {
+  const requiredFields =
+    viz.type === "kpi"
+      ? [viz.metricField]
+      : viz.type === "combo"
+        ? [viz.xField, viz.yField, viz.y2Field]
+        : [viz.xField, viz.yField ?? viz.metricField];
+  const missing = requiredFields.filter(
+    (field): field is string => field != null && field !== "" && !columns.includes(field),
+  );
+  const compatibility: QualityCheck = missing.length
+    ? { ok: false, label: `Missing ${missing.join(", ")}` }
+    : { ok: true, label: "All required fields" };
+
+  const measureField = viz.yField ?? viz.metricField;
+  const populated = measureField
+    ? rows.filter((row) => isNumeric(row[measureField])).length
+    : 0;
+  const dataQuality: QualityCheck = !rows.length
+    ? { ok: false, label: "No preview rows returned" }
+    : !measureField
+      ? { ok: true, label: `${rows.length} preview rows` }
+      : { ok: populated > 0, label: `${populated}/${rows.length} rows with data` };
+
+  return { compatibility, dataQuality, layout: { ok: true, label: "Responsive widget" } };
 }
 
 function toWidget(title: string, queryId: number, viz: SuggestedVisualization, columns: string[], rows: Record<string, unknown>[], size: "compact" | "standard" | "wide"): WidgetConfig {
@@ -151,6 +190,10 @@ export function QuerySuggestionPreviewModal({ open, projectId, title, descriptio
   const candidates = useMemo(() => result ? buildCandidates(result.columns, result.rows, preferred) : [], [result, preferred]);
   const selected = candidates.find((candidate) => candidate.id === selectedId) ?? candidates[0];
   const viz = selected?.viz ?? preferred;
+  const quality = useMemo(
+    () => (result ? evaluateChartQuality(viz, result.columns, result.rows) : null),
+    [result, viz],
+  );
   const project = projects?.find((item) => Number(item.id) === projectId);
   const previewCard: InsightCard | null = result ? {
     id: `query-preview-${projectId}`, projectId: String(projectId), projectName: project?.name ?? "", projectColor: project?.accent ?? "",
@@ -179,7 +222,7 @@ export function QuerySuggestionPreviewModal({ open, projectId, title, descriptio
       <div className="mx-auto my-4 w-full max-w-6xl rounded-xl border border-line-tertiary bg-bg-secondary shadow-xl">
         <header className="flex flex-wrap items-start justify-between gap-4 border-b border-line-tertiary bg-bg-primary px-5 py-4">
           <div><p className="text-caption text-ink-tertiary">Home / New chart suggestion</p><h2 className="mt-1 flex items-center gap-2 text-h1 text-ink-primary"><IconSparkles size={20} className="text-brand-500" />Preview chart suggestions</h2></div>
-          <div className="flex items-center gap-2"><Button variant="secondary" size="md" onClick={onClose}>Cancel</Button><Button variant="primary" size="md" disabled={!selected || addToHome.isPending || run.isPending} onClick={() => addToHome.mutate()}>{addToHome.isPending ? <IconLoader2 size={15} className="animate-spin" /> : <IconPin size={15} />}Add selected chart to Home</Button></div>
+          <div className="flex items-center gap-2"><Button variant="secondary" size="md" onClick={onClose}>Cancel</Button><Button variant="primary" size="md" disabled={!selected || !quality?.compatibility.ok || addToHome.isPending || run.isPending} onClick={() => addToHome.mutate()}>{addToHome.isPending ? <IconLoader2 size={15} className="animate-spin" /> : <IconPin size={15} />}Add selected chart to Home</Button></div>
         </header>
         <div className="p-5">
           <section className="mb-4 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-line-tertiary bg-bg-primary px-4 py-3">
@@ -195,8 +238,27 @@ export function QuerySuggestionPreviewModal({ open, projectId, title, descriptio
                 <div className="flex items-start justify-between gap-4 border-b border-line-tertiary pb-3"><div><h3 className="text-h2 text-ink-primary">{selected.label}</h3><p className="mt-1 text-caption text-ink-tertiary">Preview mode · No chart has been added yet</p></div><span className="rounded-full bg-bg-secondary px-2.5 py-1 text-caption text-ink-secondary">{selected.viz.type.replace("_", " ")}</span></div>
                 <div className="min-h-[320px] py-4"><ResultChart columns={result.columns} rows={result.rows} viz={selected.viz} /></div>
                 <div className="grid gap-3 border-y border-line-tertiary py-3 sm:grid-cols-3">
-                  {["All required fields", `${result.rows.length} preview rows`, "Responsive widget"].map((value, index) => <div key={value} className="sm:border-r sm:border-line-tertiary sm:last:border-r-0 sm:px-3"><p className="text-[10px] font-medium uppercase tracking-wide text-ink-tertiary">{["Chart compatibility", "Data quality", "Home layout"][index]}</p><p className="mt-1 flex items-center gap-1.5 text-small text-ink-primary"><span className="flex h-4 w-4 items-center justify-center rounded-full bg-success-bg text-success"><IconCheck size={11} /></span>{value}</p></div>)}
+                  {quality && [
+                    { name: "Chart compatibility", check: quality.compatibility },
+                    { name: "Data quality", check: quality.dataQuality },
+                    { name: "Home layout", check: quality.layout },
+                  ].map(({ name, check }) => (
+                    <div key={name} className="sm:border-r sm:border-line-tertiary sm:last:border-r-0 sm:px-3">
+                      <p className="text-[10px] font-medium uppercase tracking-wide text-ink-tertiary">{name}</p>
+                      <p className="mt-1 flex items-center gap-1.5 text-small text-ink-primary">
+                        <span className={`flex h-4 w-4 items-center justify-center rounded-full ${check.ok ? "bg-success-bg text-success" : "bg-danger-bg text-danger"}`}>
+                          {check.ok ? <IconCheck size={11} /> : <IconX size={11} />}
+                        </span>
+                        {check.label}
+                      </p>
+                    </div>
+                  ))}
                 </div>
+                {quality && !quality.compatibility.ok && (
+                  <p className="mt-2 text-caption text-danger">
+                    This chart can&apos;t be added yet -- pick another suggestion or adjust the query.
+                  </p>
+                )}
                 <div className="grid gap-3 py-4 sm:grid-cols-2 xl:grid-cols-4">
                   <label className="text-caption text-ink-tertiary">PROJECT<input disabled value={project?.name ?? `Project ${projectId}`} className="mt-1 h-9 w-full rounded-md border border-line-tertiary bg-bg-secondary px-2 text-small text-ink-primary" /></label>
                   <label className="text-caption text-ink-tertiary">PERIOD<select className="mt-1 h-9 w-full rounded-md border border-line-tertiary bg-bg-primary px-2 text-small text-ink-primary"><option>From generated query</option></select></label>
