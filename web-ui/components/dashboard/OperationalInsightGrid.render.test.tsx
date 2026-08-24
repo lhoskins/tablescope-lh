@@ -116,6 +116,52 @@ describe("OperationalInsightGrid", () => {
     expect(patch).toBeGreaterThan(4);
   });
 
+  it("drags a KPI card's resize handle vertically and reports the new height", () => {
+    const onLayoutChange = vi.fn();
+    render(
+      <OperationalInsightGrid
+        widgets={[kpiWidget()]}
+        widgetData={{}}
+        operationalWidgets={[]}
+        editingLayout
+        onEditWidget={noop}
+        onElementClick={noop}
+        onLayoutChange={onLayoutChange}
+      />,
+    );
+    const grid = document.querySelector('[class*="kpiGrid"]') as HTMLElement;
+    vi.spyOn(grid, "getBoundingClientRect").mockReturnValue({ width: 1200 } as DOMRect);
+
+    const handle = screen.getByTitle("Drag to resize");
+    fireEvent.mouseDown(handle, { clientX: 0, clientY: 0 });
+    fireEvent.mouseMove(window, { clientX: 0, clientY: 60 });
+    fireEvent.mouseUp(window);
+
+    const options = onLayoutChange.mock.calls.at(-1)?.[0][0].visualizationOptions;
+    expect(options.gridHeightPx).toBeGreaterThan(96);
+  });
+
+  it("does not stretch a KPI card to a neighboring chart's height", () => {
+    const widgets = [
+      kpiWidget({ id: "kpi-1", title: "Total Revenue", position: 0 }),
+      chartWidget({ id: "chart-1", title: "Monthly Revenue", position: 1 }),
+    ];
+    render(
+      <OperationalInsightGrid
+        widgets={widgets}
+        widgetData={{}}
+        operationalWidgets={[]}
+        onEditWidget={noop}
+        onElementClick={noop}
+      />,
+    );
+    const grid = document.querySelector('[class*="kpiGrid"]') as HTMLElement;
+    expect(grid.style.alignItems).toBe("start");
+
+    const kpiCard = screen.getByText("Total Revenue").closest("div.relative") as HTMLElement;
+    expect(kpiCard.style.height).toBe("96px");
+  });
+
   it("drags a chart's resize handle and reports the new width and height", () => {
     const onLayoutChange = vi.fn();
     render(

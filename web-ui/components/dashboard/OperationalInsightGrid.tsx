@@ -213,6 +213,8 @@ const GRID_GAP_PX = 10; // matches .kpiGrid's `gap: 0.625rem` in the CSS module
 const CHART_MIN_HEIGHT_PX = 160;
 const CHART_MAX_HEIGHT_PX = 640;
 const KPI_HEIGHT_PX = 96;
+const KPI_MIN_HEIGHT_PX = 72;
+const KPI_MAX_HEIGHT_PX = 320;
 
 function sortByPosition(items: WidgetConfig[]): WidgetConfig[] {
   return [...items].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
@@ -368,7 +370,14 @@ export function OperationalInsightGrid({
   // height. Reads the grid's actual rendered width once, at drag start, to
   // convert a pixel delta into a column-count delta.
   const startResize = useCallback(
-    (widget: WidgetConfig, startSpan: number, startHeightPx: number | undefined, resizeHeight: boolean) =>
+    (
+        widget: WidgetConfig,
+        startSpan: number,
+        startHeightPx: number | undefined,
+        resizeHeight: boolean,
+        minHeightPx: number,
+        maxHeightPx: number,
+      ) =>
       (event: React.MouseEvent) => {
         event.preventDefault();
         event.stopPropagation();
@@ -385,7 +394,7 @@ export function OperationalInsightGrid({
             GRID_MAX_SPAN,
           );
           const heightPx = resizeHeight && startHeightPx != null
-            ? clamp(startHeightPx + (moveEvent.clientY - startY), CHART_MIN_HEIGHT_PX, CHART_MAX_HEIGHT_PX)
+            ? clamp(startHeightPx + (moveEvent.clientY - startY), minHeightPx, maxHeightPx)
             : undefined;
           setResizePreview({ id: widget.id, span, heightPx });
         };
@@ -413,12 +422,14 @@ export function OperationalInsightGrid({
     startSpan: number,
     startHeightPx: number | undefined,
     resizeHeight: boolean,
+    minHeightPx: number = CHART_MIN_HEIGHT_PX,
+    maxHeightPx: number = CHART_MAX_HEIGHT_PX,
   ) =>
     editingLayout && (
       <div
         draggable={false}
         onDragStart={(event) => event.stopPropagation()}
-        onMouseDown={startResize(widget, startSpan, startHeightPx, resizeHeight)}
+        onMouseDown={startResize(widget, startSpan, startHeightPx, resizeHeight, minHeightPx, maxHeightPx)}
         title="Drag to resize"
         className={cn(
           "absolute bottom-1 right-1 z-10 rounded-sm border border-line-secondary bg-bg-primary opacity-70 hover:opacity-100",
@@ -443,15 +454,23 @@ export function OperationalInsightGrid({
       )}
 
       {orderedWidgets.length > 0 && (
-        <div ref={gridRef} className={`${styles.kpiGrid} mt-3`}>
+        <div ref={gridRef} className={`${styles.kpiGrid} mt-3`} style={{ alignItems: "start" }}>
           {orderedWidgets.map((widget) => {
             const preview = resizePreview?.id === widget.id ? resizePreview : null;
 
             if (widget.type === "kpi") {
               const span = preview?.span ?? widget.visualizationOptions?.gridSpan ?? defaultSpan(widget, 0);
+              const kpiHeightPx =
+                preview?.heightPx ?? widget.visualizationOptions?.gridHeightPx ?? KPI_HEIGHT_PX;
               return (
                 <div key={widget.id} style={{ gridColumn: `span ${span}` }} {...dragProps(widget.id)}>
-                  <Card className={cn("relative h-full p-3", editingLayout && "cursor-grab border-dashed")} style={{ minHeight: KPI_HEIGHT_PX }}>
+                  <Card
+                    className={cn(
+                      "relative flex flex-col overflow-hidden p-3",
+                      editingLayout && "cursor-grab border-dashed",
+                    )}
+                    style={{ height: kpiHeightPx }}
+                  >
                     <div className="flex items-start justify-between gap-2">
                       <span className="truncate text-[11px] font-semibold uppercase tracking-[0.02em] text-ink-secondary">
                         {widget.title}
@@ -477,13 +496,15 @@ export function OperationalInsightGrid({
                         )}
                       </div>
                     </div>
-                    <WidgetRenderer
-                      widget={widget}
-                      data={widgetData[widget.id] ?? []}
-                      operational
-                      onElementClick={(event) => onElementClick(widget, event)}
-                    />
-                    {resizeHandle(widget, span, undefined, false)}
+                    <div className="min-h-0 flex-1">
+                      <WidgetRenderer
+                        widget={widget}
+                        data={widgetData[widget.id] ?? []}
+                        operational
+                        onElementClick={(event) => onElementClick(widget, event)}
+                      />
+                    </div>
+                    {resizeHandle(widget, span, kpiHeightPx, true, KPI_MIN_HEIGHT_PX, KPI_MAX_HEIGHT_PX)}
                   </Card>
                 </div>
               );
