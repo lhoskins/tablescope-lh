@@ -254,6 +254,49 @@ def _strip_output_alias(select_item: str) -> tuple[str, str | None]:
     return expr, alias
 
 
+def _top_level_keyword_index(sql: str, start: int, keyword: str) -> int | None:
+    """Find the first ``keyword`` at paren-depth 0, outside any quoted string,
+    starting the search at ``start``. Returns its start index, or ``None``.
+
+    A plain ``re.search`` for a clause keyword like ``FROM`` matches the
+    *first* occurrence anywhere in the string -- including one nested inside
+    the SELECT list itself, e.g. ``EXTRACT(QUARTER FROM "Month")``. That
+    truncated the SELECT-list extraction in ``rebuild_group_by_from_select``
+    at EXTRACT's own ``FROM``, well before the query's real FROM clause,
+    silently corrupting the rebuilt GROUP BY (or dropping it) for any query
+    combining an aggregate with an EXTRACT(... FROM ...) expression -- one of
+    the most common shapes for a "revenue by quarter" style question.
+    """
+    pattern = re.compile(r"\b" + keyword + r"\b", re.IGNORECASE)
+    depth = 0
+    in_quote: str | None = None
+    i = start
+    n = len(sql)
+    while i < n:
+        ch = sql[i]
+        if in_quote:
+            if ch == in_quote:
+                in_quote = None
+            i += 1
+            continue
+        if ch in ("'", '"'):
+            in_quote = ch
+            i += 1
+            continue
+        if ch == "(":
+            depth += 1
+            i += 1
+            continue
+        if ch == ")":
+            depth -= 1
+            i += 1
+            continue
+        if depth == 0 and pattern.match(sql, i):
+            return i
+        i += 1
+    return None
+
+
 def _next_clause_position(sql: str, after: int) -> int | None:
     """Return the earliest position of a following SQL clause, or None."""
     positions: list[int] = []
@@ -286,11 +329,14 @@ def rebuild_group_by_from_select(sql: str) -> str:
     if not sql:
         return sql
 
-    select_match = re.search(r"\bSELECT\s+(.+?)\bFROM\b", sql, re.IGNORECASE | re.DOTALL)
-    if not select_match:
+    select_kw = re.search(r"\bSELECT\b", sql, re.IGNORECASE)
+    if not select_kw:
+        return sql
+    from_idx = _top_level_keyword_index(sql, select_kw.end(), "FROM")
+    if from_idx is None:
         return sql
 
-    select_body = select_match.group(1)
+    select_body = sql[select_kw.end():from_idx]
     select_items = [item.strip() for item in _split_top_level(select_body)]
 
     non_aggregate_exprs: list[str] = []
