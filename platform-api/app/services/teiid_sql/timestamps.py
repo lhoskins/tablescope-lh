@@ -337,6 +337,27 @@ def _rewrite_date_format(sql: str) -> str:
     return _DATE_FORMAT_RE.sub(_repl, sql)
 
 
+# EXTRACT("MONTH" FROM expr) / EXTRACT('QUARTER' FROM expr) -- Teiid's
+# EXTRACT grammar requires the datetime field (YEAR, QUARTER, MONTH, ...) as
+# a bare keyword. Quoting it (the model reaches for both single and double
+# quotes, likely primed by how heavily this codebase double-quotes column
+# identifiers elsewhere) makes Teiid's parser treat it as an
+# identifier/literal in a position that requires a keyword -- a hard syntax
+# error (TEIID31100) regardless of which datepart or expr follows.
+_EXTRACT_QUOTED_DATEPART_RE = re.compile(
+    r'EXTRACT\s*\(\s*["\']([A-Za-z_]+)["\']\s+FROM',
+    re.IGNORECASE,
+)
+
+
+def _rewrite_extract_quoted_datepart(sql: str) -> str:
+    """Rewrite ``EXTRACT("MONTH" FROM expr)`` to Teiid's bare-keyword
+    ``EXTRACT(MONTH FROM expr)``."""
+    return _EXTRACT_QUOTED_DATEPART_RE.sub(
+        lambda m: f"EXTRACT({m.group(1)} FROM", sql
+    )
+
+
 _DATE_TYPES = frozenset({"date", "datetime", "timestamp"})
 
 
@@ -437,6 +458,9 @@ def normalize_teiid_timestamps(
       the column so a mask can be inferred.
     - ``PARSETIMESTAMP("col", 'mask')`` / ``PARSEDATE("col", 'mask')`` when
       the column is typed as a date or a sample reveals the real format.
+    - ``EXTRACT("MONTH" FROM expr)`` -- a quoted datetime field, which Teiid's
+      grammar requires as a bare keyword -- rewritten to ``EXTRACT(MONTH FROM
+      expr)``.
 
     Unknown column casts are left as-is; the query will fail in the normal
     Teiid execution path and can be repaired by the existing AI SQL fix loop.
@@ -452,6 +476,7 @@ def normalize_teiid_timestamps(
     # mask-inference passes below so their arguments are left untouched.
     sql = _rewrite_dateadd(sql)
     sql = _rewrite_date_format(sql)
+    sql = _rewrite_extract_quoted_datepart(sql)
 
     def _replace_to_timestamp(m: re.Match[str]) -> str:
         value = _extract_string(m.group(1))
