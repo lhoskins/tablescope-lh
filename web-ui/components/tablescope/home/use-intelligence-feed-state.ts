@@ -278,6 +278,7 @@ export function useIntelligenceFeedState({
         cross_project: true,
         email_digest: false,
         granularity: 3,
+        home_focus: [],
       };
       setSettings(intel);
 

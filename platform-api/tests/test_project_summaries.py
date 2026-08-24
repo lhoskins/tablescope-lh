@@ -145,6 +145,40 @@ async def test_project_summaries_counts_and_status(
     assert row["member_count"] >= 1
 
 
+async def test_home_action_summary_is_cross_project_and_user_scoped(
+    client, service_headers
+) -> None:
+    _tenant, user, headers = await _setup(client, service_headers)
+    r = await client.post(
+        "/api/projects",
+        json={"name": "Home Operations"},
+        headers=headers,
+    )
+    assert r.status_code == 201
+    project_id = r.json()["id"]
+
+    r = await client.post(
+        f"/api/projects/{project_id}/actions",
+        json={
+            "title": "Resolve blocked rollout",
+            "status": "blocked",
+            "priority": "high",
+            "owner_user_id": user["id"],
+            "source_type": "manual",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+
+    r = await client.get("/api/projects/actions-home", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["highlights"]["needs_attention"] == 1
+    assert len(body["assigned"]) == 1
+    assert body["assigned"][0]["title"] == "Resolve blocked rollout"
+    assert body["assigned"][0]["project_name"] == "Home Operations"
+
+
 async def test_route_prompt_targets_existing_project(
     client, service_headers
 ) -> None:

@@ -14,6 +14,6 @@ export function saveQuerySuggestion(body: {
   name: string;
   description?: string;
   sql_text: string;
-}): Promise<{ name: string; status: string }> {
+}): Promise<{ name: string; status: string; query_id: number; sql_text: string }> {
   return apiClient.post("/api/ai/actions/save-query", body);
 }

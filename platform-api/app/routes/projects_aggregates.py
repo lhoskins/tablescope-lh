@@ -6,6 +6,7 @@ Split from ``projects.py``; see ``projects_shared.py`` for the helper cluster.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, or_, select
@@ -34,6 +35,125 @@ from app.schemas.project import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+
+def _action_home_item(action: ProjectAction, project: Project) -> dict:
+    """Serialize the compact action shape used by the personalized Home page."""
+    return {
+        "id": action.id,
+        "project_id": action.project_id,
+        "project_name": project.name,
+        "title": action.title,
+        "status": action.status,
+        "priority": action.priority,
+        "percent_complete": action.percent_complete,
+        "due_date": action.due_date.isoformat() if action.due_date else None,
+        "completed_at": (
+            action.completed_at.isoformat() if action.completed_at else None
+        ),
+        "updated_at": action.updated_at.isoformat() if action.updated_at else None,
+    }
+
+
+@router.get("/actions-home")
+async def get_home_action_summary(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict:
+    """Return one tenant-safe action rollup for the personalized Home page.
+
+    Keeping this aggregation server-side avoids loading every visible project
+    and issuing an actions request for each one whenever Home opens.
+    """
+    projects, _ = await _home_context(session, context)
+    if not projects:
+        return {
+            "highlights": {
+                "needs_attention": 0,
+                "due_this_week": 0,
+                "recently_completed": 0,
+            },
+            "assigned": [],
+            "updates": [],
+        }
+
+    now = datetime.now(UTC)
+    week_end = now + timedelta(days=7)
+    recent_start = now - timedelta(days=7)
+    project_ids = list(projects.keys())
+    visible = (
+        ProjectAction.tenant_id == context.tenant_id,
+        ProjectAction.project_id.in_(project_ids),
+        ProjectAction.archived_at.is_(None),
+        ProjectAction.deleted_at.is_(None),
+    )
+    active = ProjectAction.status.notin_(["completed", "cancelled"])
+
+    needs_attention = await session.scalar(
+        select(func.count(ProjectAction.id)).where(
+            *visible,
+            active,
+            or_(
+                ProjectAction.status == "blocked",
+                ProjectAction.due_date < now,
+            ),
+        )
+    )
+    due_this_week = await session.scalar(
+        select(func.count(ProjectAction.id)).where(
+            *visible,
+            active,
+            ProjectAction.due_date >= now,
+            ProjectAction.due_date <= week_end,
+        )
+    )
+    recently_completed = await session.scalar(
+        select(func.count(ProjectAction.id)).where(
+            *visible,
+            ProjectAction.status == "completed",
+            ProjectAction.completed_at >= recent_start,
+        )
+    )
+
+    assigned_rows = list(
+        await session.scalars(
+            select(ProjectAction)
+            .where(
+                *visible,
+                active,
+                ProjectAction.owner_user_id == context.user_id,
+            )
+            .order_by(
+                ProjectAction.due_date.asc().nullslast(),
+                ProjectAction.updated_at.desc(),
+            )
+            .limit(6)
+        )
+    )
+    update_rows = list(
+        await session.scalars(
+            select(ProjectAction)
+            .where(*visible)
+            .order_by(ProjectAction.updated_at.desc())
+            .limit(5)
+        )
+    )
+
+    return {
+        "highlights": {
+            "needs_attention": int(needs_attention or 0),
+            "due_this_week": int(due_this_week or 0),
+            "recently_completed": int(recently_completed or 0),
+        },
+        "assigned": [
+            _action_home_item(action, projects[action.project_id])
+            for action in assigned_rows
+        ],
+        "updates": [
+            _action_home_item(action, projects[action.project_id])
+            for action in update_rows
+        ],
+    }
 
 
 @router.get("/summaries", response_model=list[ProjectSummaryRead])
@@ -388,4 +508,3 @@ async def list_all_documents(
         }
         for a in rows
     ]
-

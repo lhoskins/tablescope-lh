@@ -6,9 +6,21 @@ import type { InsightChart } from "@/lib/api/home-intelligence";
 const { runDatasourceSql } = vi.hoisted(() => ({
   runDatasourceSql: vi.fn(),
 }));
+const { saveQuerySuggestion, createHomePin } = vi.hoisted(() => ({
+  saveQuerySuggestion: vi.fn(),
+  createHomePin: vi.fn(),
+}));
 
 vi.mock("@/lib/api/data-source-builder", () => ({
   runDatasourceSql,
+}));
+
+vi.mock("@/lib/api/home-intelligence", () => ({
+  saveQuerySuggestion,
+}));
+
+vi.mock("@/lib/api/home-pins", () => ({
+  createHomePin,
 }));
 
 vi.mock("@/components/tablescope/home/intelligence-card", () => ({
@@ -53,12 +65,20 @@ const RESULT = {
 describe("QuerySuggestionPreviewModal", () => {
   beforeEach(() => {
     runDatasourceSql.mockReset();
+    saveQuerySuggestion.mockReset().mockResolvedValue({
+      query_id: 77,
+      name: "Late shipments",
+      status: "saved",
+      sql_text: "SELECT 1",
+    });
+    createHomePin.mockReset().mockResolvedValue({ id: 88 });
   });
 
   it("executes the query and renders a chart preview", async () => {
     runDatasourceSql.mockResolvedValue(RESULT);
     renderModal();
     expect(await screen.findByTestId("chart")).toBeTruthy();
+    fireEvent.click(screen.getByText(/Preview data/));
     expect(screen.getByText("Acme")).toBeTruthy();
   });
 
@@ -66,7 +86,7 @@ describe("QuerySuggestionPreviewModal", () => {
     runDatasourceSql.mockResolvedValue(RESULT);
     renderModal();
     await screen.findByTestId("chart");
-    fireEvent.click(screen.getByText(/Show SQL/));
+    fireEvent.click(screen.getByText(/^SQL$/));
     await waitFor(() =>
       expect(screen.getByText(/due > '2024-01-01T00:00:00'/)).toBeTruthy(),
     );
@@ -88,5 +108,25 @@ describe("QuerySuggestionPreviewModal", () => {
     const btn = screen.getByRole("button", { name: /Add to Dashboard/i });
     expect(btn).toBeTruthy();
     expect((btn as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("saves the query and pins the selected chart to Home", async () => {
+    runDatasourceSql.mockResolvedValue(RESULT);
+    renderModal();
+    await screen.findByTestId("chart");
+    fireEvent.click(screen.getByRole("button", { name: /Add selected chart to Home/i }));
+
+    await waitFor(() => expect(saveQuerySuggestion).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(createHomePin).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pin_type: "live_widget",
+          project_id: 42,
+          config: expect.objectContaining({
+            widget: expect.objectContaining({ dataSource: { kind: "query", queryId: 77 } }),
+          }),
+        }),
+      ),
+    );
   });
 });

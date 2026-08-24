@@ -38,11 +38,16 @@ function newRequestId(): string {
 export function WorkspaceAssistantPanel({
   projectId,
   activeItem,
+  surface = "project_workspace",
+  contextLabel,
 }: {
-  projectId: string;
-  activeItem: WorkspaceTab | null;
+  projectId?: string;
+  activeItem?: WorkspaceTab | null;
+  surface?: "business_insights" | "project_workspace";
+  contextLabel?: string;
 }) {
   const projectIdNum = Number(projectId);
+  const hasProject = projectId != null && projectId !== "" && Number.isFinite(projectIdNum);
   const [collapsed, setCollapsed] = useState(true);
   const [width, setWidth] = useState(ASSISTANT_MIN_WIDTH);
   const [conversation, setConversation] = useState<Conversation | null>(null);
@@ -66,13 +71,15 @@ export function WorkspaceAssistantPanel({
   // was meant to avoid.
   const hasResumedRef = useRef(false);
   useEffect(() => {
-    if (collapsed || hasResumedRef.current || !Number.isFinite(projectIdNum)) return;
+    if (collapsed || hasResumedRef.current) return;
     hasResumedRef.current = true;
     let cancelled = false;
     async function resume() {
       try {
-        const list = await listConversations(projectIdNum);
-        const workspace = list.find((c) => c.surface === "project_workspace");
+        const list = await listConversations(hasProject ? projectIdNum : undefined);
+        const workspace = list.find(
+          (c) => c.surface === surface && (hasProject || c.project_id == null),
+        );
         if (!workspace || cancelled) return;
         const full = await getConversation(workspace.id);
         if (!cancelled) setConversation(full);
@@ -84,7 +91,7 @@ export function WorkspaceAssistantPanel({
     return () => {
       cancelled = true;
     };
-  }, [collapsed, projectIdNum]);
+  }, [collapsed, hasProject, projectIdNum, surface]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -131,15 +138,15 @@ export function WorkspaceAssistantPanel({
 
   async function send(raw: string) {
     const message = raw.trim();
-    if (!message || busy || !Number.isFinite(projectIdNum)) return;
+    if (!message || busy) return;
     setPendingMessage(message);
     setInput("");
     setBusy(true);
     setError(null);
     try {
       const result = await submitCanonicalTurn({
-        surface: "project_workspace",
-        project_id: projectIdNum,
+        surface,
+        project_id: hasProject ? projectIdNum : undefined,
         message,
         client_request_id: newRequestId(),
         active_resource_type: activeItem?.type,
@@ -151,7 +158,7 @@ export function WorkspaceAssistantPanel({
             id: result.conversation_id,
             project_id: result.project_id,
             surface: result.surface,
-            title: "Workspace",
+            title: contextLabel ?? "Workspace",
             status: "active",
             active_datasource_id: null,
             canonical_key: null,
@@ -223,9 +230,9 @@ export function WorkspaceAssistantPanel({
           </div>
           <div>
             <p className="text-[13px] font-medium text-ink-primary">AI Assistant</p>
-            {activeItem && (
+            {(activeItem || contextLabel) && (
               <p className="max-w-[14rem] truncate text-caption text-ink-tertiary">
-                Grounded on: {activeItem.label}
+                Grounded on: {activeItem?.label ?? contextLabel}
               </p>
             )}
           </div>
@@ -249,7 +256,7 @@ export function WorkspaceAssistantPanel({
       <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-3 py-3">
         {(!conversation || conversation.turns.length === 0) && !pendingQuestion && (
           <p className="text-[13px] text-ink-tertiary">
-            Ask about {activeItem ? `"${activeItem.label}"` : "this project"} or anything else in
+            Ask about {activeItem ? `"${activeItem.label}"` : contextLabel ?? "this project"} or anything else in
             this workspace.
           </p>
         )}

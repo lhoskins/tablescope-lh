@@ -20,6 +20,7 @@ _DEFAULT_INTELLIGENCE = {
     "cross_project": True,
     "email_digest": False,
     "granularity": 3,
+    "home_focus": [],
 }
 
 

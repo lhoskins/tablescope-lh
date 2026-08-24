@@ -322,17 +322,18 @@ export function HomePinsGrid() {
     );
   }
 
-  if (pins.length === 0) {
-    return null;
-  }
-
   return (
     <div
       ref={containerRef}
       className="-mx-5 w-[calc(100%+2.5rem)] space-y-3"
     >
       <div className="flex items-center justify-between px-5">
-        <h2 className="text-h3 text-ink-primary">Pinned to Home</h2>
+        <div>
+          <h2 className="text-h3 text-ink-primary">Pinned workspace</h2>
+          <p className="mt-0.5 text-small text-ink-tertiary">
+            Business insights, project insights, dashboard widgets, and charts you selected.
+          </p>
+        </div>
         <button
           type="button"
           onClick={() => refreshMutation.mutate()}
@@ -346,8 +347,16 @@ export function HomePinsGrid() {
       {layoutError && (
         <p className="px-5 text-small text-red-600">{layoutError}</p>
       )}
+      {pins.length === 0 && (
+        <div className="mx-5 rounded-xl border border-dashed border-line-secondary bg-bg-primary px-5 py-10 text-center">
+          <p className="text-[13px] font-medium text-ink-primary">Your pinned workspace is ready.</p>
+          <p className="mt-1 text-small text-ink-tertiary">
+            Pin an insight, dashboard widget, or a new chart suggestion to build this area.
+          </p>
+        </div>
+      )}
       <div className="w-full">
-        {mounted && (
+        {mounted && pins.length > 0 && (
           <ResponsiveGridLayout
             className="layout"
             breakpoints={GRID_BREAKPOINTS}

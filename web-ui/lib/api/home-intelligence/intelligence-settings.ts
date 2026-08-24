@@ -17,4 +17,6 @@ export interface IntelligenceSettings {
   email_digest: boolean;
   /** 1 = executive/high-level .. 5 = granular/detailed. */
   granularity: number;
+  /** Decisions, risks, KPIs, and questions the user wants prioritized on Home. */
+  home_focus: string[];
 }

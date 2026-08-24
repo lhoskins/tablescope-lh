@@ -104,6 +104,38 @@ describe("WorkspaceAssistantPanel", () => {
     await waitFor(() => expect(screen.getByTestId("turn-1")).toHaveTextContent("What changed?"));
   });
 
+  it("supports the global Home assistant without a project id", async () => {
+    window.localStorage.setItem("tablescope:workspace-assistant-collapsed", "false");
+    submitCanonicalTurn.mockResolvedValue({
+      conversation_id: 43,
+      conversation_created: true,
+      surface: "business_insights",
+      project_id: null,
+      turn: { id: 2, user_message: "What needs attention?", sequence: 1 },
+    });
+
+    render(
+      <WorkspaceAssistantPanel
+        surface="business_insights"
+        contextLabel="Personal Home"
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Ask the AI Assistant"), {
+      target: { value: "What needs attention?" },
+    });
+    fireEvent.keyDown(screen.getByLabelText("Ask the AI Assistant"), { key: "Enter" });
+
+    await waitFor(() =>
+      expect(submitCanonicalTurn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          surface: "business_insights",
+          project_id: undefined,
+          message: "What needs attention?",
+        }),
+      ),
+    );
+  });
+
   it("collapsing the panel persists the collapsed state", () => {
     window.localStorage.setItem("tablescope:workspace-assistant-collapsed", "false");
     render(<WorkspaceAssistantPanel projectId="7" activeItem={null} />);
