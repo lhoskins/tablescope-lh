@@ -74,7 +74,8 @@ async def _generate_openai(
             )
             raise
         data = resp.json()
-        message = data["choices"][0]["message"]
+        choice = data["choices"][0]
+        message = choice["message"]
         content = message.get("content") or ""
         if not content and message.get("reasoning"):
             # A reasoning model (e.g. muse-glimmer) returns "reasoning" and
@@ -85,11 +86,22 @@ async def _generate_openai(
             # JSON, guaranteeing a downstream parse failure that looked like
             # malformed output rather than what it actually was: no output.
             # Log it for diagnosis and return empty so that failure is honest.
+            #
+            # finish_reason distinguishes the two ways this happens: "length"
+            # means generation was cut off before it could reach the content
+            # channel (a max_tokens/budget problem, fixable from this
+            # client); "stop" means the model produced a complete response
+            # that was reasoning-only by its own choice (a prompt/template/
+            # generation-config problem on the model-serving side, not
+            # something this retry-less client call can fix).
             logger.warning(
-                "vLLM target %s returned no content, only reasoning (%d chars); "
-                "treating as an empty completion",
+                "vLLM target %s returned no content, only reasoning (%d chars, "
+                "finish_reason=%s, requested max_tokens=%s); treating as an "
+                "empty completion",
                 target_url,
                 len(str(message.get("reasoning") or "")),
+                choice.get("finish_reason"),
+                payload.get("max_tokens"),
             )
         text = str(content)
         # Muse Glimmer emits channel-scoped messages (to=self reasoning,

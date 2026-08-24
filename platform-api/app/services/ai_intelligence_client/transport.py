@@ -37,6 +37,16 @@ class AIUnavailableError(RuntimeError):
     retryable error onto ``arq``'s ``Retry`` — so contention defers a project
     instead of dropping it — while a terminal error is reported once and not
     retried. ``retry_after`` carries the server's ``Retry-After`` when present.
+
+    ``declined`` distinguishes a second, unrelated axis from ``retryable``: it
+    is true when the AI server was reached and responded, but rejected this
+    specific request (a 4xx like the SQL generator's structured 422 "needs
+    clarification") -- as opposed to a genuine outage (unreachable, timed
+    out, or busy). Both raise this same exception type so every call site
+    keeps its "no silent fallback" guarantee, but a declined request has a
+    real, often structured ``detail`` worth surfacing to the user instead of
+    a generic "the AI service is unavailable" -- which is simply false when
+    the server answered.
     """
 
     def __init__(
@@ -46,13 +56,21 @@ class AIUnavailableError(RuntimeError):
         status_code: int | None = None,
         retryable: bool | None = None,
         retry_after: float | None = None,
+        detail: Any = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.retry_after = retry_after
+        self.detail = detail
         # Default: only an explicit 503 "busy" is retryable; callers pass
         # ``retryable=True`` for timeout/transport failures.
         self.retryable = (status_code == 503) if retryable is None else retryable
+
+    @property
+    def declined(self) -> bool:
+        """True when the AI server responded but rejected this request (4xx,
+        excluding 503 busy -- that's a capacity signal, not a rejection)."""
+        return self.status_code is not None and 400 <= self.status_code < 500
 
 
 def _sign_payload(payload: dict[str, Any], secret: str) -> str:
@@ -191,8 +209,26 @@ async def _post(
                 else:
                     message = f"AI server request failed with HTTP {status_code}."
                 logger.warning("AI intelligence HTTP failure for %s: %s", path, exc)
+                # A 4xx body is usually FastAPI's {"detail": ...} envelope
+                # around the AI server's own structured rejection (e.g. the
+                # SQL generator's {"code": "needs_clarification", "reason":
+                # ..., "suggested_sources": [...]}) -- unwrap it so a caller
+                # can build an accurate, specific message instead of a
+                # generic one.
+                try:
+                    error_body = exc.response.json()
+                    detail: Any = (
+                        error_body.get("detail", error_body)
+                        if isinstance(error_body, dict)
+                        else error_body
+                    )
+                except ValueError:
+                    detail = exc.response.text[:1000] or None
                 raise AIUnavailableError(
-                    message, status_code=status_code, retry_after=retry_after
+                    message,
+                    status_code=status_code,
+                    retry_after=retry_after,
+                    detail=detail,
                 ) from exc
             break
 

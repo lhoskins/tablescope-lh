@@ -96,6 +96,29 @@ async def test_empty_content_does_not_fall_back_to_reasoning_trace(_patch_async_
 
 
 @pytest.mark.asyncio
+async def test_empty_content_warning_logs_finish_reason_and_budget(_patch_async_client, caplog):
+    """finish_reason distinguishes a token-budget problem (fixable client-side)
+    from the model choosing to stop after reasoning (a model/prompt-serving
+    problem) -- without it, every empty-content report looks the same and a
+    root cause can't be told apart from a guess."""
+    _patch_async_client["response"] = _chat_completion(
+        {"content": "", "reasoning": "short trace"}
+    )
+    _patch_async_client["response"]["choices"][0]["finish_reason"] = "stop"
+
+    with caplog.at_level("WARNING"):
+        await llm_client._generate_openai(
+            prompt="p", model="muse-glimmer", target_url="http://vllm/v1",
+            max_tokens=400,
+        )
+
+    assert any(
+        "finish_reason=stop" in record.message and "max_tokens=400" in record.message
+        for record in caplog.records
+    )
+
+
+@pytest.mark.asyncio
 async def test_real_content_is_returned_normally(_patch_async_client):
     _patch_async_client["response"] = _chat_completion(
         {"content": '{"suggestions": []}', "reasoning": "some internal trace"}
