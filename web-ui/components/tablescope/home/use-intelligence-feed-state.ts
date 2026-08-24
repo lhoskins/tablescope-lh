@@ -279,6 +279,7 @@ export function useIntelligenceFeedState({
         email_digest: false,
         granularity: 3,
         home_focus: [],
+        home_persona: "executive",
       };
       setSettings(intel);
 

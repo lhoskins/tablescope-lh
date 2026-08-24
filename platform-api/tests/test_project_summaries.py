@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.auth.jwt import create_access_token
+from app.models.project_asset import ProjectAsset
 from app.services.supabase_auth_service import SupabaseAuthService, SupabaseUser
 
 
@@ -250,6 +251,73 @@ async def test_home_action_summary_updates_prioritize_the_users_focus(
     assert [u["title"] for u in body["updates"]] == [
         "Approve monthly backlog recovery plan"
     ]
+
+
+async def test_home_persona_is_a_saved_presentation_preference(
+    client, service_headers
+) -> None:
+    _tenant, _user, headers = await _setup(client, service_headers)
+
+    r = await client.get("/api/users/preferences", headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["intelligence"]["home_persona"] == "executive"
+
+    r = await client.patch(
+        "/api/users/preferences",
+        json={
+            "intelligence": {
+                "home_persona": "cfo",
+                "home_focus": ["cash", "margin"],
+            }
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["intelligence"]["home_persona"] == "cfo"
+    assert r.json()["intelligence"]["home_focus"] == ["cash", "margin"]
+
+    r = await client.patch(
+        "/api/users/preferences",
+        json={"intelligence": {"home_persona": "tenant_admin"}},
+        headers=headers,
+    )
+    assert r.status_code == 422
+
+
+async def test_home_documents_include_authorized_ai_summaries(
+    client, service_headers, db_session
+) -> None:
+    tenant, user, headers = await _setup(client, service_headers)
+    r = await client.post(
+        "/api/projects", json={"name": "Executive Reporting"}, headers=headers
+    )
+    assert r.status_code == 201
+    project_id = r.json()["id"]
+
+    db_session.add(
+        ProjectAsset(
+            tenant_id=tenant["id"],
+            project_id=project_id,
+            owner_user_id=user["id"],
+            created_by=user["id"],
+            asset_type="report",
+            source_type="uploaded_file",
+            title="Annual Performance Review",
+            filename="annual-performance-review.pdf",
+            storage_location="test/annual-performance-review.pdf",
+            ai_status="profiled",
+            ai_summary="Revenue, risk, and forecast performance improved.",
+        )
+    )
+    await db_session.commit()
+
+    r = await client.get("/api/projects/documents-all", headers=headers)
+    assert r.status_code == 200, r.text
+    assert len(r.json()) == 1
+    document = r.json()[0]
+    assert document["projectName"] == "Executive Reporting"
+    assert document["aiSummary"] == "Revenue, risk, and forecast performance improved."
+    assert document["updatedAt"] is not None
 
 
 async def test_route_prompt_targets_existing_project(
