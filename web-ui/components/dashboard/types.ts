@@ -47,12 +47,12 @@ export type VisualizationOptions = {
   // Layout mode, so the two can never diverge the way they did when
   // viewing used this curated grid but editing used a separate
   // react-grid-layout x/y/w/h model with no way to reflect back into it.
-  /** KPI card width, in the 12-column operational grid. */
-  cardSize?: "compact" | "standard" | "wide";
-  /** Chart column width, in the 12-column operational grid. */
-  chartWidth?: "half" | "full";
-  /** Chart row height. */
-  chartHeight?: "compact" | "standard" | "tall";
+  /** Card/chart width, in columns of the 12-column operational grid (1-12).
+   *  Set by dragging the resize handle in Edit Layout. */
+  gridSpan?: number;
+  /** Chart height in pixels. Charts only -- KPI cards keep a fixed height.
+   *  Set by dragging the resize handle in Edit Layout. */
+  gridHeightPx?: number;
   // Shared
   showLegend?: boolean;
   showLabels?: boolean;

@@ -207,26 +207,33 @@ export function OperationalWidgetChart({
   return <OperationalChart chart={chartData} className={className} onElementClick={handleElementClick} />;
 }
 
-const CARD_SIZE_CLASS: Record<NonNullable<VisualizationOptions["cardSize"]>, string> = {
-  compact: styles.cardCompact,
-  standard: styles.cardStandard,
-  wide: styles.cardWide,
-};
-const CARD_SIZE_CYCLE: NonNullable<VisualizationOptions["cardSize"]>[] = ["compact", "standard", "wide"];
-const CHART_HEIGHT_CLASS: Record<NonNullable<VisualizationOptions["chartHeight"]>, string> = {
-  compact: "h-44",
-  standard: "h-56",
-  tall: "h-80",
-};
-const CHART_HEIGHT_CYCLE: NonNullable<VisualizationOptions["chartHeight"]>[] = ["compact", "standard", "tall"];
+const GRID_MIN_SPAN = 2;
+const GRID_MAX_SPAN = 12;
+const GRID_GAP_PX = 10; // matches .kpiGrid's `gap: 0.625rem` in the CSS module
+const CHART_MIN_HEIGHT_PX = 160;
+const CHART_MAX_HEIGHT_PX = 640;
+const KPI_HEIGHT_PX = 96;
 
 function sortByPosition(items: WidgetConfig[]): WidgetConfig[] {
   return [...items].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
 }
 
-function cycle<T>(values: readonly T[], current: T): T {
-  const index = values.indexOf(current);
-  return values[(index + 1) % values.length];
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+/** Default width/height for a widget that has never been explicitly
+ *  resized -- the first chart defaults to prominent (full width, tall) to
+ *  approximate the old curated "main chart" hierarchy on a never-edited
+ *  dashboard; every explicit size is remembered per widget once the user
+ *  drags it to one. */
+function defaultSpan(widget: WidgetConfig, chartIndex: number): number {
+  if (widget.type === "kpi") return 4;
+  return chartIndex === 0 ? 12 : 6;
+}
+
+function defaultHeightPx(chartIndex: number): number {
+  return chartIndex === 0 ? 320 : 224;
 }
 
 /**
@@ -289,7 +296,13 @@ export function OperationalInsightGrid({
     setOrderedWidgets(sortByPosition(widgets));
   }, [widgets]);
 
+  const gridRef = useRef<HTMLDivElement>(null);
   const draggedId = useRef<string | null>(null);
+  // Live values while a resize-handle drag is in progress, keyed by widget
+  // id -- kept separate from `orderedWidgets` so dragging doesn't fire
+  // `onLayoutChange` (and a save) on every pixel of mouse movement, only
+  // once on release.
+  const [resizePreview, setResizePreview] = useState<{ id: string; span: number; heightPx?: number } | null>(null);
 
   const applyOrder = useCallback(
     (next: WidgetConfig[]) => {
@@ -349,6 +362,71 @@ export function OperationalInsightGrid({
     },
   });
 
+  // Drag-to-resize from a handle in the card's bottom-right corner. Width
+  // (a column count) always tracks horizontal movement; height (pixels)
+  // only tracks vertical movement for charts -- KPI cards keep a fixed
+  // height. Reads the grid's actual rendered width once, at drag start, to
+  // convert a pixel delta into a column-count delta.
+  const startResize = useCallback(
+    (widget: WidgetConfig, startSpan: number, startHeightPx: number | undefined, resizeHeight: boolean) =>
+      (event: React.MouseEvent) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const gridWidthPx = gridRef.current?.getBoundingClientRect().width;
+        if (!gridWidthPx) return;
+        const columnStridePx = (gridWidthPx - 11 * GRID_GAP_PX) / 12 + GRID_GAP_PX;
+        const startX = event.clientX;
+        const startY = event.clientY;
+
+        const onMove = (moveEvent: MouseEvent) => {
+          const span = clamp(
+            Math.round(startSpan + (moveEvent.clientX - startX) / columnStridePx),
+            GRID_MIN_SPAN,
+            GRID_MAX_SPAN,
+          );
+          const heightPx = resizeHeight && startHeightPx != null
+            ? clamp(startHeightPx + (moveEvent.clientY - startY), CHART_MIN_HEIGHT_PX, CHART_MAX_HEIGHT_PX)
+            : undefined;
+          setResizePreview({ id: widget.id, span, heightPx });
+        };
+        const onUp = () => {
+          window.removeEventListener("mousemove", onMove);
+          window.removeEventListener("mouseup", onUp);
+          setResizePreview((current) => {
+            if (current && current.id === widget.id) {
+              updateVisualizationOptions(widget.id, {
+                gridSpan: current.span,
+                ...(current.heightPx != null ? { gridHeightPx: current.heightPx } : {}),
+              });
+            }
+            return null;
+          });
+        };
+        window.addEventListener("mousemove", onMove);
+        window.addEventListener("mouseup", onUp);
+      },
+    [updateVisualizationOptions],
+  );
+
+  const resizeHandle = (
+    widget: WidgetConfig,
+    startSpan: number,
+    startHeightPx: number | undefined,
+    resizeHeight: boolean,
+  ) =>
+    editingLayout && (
+      <div
+        draggable={false}
+        onDragStart={(event) => event.stopPropagation()}
+        onMouseDown={startResize(widget, startSpan, startHeightPx, resizeHeight)}
+        title="Drag to resize"
+        className={cn(
+          "absolute bottom-1 right-1 z-10 rounded-sm border border-line-secondary bg-bg-primary opacity-70 hover:opacity-100",
+          resizeHeight ? "h-3.5 w-3.5 cursor-nwse-resize" : "h-4 w-2 cursor-ew-resize",
+        )}
+      />
+    );
+
   return (
     <div className={styles.dashboardContainer}>
       {brief && (
@@ -360,33 +438,25 @@ export function OperationalInsightGrid({
 
       {editingLayout && (
         <div className="mt-3 rounded-md border border-dashed border-brand-200 bg-brand-50/40 px-3 py-2 text-xs text-ink-secondary">
-          Drag any card or chart into any grid position. Use the size controls to change chart width and height.
+          Drag any card or chart into any grid position. Drag the handle in a card&apos;s corner to resize it.
         </div>
       )}
 
       {orderedWidgets.length > 0 && (
-        <div className={`${styles.kpiGrid} mt-3`}>
+        <div ref={gridRef} className={`${styles.kpiGrid} mt-3`}>
           {orderedWidgets.map((widget) => {
+            const preview = resizePreview?.id === widget.id ? resizePreview : null;
+
             if (widget.type === "kpi") {
-              const size = widget.visualizationOptions?.cardSize ?? "standard";
+              const span = preview?.span ?? widget.visualizationOptions?.gridSpan ?? defaultSpan(widget, 0);
               return (
-                <div key={widget.id} className={CARD_SIZE_CLASS[size]} {...dragProps(widget.id)}>
-                  <Card className={cn("h-full p-3", editingLayout && "cursor-grab border-dashed")}>
+                <div key={widget.id} style={{ gridColumn: `span ${span}` }} {...dragProps(widget.id)}>
+                  <Card className={cn("relative h-full p-3", editingLayout && "cursor-grab border-dashed")} style={{ minHeight: KPI_HEIGHT_PX }}>
                     <div className="flex items-start justify-between gap-2">
                       <span className="truncate text-[11px] font-semibold uppercase tracking-[0.02em] text-ink-secondary">
                         {widget.title}
                       </span>
                       <div className="flex shrink-0 items-center gap-0.5">
-                        {editingLayout && (
-                          <button
-                            type="button"
-                            onClick={() => updateVisualizationOptions(widget.id, { cardSize: cycle(CARD_SIZE_CYCLE, size) })}
-                            title="Resize"
-                            className="rounded bg-bg-secondary px-1.5 py-0.5 text-[10px] font-semibold capitalize text-ink-secondary hover:bg-bg-tertiary"
-                          >
-                            {size}
-                          </button>
-                        )}
                         <button
                           type="button"
                           onClick={() => onEditWidget(widget)}
@@ -413,54 +483,26 @@ export function OperationalInsightGrid({
                       operational
                       onElementClick={(event) => onElementClick(widget, event)}
                     />
+                    {resizeHandle(widget, span, undefined, false)}
                   </Card>
                 </div>
               );
             }
 
-            // First chart defaults to prominent (full width, tall) to
-            // approximate the old curated "main chart" hierarchy on a
-            // never-edited dashboard; every explicit size is remembered
-            // per widget once the user changes it.
             const chartIndex = chartIndexById.get(widget.id) ?? 0;
-            const width = widget.visualizationOptions?.chartWidth ?? (chartIndex === 0 ? "full" : "half");
-            const height = widget.visualizationOptions?.chartHeight ?? (chartIndex === 0 ? "tall" : "standard");
+            const span = preview?.span ?? widget.visualizationOptions?.gridSpan ?? defaultSpan(widget, chartIndex);
+            const heightPx =
+              preview?.heightPx ?? widget.visualizationOptions?.gridHeightPx ?? defaultHeightPx(chartIndex);
             return (
-              <div
-                key={widget.id}
-                className={width === "full" ? styles.chartFull : styles.chartHalf}
-                {...dragProps(widget.id)}
-              >
-                <Card className={cn("h-full overflow-hidden p-3", editingLayout && "cursor-grab border-dashed")}>
+              <div key={widget.id} style={{ gridColumn: `span ${span}` }} {...dragProps(widget.id)}>
+                <Card
+                  className={cn("relative overflow-hidden p-3", editingLayout && "cursor-grab border-dashed")}
+                >
                   <div className="mb-1 flex items-start justify-between gap-3">
                     <h3 className="truncate text-small font-semibold text-ink-primary">
                       {widget.title || "Untitled"}
                     </h3>
                     <div className="flex shrink-0 items-center gap-0.5">
-                      {editingLayout && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              updateVisualizationOptions(widget.id, { chartWidth: width === "full" ? "half" : "full" })
-                            }
-                            title="Toggle width"
-                            className="rounded bg-bg-secondary px-1.5 py-0.5 text-[10px] font-semibold text-ink-secondary hover:bg-bg-tertiary"
-                          >
-                            {width === "full" ? "Full" : "½"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              updateVisualizationOptions(widget.id, { chartHeight: cycle(CHART_HEIGHT_CYCLE, height) })
-                            }
-                            title="Cycle height"
-                            className="rounded bg-bg-secondary px-1.5 py-0.5 text-[10px] font-semibold capitalize text-ink-secondary hover:bg-bg-tertiary"
-                          >
-                            {height}
-                          </button>
-                        </>
-                      )}
                       {onChartOptions && (
                         <button
                           type="button"
@@ -491,7 +533,7 @@ export function OperationalInsightGrid({
                       )}
                     </div>
                   </div>
-                  <div className={CHART_HEIGHT_CLASS[height]}>
+                  <div style={{ height: heightPx }}>
                     <OperationalWidgetChart
                       widget={widget}
                       rows={widgetData[widget.id] ?? []}
@@ -499,6 +541,7 @@ export function OperationalInsightGrid({
                       onElementClick={onElementClick}
                     />
                   </div>
+                  {resizeHandle(widget, span, heightPx, true)}
                 </Card>
               </div>
             );

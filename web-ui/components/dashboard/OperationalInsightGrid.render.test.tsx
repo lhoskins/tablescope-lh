@@ -68,7 +68,7 @@ describe("OperationalInsightGrid", () => {
     expect(headings[1]).toHaveTextContent("Monthly Revenue");
   });
 
-  it("shows no size controls when not editing", () => {
+  it("shows no resize handle when not editing", () => {
     render(
       <OperationalInsightGrid
         widgets={[kpiWidget(), chartWidget()]}
@@ -78,11 +78,10 @@ describe("OperationalInsightGrid", () => {
         onElementClick={noop}
       />,
     );
-    expect(screen.queryByTitle("Resize")).toBeNull();
-    expect(screen.queryByTitle("Toggle width")).toBeNull();
+    expect(screen.queryByTitle("Drag to resize")).toBeNull();
   });
 
-  it("cycles a KPI card's size and reports the change", () => {
+  it("drags a KPI card's resize handle and reports the new width", () => {
     const onLayoutChange = vi.fn();
     render(
       <OperationalInsightGrid
@@ -95,13 +94,29 @@ describe("OperationalInsightGrid", () => {
         onLayoutChange={onLayoutChange}
       />,
     );
-    fireEvent.click(screen.getByTitle("Resize"));
+    const grid = document.querySelector('[class*="kpiGrid"]') as HTMLElement;
+    vi.spyOn(grid, "getBoundingClientRect").mockReturnValue({
+      width: 1200,
+    } as DOMRect);
+
+    const handle = screen.getByTitle("Drag to resize");
+    fireEvent.mouseDown(handle, { clientX: 0, clientY: 0 });
+    // Grid is 1200px wide across 12 columns (~100px/column stride incl. gap)
+    // -- dragging 300px right should grow the span by roughly 3 columns.
+    fireEvent.mouseMove(window, { clientX: 300, clientY: 0 });
+    fireEvent.mouseUp(window);
+
     expect(onLayoutChange).toHaveBeenCalledWith([
-      expect.objectContaining({ id: "kpi-1", visualizationOptions: expect.objectContaining({ cardSize: "wide" }) }),
+      expect.objectContaining({
+        id: "kpi-1",
+        visualizationOptions: expect.objectContaining({ gridSpan: expect.any(Number) }),
+      }),
     ]);
+    const patch = onLayoutChange.mock.calls.at(-1)?.[0][0].visualizationOptions.gridSpan as number;
+    expect(patch).toBeGreaterThan(4);
   });
 
-  it("toggles a chart's width and reports the change", () => {
+  it("drags a chart's resize handle and reports the new width and height", () => {
     const onLayoutChange = vi.fn();
     render(
       <OperationalInsightGrid
@@ -114,12 +129,20 @@ describe("OperationalInsightGrid", () => {
         onLayoutChange={onLayoutChange}
       />,
     );
-    // The lone chart defaults to full width (it's the "main" chart), so the
-    // toggle button reads "Full" and clicking it switches to half.
-    fireEvent.click(screen.getByTitle("Toggle width"));
-    expect(onLayoutChange).toHaveBeenCalledWith([
-      expect.objectContaining({ id: "chart-1", visualizationOptions: expect.objectContaining({ chartWidth: "half" }) }),
-    ]);
+    const grid = document.querySelector('[class*="kpiGrid"]') as HTMLElement;
+    vi.spyOn(grid, "getBoundingClientRect").mockReturnValue({
+      width: 1200,
+    } as DOMRect);
+
+    const handle = screen.getByTitle("Drag to resize");
+    fireEvent.mouseDown(handle, { clientX: 0, clientY: 0 });
+    fireEvent.mouseMove(window, { clientX: -200, clientY: 80 });
+    fireEvent.mouseUp(window);
+
+    expect(onLayoutChange).toHaveBeenCalledTimes(1);
+    const options = onLayoutChange.mock.calls.at(-1)?.[0][0].visualizationOptions;
+    expect(options.gridSpan).toBeLessThan(12);
+    expect(options.gridHeightPx).toBeGreaterThan(320);
   });
 
   it("reorders widgets via drag-and-drop and persists the new position", () => {
