@@ -17,6 +17,7 @@ import type { WidgetConfig, ChartClickEvent, VisualizationOptions } from "./type
 // (10%-opacity, first-series-only) area fill the real screens use, so an
 // AI-Designer dashboard of any domain renders through it too.
 import styles from "@/components/tablescope/project/itsm-dashboards/ItsmDashboardScreen.module.css";
+import denseGridStyles from "./OperationalInsightGrid.module.css";
 import { ItsmChart as OperationalChart } from "@/components/tablescope/project/itsm-dashboards/ItsmChart";
 import type {
   ItsmChart as OperationalChartData,
@@ -210,6 +211,7 @@ export function OperationalWidgetChart({
 const GRID_MIN_SPAN = 2;
 const GRID_MAX_SPAN = 12;
 const GRID_GAP_PX = 10; // matches .kpiGrid's `gap: 0.625rem` in the CSS module
+const GRID_ROW_UNIT_PX = 8; // matches denseGridStyles.denseGrid's `grid-auto-rows: 8px`
 const CHART_MIN_HEIGHT_PX = 160;
 const CHART_MAX_HEIGHT_PX = 640;
 const KPI_HEIGHT_PX = 96;
@@ -222,6 +224,15 @@ function sortByPosition(items: WidgetConfig[]): WidgetConfig[] {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+/** How many `GRID_ROW_UNIT_PX` row tracks (plus their gaps) a card needs to
+ *  reach its target pixel height -- lets `grid-auto-flow: dense` treat a
+ *  card's actual size as real, reservable grid space instead of every card
+ *  implicitly spanning one row, which is what makes dense packing able to
+ *  backfill a short card into the gap below another short one. */
+export function rowSpanFor(heightPx: number): number {
+  return Math.max(1, Math.round((heightPx + GRID_GAP_PX) / (GRID_ROW_UNIT_PX + GRID_GAP_PX)));
 }
 
 /** Default width/height for a widget that has never been explicitly
@@ -329,6 +340,26 @@ export function OperationalInsightGrid({
       applyOrder(next);
     },
     [orderedWidgets, applyOrder],
+  );
+
+  // Fallback for a drop that lands on genuinely empty grid space -- e.g. the
+  // gap dense packing leaves open below a short card next to a tall one --
+  // rather than on top of another card's own onDrop target. Moves the
+  // dragged widget to the end of the order; dense packing then re-flows
+  // everything and slots it into whatever gap the new order opens up.
+  const handleContainerDrop = useCallback(
+    (event: DragEvent) => {
+      if (!editingLayout) return;
+      if (event.target !== event.currentTarget) return; // a card's own onDrop already handled this
+      event.preventDefault();
+      const sourceId = draggedId.current;
+      draggedId.current = null;
+      if (!sourceId) return;
+      const moved = orderedWidgets.find((w) => w.id === sourceId);
+      if (!moved) return;
+      applyOrder([...orderedWidgets.filter((w) => w.id !== sourceId), moved]);
+    },
+    [orderedWidgets, applyOrder, editingLayout],
   );
 
   const updateVisualizationOptions = useCallback(
@@ -454,7 +485,12 @@ export function OperationalInsightGrid({
       )}
 
       {orderedWidgets.length > 0 && (
-        <div ref={gridRef} className={`${styles.kpiGrid} mt-3`} style={{ alignItems: "start" }}>
+        <div
+          ref={gridRef}
+          className={`${styles.kpiGrid} ${denseGridStyles.denseGrid} mt-3`}
+          onDragOver={(event) => { if (editingLayout) event.preventDefault(); }}
+          onDrop={handleContainerDrop}
+        >
           {orderedWidgets.map((widget) => {
             const preview = resizePreview?.id === widget.id ? resizePreview : null;
 
@@ -463,13 +499,16 @@ export function OperationalInsightGrid({
               const kpiHeightPx =
                 preview?.heightPx ?? widget.visualizationOptions?.gridHeightPx ?? KPI_HEIGHT_PX;
               return (
-                <div key={widget.id} style={{ gridColumn: `span ${span}` }} {...dragProps(widget.id)}>
+                <div
+                  key={widget.id}
+                  style={{ gridColumn: `span ${span}`, gridRow: `span ${rowSpanFor(kpiHeightPx)}` }}
+                  {...dragProps(widget.id)}
+                >
                   <Card
                     className={cn(
-                      "relative flex flex-col overflow-hidden p-3",
+                      "relative flex h-full flex-col overflow-hidden p-3",
                       editingLayout && "cursor-grab border-dashed",
                     )}
-                    style={{ height: kpiHeightPx }}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <span className="truncate text-[11px] font-semibold uppercase tracking-[0.02em] text-ink-secondary">
@@ -515,9 +554,16 @@ export function OperationalInsightGrid({
             const heightPx =
               preview?.heightPx ?? widget.visualizationOptions?.gridHeightPx ?? defaultHeightPx(chartIndex);
             return (
-              <div key={widget.id} style={{ gridColumn: `span ${span}` }} {...dragProps(widget.id)}>
+              <div
+                key={widget.id}
+                style={{ gridColumn: `span ${span}`, gridRow: `span ${rowSpanFor(heightPx)}` }}
+                {...dragProps(widget.id)}
+              >
                 <Card
-                  className={cn("relative overflow-hidden p-3", editingLayout && "cursor-grab border-dashed")}
+                  className={cn(
+                    "relative flex h-full flex-col overflow-hidden p-3",
+                    editingLayout && "cursor-grab border-dashed",
+                  )}
                 >
                   <div className="mb-1 flex items-start justify-between gap-3">
                     <h3 className="truncate text-small font-semibold text-ink-primary">
@@ -554,7 +600,7 @@ export function OperationalInsightGrid({
                       )}
                     </div>
                   </div>
-                  <div style={{ height: heightPx }}>
+                  <div className="min-h-0 flex-1">
                     <OperationalWidgetChart
                       widget={widget}
                       rows={widgetData[widget.id] ?? []}
