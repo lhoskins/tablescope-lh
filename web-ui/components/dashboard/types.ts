@@ -42,6 +42,17 @@ export type ReferenceLineConfig = {
  * which keeps existing saved dashboards working unchanged.
  */
 export type VisualizationOptions = {
+  // Operational (ITSM-style) grid layout -- the single source of truth for
+  // an operational dashboard's card/chart size in BOTH viewing and Edit
+  // Layout mode, so the two can never diverge the way they did when
+  // viewing used this curated grid but editing used a separate
+  // react-grid-layout x/y/w/h model with no way to reflect back into it.
+  /** KPI card width, in the 12-column operational grid. */
+  cardSize?: "compact" | "standard" | "wide";
+  /** Chart column width, in the 12-column operational grid. */
+  chartWidth?: "half" | "full";
+  /** Chart row height. */
+  chartHeight?: "compact" | "standard" | "tall";
   // Shared
   showLegend?: boolean;
   showLabels?: boolean;

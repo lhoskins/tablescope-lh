@@ -690,6 +690,17 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
     [persistLayout],
   );
 
+  // OperationalInsightGrid's own position/visualizationOptions model
+  // (see its doc comment) replaces gridX/Y/W/H for operational dashboards --
+  // it already returns the full widget list with those fields updated, so
+  // this just needs to save it.
+  const persistOperationalLayout = useCallback(
+    (updatedWidgets: WidgetConfig[]) => {
+      updateMutation.mutate({ config: { ...dashboard.config, widgets: updatedWidgets, globalFilters } });
+    },
+    [dashboard.config, globalFilters, updateMutation],
+  );
+
   // Cross-filter chips + "Clear all", shared by both header styles below.
   const runtimeFilterChips = (runtime.crossFilters.length > 0 || runtime.dateRange) && (
     <div className="flex flex-wrap items-center gap-2">
@@ -813,12 +824,6 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
             }
           />
 
-          {editingLayout && gridLayoutEditable && (
-            <div className="mt-2 rounded-md border border-dashed border-brand-200 bg-brand-50/40 px-3 py-2 text-xs text-ink-secondary">
-              Drag cards by their headers and resize from any edge. Horizontal rankings remain half width or smaller; improvement opportunities default to the bottom-right.
-            </div>
-          )}
-
           {runtimeFilterChips && <div className="mt-2">{runtimeFilterChips}</div>}
           {allColumns.length > 0 && (
             <div className="mt-2 border-t border-line-tertiary pt-2">
@@ -926,15 +931,22 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
             <p className="mt-1 text-xs text-slate-400">{operational ? "AI will select, validate and wire the appropriate KPI cards and charts." : "Click + Add Widget to start building your dashboard"}</p>
             {operational && <button type="button" onClick={() => setDesignerMode("edit_dashboard")} className="mt-3 rounded-md bg-brand-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-brand-700">Design with AI</button>}
           </div>
-        ) : operational && operationalWidgets.length > 0 && !editingLayout ? (
+        ) : operational ? (
+          // OperationalInsightGrid is the ONE renderer for an operational
+          // dashboard in both viewing and Edit Layout mode -- see its own
+          // doc comment for why a separate react-grid-layout x/y/w/h model
+          // (used below for non-operational dashboards) made editing and
+          // viewing visibly disagree with each other.
           <OperationalInsightGrid
             widgets={widgets}
             widgetData={widgetData}
             operationalWidgets={operationalWidgets}
+            editingLayout={editingLayout}
             onEditWidget={handleEditWidget}
             onElementClick={handleElementClick}
             onChartOptions={setChartOptionsWidget}
             onDeleteWidget={setWidgetPendingDelete}
+            onLayoutChange={persistOperationalLayout}
           />
         ) : widgets.length > 0 ? (
           <div ref={containerRef} className="w-full">

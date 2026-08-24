@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { IconChartBar, IconTrash } from "@tabler/icons-react";
+import { cn } from "@/lib/cn";
 import { Card } from "@/components/ui/card";
 import { WidgetRenderer } from "./WidgetRenderer";
-import type { WidgetConfig, ChartClickEvent } from "./types";
+import type { WidgetConfig, ChartClickEvent, VisualizationOptions } from "./types";
 // Shared operational-insight visual grammar — built for the ITSM insight
 // dashboards but structurally domain-agnostic (CSS grid layout, the chart
 // renderer's option-building, the metric-card shape), so it's reused here
@@ -206,88 +207,61 @@ export function OperationalWidgetChart({
   return <OperationalChart chart={chartData} className={className} onElementClick={handleElementClick} />;
 }
 
-function OperationalChartCard({
-  widget,
-  rows,
-  heightClass,
-  onEditWidget,
-  onChartOptions,
-  onDeleteWidget,
-  onElementClick,
-}: {
-  widget: WidgetConfig;
-  rows: Array<Record<string, unknown>>;
-  heightClass: string;
-  onEditWidget: (widget: WidgetConfig) => void;
-  onChartOptions?: (widget: WidgetConfig) => void;
-  onDeleteWidget?: (widget: WidgetConfig) => void;
-  onElementClick: (widget: WidgetConfig, event: ChartClickEvent) => void;
-}) {
-  return (
-    <Card className="overflow-hidden p-3">
-      <div className="mb-1 flex items-start justify-between gap-3">
-        <h3 className="truncate text-small font-semibold text-ink-primary">
-          {widget.title || "Untitled"}
-        </h3>
-        <div className="flex shrink-0 items-center gap-0.5">
-          {onChartOptions && (
-            <button
-              type="button"
-              onClick={() => onChartOptions(widget)}
-              title="Chart options"
-              className="rounded p-1 text-ink-tertiary transition-colors hover:bg-bg-secondary hover:text-ink-secondary"
-            >
-              <IconChartBar size={14} />
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => onEditWidget(widget)}
-            title="Modify with AI"
-            className="rounded p-1 text-ink-tertiary transition-colors hover:bg-bg-secondary hover:text-ink-secondary"
-          >
-            {EDIT_ICON}
-          </button>
-          {onDeleteWidget && (
-            <button
-              type="button"
-              onClick={() => onDeleteWidget(widget)}
-              title="Delete widget"
-              className="rounded p-1 text-ink-tertiary transition-colors hover:bg-red-50 hover:text-red-600"
-            >
-              <IconTrash size={14} />
-            </button>
-          )}
-        </div>
-      </div>
-      <div className={heightClass}>
-        <OperationalWidgetChart widget={widget} rows={rows} className="h-full" onElementClick={onElementClick} />
-      </div>
-    </Card>
-  );
+const CARD_SIZE_CLASS: Record<NonNullable<VisualizationOptions["cardSize"]>, string> = {
+  compact: styles.cardCompact,
+  standard: styles.cardStandard,
+  wide: styles.cardWide,
+};
+const CARD_SIZE_CYCLE: NonNullable<VisualizationOptions["cardSize"]>[] = ["compact", "standard", "wide"];
+const CHART_HEIGHT_CLASS: Record<NonNullable<VisualizationOptions["chartHeight"]>, string> = {
+  compact: "h-44",
+  standard: "h-56",
+  tall: "h-80",
+};
+const CHART_HEIGHT_CYCLE: NonNullable<VisualizationOptions["chartHeight"]>[] = ["compact", "standard", "tall"];
+
+function sortByPosition(items: WidgetConfig[]): WidgetConfig[] {
+  return [...items].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+}
+
+function cycle<T>(values: readonly T[], current: T): T {
+  const index = values.indexOf(current);
+  return values[(index + 1) % values.length];
 }
 
 /**
- * Curated operational-insight layout: brief, KPI grid, a main chart + side
- * stack, then a bottom row pairing charts with Best Improvement
- * Opportunities — the same structure `ItsmInsightsDashboardContent` uses,
- * generalized to any AI-Designer-created dashboard's widgets rather than
- * the bespoke ITSM data source. Rendered instead of the free-form
- * react-grid-layout widget grid when the dashboard carries the narrative
- * `operationalWidgets` the AI Designer already persists at creation time.
+ * One flowing 12-column grid -- brief strip, then KPI cards and charts
+ * interleaved in a single reorderable sequence, then Best Improvement
+ * Opportunities -- ported directly from `ItsmDashboardContent`'s own
+ * Edit Layout mechanism (native drag-and-drop reorder + a width/height
+ * size cycle, position/size persisted on the widget itself) rather than
+ * the generic react-grid-layout engine every other dashboard uses.
+ *
+ * This is deliberately the ONE layout this grid ever renders, in both
+ * viewing and Edit Layout mode: a separate x/y/w/h grid model for editing
+ * (as react-grid-layout requires) computed its own default positions
+ * independently of this component's curated CSS-grid arrangement, so a
+ * saved edit changed nothing here and a first-time (unedited) dashboard
+ * didn't even look the same in the two modes. Driving both off the same
+ * widget.position/visualizationOptions fields makes that impossible.
  */
 export function OperationalInsightGrid({
   widgets,
   widgetData,
   operationalWidgets,
+  editingLayout = false,
   onEditWidget,
   onElementClick,
   onChartOptions,
   onDeleteWidget,
+  onLayoutChange,
 }: {
   widgets: WidgetConfig[];
   widgetData: Record<string, Array<Record<string, unknown>>>;
   operationalWidgets: OperationalNarrativeWidget[];
+  /** True while the dashboard is in Edit Layout mode -- enables
+   *  drag-to-reorder and the width/height/size cycle controls. */
+  editingLayout?: boolean;
   onEditWidget: (widget: WidgetConfig) => void;
   onElementClick: (widget: WidgetConfig, event: ChartClickEvent) => void;
   /** Opens the lightweight "pick a compatible chart type" picker, reusing
@@ -296,29 +270,84 @@ export function OperationalInsightGrid({
   onChartOptions?: (widget: WidgetConfig) => void;
   /** Removes the widget from the dashboard entirely. */
   onDeleteWidget?: (widget: WidgetConfig) => void;
+  /** Fired with the full widget list (updated position/visualizationOptions)
+   *  after a drag-reorder or a size-cycle click, so the caller can persist
+   *  it -- the same fields this grid renders from in both view and edit
+   *  mode, so a saved change is never invisible outside Edit Layout. */
+  onLayoutChange?: (widgets: WidgetConfig[]) => void;
 }) {
   const brief = findNarrative(operationalWidgets, "operational_brief");
   const improvements = findNarrative(operationalWidgets, "improvement_opportunities");
 
-  const kpiWidgets = widgets.filter((w) => w.type === "kpi");
-  const chartWidgets = widgets.filter((w) => w.type !== "kpi");
-  const [mainChart, ...restCharts] = chartWidgets;
-  const sideCharts = restCharts.slice(0, 2);
-  const bottomCharts = restCharts.slice(2, 4);
-  const overflowCharts = restCharts.slice(4);
+  // Local, immediately-updated copy for drag/resize feedback -- the
+  // `widgets` prop only reflects a save after the mutation round-trips, so
+  // waiting on it would make every drag/click feel like it did nothing
+  // until the request resolved. Resynced whenever the prop itself changes
+  // (widgets added/removed, or the eventual server-confirmed save).
+  const [orderedWidgets, setOrderedWidgets] = useState<WidgetConfig[]>(() => sortByPosition(widgets));
+  useEffect(() => {
+    setOrderedWidgets(sortByPosition(widgets));
+  }, [widgets]);
 
-  const chartCard = (widget: WidgetConfig, heightClass: string) => (
-    <OperationalChartCard
-      key={widget.id}
-      widget={widget}
-      rows={widgetData[widget.id] ?? []}
-      heightClass={heightClass}
-      onEditWidget={onEditWidget}
-      onChartOptions={onChartOptions}
-      onDeleteWidget={onDeleteWidget}
-      onElementClick={onElementClick}
-    />
+  const draggedId = useRef<string | null>(null);
+
+  const applyOrder = useCallback(
+    (next: WidgetConfig[]) => {
+      const repositioned = next.map((w, index) => ({ ...w, position: index }));
+      setOrderedWidgets(repositioned);
+      onLayoutChange?.(repositioned);
+    },
+    [onLayoutChange],
   );
+
+  const handleDrop = useCallback(
+    (targetId: string) => {
+      const sourceId = draggedId.current;
+      draggedId.current = null;
+      if (!sourceId || sourceId === targetId) return;
+      const next = [...orderedWidgets];
+      const from = next.findIndex((w) => w.id === sourceId);
+      const to = next.findIndex((w) => w.id === targetId);
+      if (from < 0 || to < 0) return;
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      applyOrder(next);
+    },
+    [orderedWidgets, applyOrder],
+  );
+
+  const updateVisualizationOptions = useCallback(
+    (widgetId: string, patch: Partial<VisualizationOptions>) => {
+      const next = orderedWidgets.map((w) =>
+        w.id === widgetId ? { ...w, visualizationOptions: { ...w.visualizationOptions, ...patch } } : w,
+      );
+      setOrderedWidgets(next);
+      onLayoutChange?.(next);
+    },
+    [orderedWidgets, onLayoutChange],
+  );
+
+  const chartIndexById = useMemo(() => {
+    const map = new Map<string, number>();
+    let index = 0;
+    for (const w of orderedWidgets) {
+      if (w.type === "kpi") continue;
+      map.set(w.id, index);
+      index += 1;
+    }
+    return map;
+  }, [orderedWidgets]);
+
+  const dragProps = (widgetId: string) => ({
+    draggable: editingLayout,
+    onDragStart: () => { draggedId.current = widgetId; },
+    onDragOver: (event: DragEvent) => { if (editingLayout) event.preventDefault(); },
+    onDrop: (event: DragEvent) => {
+      if (!editingLayout) return;
+      event.preventDefault();
+      handleDrop(widgetId);
+    },
+  });
 
   return (
     <div className={styles.dashboardContainer}>
@@ -329,89 +358,173 @@ export function OperationalInsightGrid({
         />
       )}
 
-      {kpiWidgets.length > 0 && (
+      {editingLayout && (
+        <div className="mt-3 rounded-md border border-dashed border-brand-200 bg-brand-50/40 px-3 py-2 text-xs text-ink-secondary">
+          Drag any card or chart into any grid position. Use the size controls to change chart width and height.
+        </div>
+      )}
+
+      {orderedWidgets.length > 0 && (
         <div className={`${styles.kpiGrid} mt-3`}>
-          {kpiWidgets.map((widget) => (
-            <div key={widget.id} className={styles.cardStandard}>
-              <Card className="h-full p-3">
-                <div className="flex items-start justify-between gap-2">
-                  <span className="truncate text-[11px] font-semibold uppercase tracking-[0.02em] text-ink-secondary">
-                    {widget.title}
-                  </span>
-                  <div className="flex shrink-0 items-center gap-0.5">
-                    <button
-                      type="button"
-                      onClick={() => onEditWidget(widget)}
-                      title="Modify with AI"
-                      className="rounded p-0.5 text-ink-tertiary hover:bg-bg-secondary"
-                    >
-                      {EDIT_ICON}
-                    </button>
-                    {onDeleteWidget && (
+          {orderedWidgets.map((widget) => {
+            if (widget.type === "kpi") {
+              const size = widget.visualizationOptions?.cardSize ?? "standard";
+              return (
+                <div key={widget.id} className={CARD_SIZE_CLASS[size]} {...dragProps(widget.id)}>
+                  <Card className={cn("h-full p-3", editingLayout && "cursor-grab border-dashed")}>
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="truncate text-[11px] font-semibold uppercase tracking-[0.02em] text-ink-secondary">
+                        {widget.title}
+                      </span>
+                      <div className="flex shrink-0 items-center gap-0.5">
+                        {editingLayout && (
+                          <button
+                            type="button"
+                            onClick={() => updateVisualizationOptions(widget.id, { cardSize: cycle(CARD_SIZE_CYCLE, size) })}
+                            title="Resize"
+                            className="rounded bg-bg-secondary px-1.5 py-0.5 text-[10px] font-semibold capitalize text-ink-secondary hover:bg-bg-tertiary"
+                          >
+                            {size}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => onEditWidget(widget)}
+                          title="Modify with AI"
+                          className="rounded p-0.5 text-ink-tertiary hover:bg-bg-secondary"
+                        >
+                          {EDIT_ICON}
+                        </button>
+                        {onDeleteWidget && (
+                          <button
+                            type="button"
+                            onClick={() => onDeleteWidget(widget)}
+                            title="Delete widget"
+                            className="rounded p-0.5 text-ink-tertiary hover:bg-red-50 hover:text-red-600"
+                          >
+                            <IconTrash size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <WidgetRenderer
+                      widget={widget}
+                      data={widgetData[widget.id] ?? []}
+                      operational
+                      onElementClick={(event) => onElementClick(widget, event)}
+                    />
+                  </Card>
+                </div>
+              );
+            }
+
+            // First chart defaults to prominent (full width, tall) to
+            // approximate the old curated "main chart" hierarchy on a
+            // never-edited dashboard; every explicit size is remembered
+            // per widget once the user changes it.
+            const chartIndex = chartIndexById.get(widget.id) ?? 0;
+            const width = widget.visualizationOptions?.chartWidth ?? (chartIndex === 0 ? "full" : "half");
+            const height = widget.visualizationOptions?.chartHeight ?? (chartIndex === 0 ? "tall" : "standard");
+            return (
+              <div
+                key={widget.id}
+                className={width === "full" ? styles.chartFull : styles.chartHalf}
+                {...dragProps(widget.id)}
+              >
+                <Card className={cn("h-full overflow-hidden p-3", editingLayout && "cursor-grab border-dashed")}>
+                  <div className="mb-1 flex items-start justify-between gap-3">
+                    <h3 className="truncate text-small font-semibold text-ink-primary">
+                      {widget.title || "Untitled"}
+                    </h3>
+                    <div className="flex shrink-0 items-center gap-0.5">
+                      {editingLayout && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateVisualizationOptions(widget.id, { chartWidth: width === "full" ? "half" : "full" })
+                            }
+                            title="Toggle width"
+                            className="rounded bg-bg-secondary px-1.5 py-0.5 text-[10px] font-semibold text-ink-secondary hover:bg-bg-tertiary"
+                          >
+                            {width === "full" ? "Full" : "½"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateVisualizationOptions(widget.id, { chartHeight: cycle(CHART_HEIGHT_CYCLE, height) })
+                            }
+                            title="Cycle height"
+                            className="rounded bg-bg-secondary px-1.5 py-0.5 text-[10px] font-semibold capitalize text-ink-secondary hover:bg-bg-tertiary"
+                          >
+                            {height}
+                          </button>
+                        </>
+                      )}
+                      {onChartOptions && (
+                        <button
+                          type="button"
+                          onClick={() => onChartOptions(widget)}
+                          title="Chart options"
+                          className="rounded p-1 text-ink-tertiary transition-colors hover:bg-bg-secondary hover:text-ink-secondary"
+                        >
+                          <IconChartBar size={14} />
+                        </button>
+                      )}
                       <button
                         type="button"
-                        onClick={() => onDeleteWidget(widget)}
-                        title="Delete widget"
-                        className="rounded p-0.5 text-ink-tertiary hover:bg-red-50 hover:text-red-600"
+                        onClick={() => onEditWidget(widget)}
+                        title="Modify with AI"
+                        className="rounded p-1 text-ink-tertiary transition-colors hover:bg-bg-secondary hover:text-ink-secondary"
                       >
-                        <IconTrash size={14} />
+                        {EDIT_ICON}
                       </button>
-                    )}
+                      {onDeleteWidget && (
+                        <button
+                          type="button"
+                          onClick={() => onDeleteWidget(widget)}
+                          title="Delete widget"
+                          className="rounded p-1 text-ink-tertiary transition-colors hover:bg-red-50 hover:text-red-600"
+                        >
+                          <IconTrash size={14} />
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-                <WidgetRenderer
-                  widget={widget}
-                  data={widgetData[widget.id] ?? []}
-                  operational
-                  onElementClick={(event) => onElementClick(widget, event)}
-                />
-              </Card>
-            </div>
-          ))}
+                  <div className={CHART_HEIGHT_CLASS[height]}>
+                    <OperationalWidgetChart
+                      widget={widget}
+                      rows={widgetData[widget.id] ?? []}
+                      className="h-full"
+                      onElementClick={onElementClick}
+                    />
+                  </div>
+                </Card>
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {mainChart && (
-        <div className={`${styles.insightMainGrid} mt-3`}>
-          {chartCard(mainChart, "h-72")}
-          <div className={styles.insightSideStack}>
-            {sideCharts.map((widget) => chartCard(widget, "h-52"))}
+      {improvements && (
+        <Card className="mt-3 p-4">
+          <div className="text-sm font-semibold text-ink-primary">
+            {improvements.title || "Best improvement opportunities"}
           </div>
-        </div>
-      )}
-
-      {(bottomCharts.length > 0 || improvements) && (
-        <div className={`${styles.insightBottomGrid} mt-3`}>
-          {bottomCharts.map((widget) => chartCard(widget, "h-56"))}
-          {improvements && (
-            <Card className="p-4">
-              <div className="text-sm font-semibold text-ink-primary">
-                {improvements.title || "Best improvement opportunities"}
+          <div className="mt-1 text-[11px] text-ink-tertiary">Prioritized by operational impact</div>
+          <div className="mt-4 space-y-3">
+            {(improvements.items ?? []).map((item, index) => (
+              <div
+                key={index}
+                className="flex items-start justify-between gap-3 border-b border-line-tertiary pb-3 text-left last:border-0"
+              >
+                <span className="block text-xs font-semibold text-ink-primary">
+                  {index + 1}. {narrativeText(item)}
+                </span>
               </div>
-              <div className="mt-1 text-[11px] text-ink-tertiary">
-                Prioritized by operational impact
-              </div>
-              <div className="mt-4 space-y-3">
-                {(improvements.items ?? []).map((item, index) => (
-                  <div
-                    key={index}
-                    className="flex items-start justify-between gap-3 border-b border-line-tertiary pb-3 text-left last:border-0"
-                  >
-                    <span className="block text-xs font-semibold text-ink-primary">
-                      {index + 1}. {narrativeText(item)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
-        </div>
-      )}
-
-      {overflowCharts.length > 0 && (
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          {overflowCharts.map((widget) => chartCard(widget, "h-56"))}
-        </div>
+            ))}
+          </div>
+        </Card>
       )}
     </div>
   );
