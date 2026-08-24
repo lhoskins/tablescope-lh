@@ -251,3 +251,33 @@ def test_rebuild_group_by_maps_order_by_alias() -> None:
     out = rebuild_group_by_from_select(sql)
     # Alias in ORDER BY is left as-is because Teiid supports it.
     assert "ORDER BY sales_month" in out
+
+
+def test_rebuild_group_by_handles_extracts_own_from_keyword() -> None:
+    """Reported failure: 'revenue by quarter' produced EXTRACT(YEAR FROM ...)
+    and EXTRACT(QUARTER FROM ...) in the SELECT list. A naive `SELECT ...
+    FROM` split matches EXTRACT's own FROM first and truncates the SELECT
+    list there, well before the query's real FROM clause -- which silently
+    dropped the GROUP BY entirely (rather than rebuilding it) for exactly
+    this shape, the actual reason the deterministic repair didn't fire."""
+    sql = (
+        'SELECT EXTRACT(YEAR FROM "Month") AS Year, '
+        'EXTRACT(QUARTER FROM "Month") AS Quarter, '
+        'SUM(CAST("Revenue" AS double)) AS revenue '
+        'FROM "sales_revenue_monthly_CSV" '
+        'GROUP BY "Month"'
+    )
+    out = rebuild_group_by_from_select(sql)
+    assert 'FROM "sales_revenue_monthly_CSV"' in out
+    gb = out.split("GROUP BY")[1].strip()
+    assert gb == 'EXTRACT(YEAR FROM "Month"), EXTRACT(QUARTER FROM "Month")'
+
+
+def test_rebuild_group_by_single_extract_matches_select() -> None:
+    sql = (
+        'SELECT EXTRACT(QUARTER FROM "Month") AS Quarter, '
+        'SUM(CAST("Revenue" AS double)) AS revenue '
+        'FROM "sales_revenue_monthly_CSV" GROUP BY "Month"'
+    )
+    out = rebuild_group_by_from_select(sql)
+    assert 'GROUP BY EXTRACT(QUARTER FROM "Month")' in out
