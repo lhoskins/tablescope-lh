@@ -504,13 +504,11 @@ async def execute_turn(
     turn.sql_fingerprint = _sql_fingerprint(turn.sql)
 
     if run.get("status") == "ai_unavailable":
-        # The AI service itself could not be reached -- distinct from
-        # "generation_error"/"execution_error" below, where the AI responded
-        # but couldn't build/run a valid query. Falling through to the
-        # Insight Card/KG-prose fallback here would substitute a matched
-        # card for the AI and make an outage look like a working (if
-        # unrelated) answer, which is exactly the confusing behavior this
-        # guards against -- surface a plain error instead.
+        # The AI service itself could not be reached, as opposed to
+        # "generation_error"/"execution_error" below (the AI responded but
+        # couldn't build/run a valid query) -- kept as its own branch for a
+        # more specific default message and error_code than the generic
+        # fallback below would give it.
         turn.status = "error"
         turn.error_code = "ai_unavailable"
         turn.assistant_message = (
@@ -519,114 +517,6 @@ async def execute_turn(
         )
         turn.result_metadata = {"error": run.get("error"), "errorDetails": run.get("errorDetails")}
         return
-
-    if run.get("status") in ("generation_error", "execution_error"):
-        # A question that cannot be grounded or executed on an authorized source
-        # may already be answered by one or more existing, verified Insight Cards —
-        # that analysis ran the real multi-query pipeline, so pointing back to it
-        # beats both a hard SQL error and unattributed KG prose. Check before
-        # falling further back.
-        card_matches = await find_matching_insight_cards(
-            session,
-            context=context,
-            tenant_id=context.tenant_id,
-            project_id=project_id,
-            question=question,
-            # Project Insights is scoped to the project the user is already
-            # looking at — widening there would answer from a different
-            # project than the page the question was asked on. AI Assistant
-            # and Business Insights have no such single-project framing, so
-            # a card from any project the user can access is fair game.
-            allow_cross_project=conversation.surface != "project_insights",
-            max_cards=3,
-        )
-        if card_matches:
-            primary = card_matches[0]
-            related = card_matches[1:]
-            turn.chart_config = None
-            turn.result_cache = None
-            turn.sql = None
-            turn.sql_fingerprint = None
-            turn.datasource_context = {"dataSourcesUsed": []}
-            matched_insights = [_matched_insight_dict(primary)] + [
-                _matched_insight_dict(m) for m in related
-            ]
-            turn.matched_insight = {
-                "insightId": primary.insight_id,
-                "projectId": primary.project_id,
-                "projectName": primary.project_name,
-                "title": primary.title,
-                "summary": primary.summary,
-                "chart": primary.chart,
-                "severity": primary.severity,
-                "diagnostics": primary.diagnostics,
-                "proposedActions": primary.proposed_actions,
-                "score": primary.score,
-                "relatedInsights": [
-                    {
-                        "insightId": m.insight_id,
-                        "projectId": m.project_id,
-                        "projectName": m.project_name,
-                        "title": m.title,
-                        "summary": m.summary,
-                        "chart": m.chart,
-                        "severity": m.severity,
-                        "diagnostics": m.diagnostics,
-                        "proposedActions": m.proposed_actions,
-                        "score": m.score,
-                    }
-                    for m in related
-                ],
-            }
-            # Keep the fallback message focused on the existing analysis the
-            # user can act on. The live-query failure reason is still captured
-            # in result_metadata for debugging, but it is not user-facing text.
-            synthesized = await _synthesize_answer(
-                context,
-                project_id,
-                question,
-                matched_insights=matched_insights,
-            )
-            turn.assistant_message = (
-                synthesized
-                or f"I found an existing analysis that answers this: **{primary.title}**"
-                + (f"\n\n{primary.summary}" if primary.summary else "")
-            )
-            # Machine-readable trail for debugging why the live path failed,
-            # even though the turn itself completed successfully from the
-            # user's point of view. error_code is intentionally set despite
-            # status="success" -- nothing in the schema or frontend treats a
-            # non-null error_code as implying failure, and it is the only
-            # place this reason is queryable/filterable server-side.
-            turn.error_code = f"live_query_fallback_{run.get('status')}"
-            turn.result_metadata = {
-                "fallbackReason": run.get("status"),
-                "fallbackError": run.get("error"),
-                "fallbackErrorDetails": run.get("errorDetails"),
-                "insightCardScores": [m.score for m in card_matches],
-            }
-            turn.status = "success"
-            return
-
-        # No existing card answers it either; the question may still be
-        # answerable from documents/KG prose instead of a hard SQL error.
-        # Degrades gracefully if the AI service is busy.
-        prose = await _forward_prose_answer(
-            session,
-            context,
-            project_id=project_id,
-            question=question,
-        )
-        answer = prose.get("answer") if isinstance(prose, dict) else (str(prose) if prose else "")
-        if answer:
-            turn.assistant_message = answer
-            turn.chart_config = None
-            turn.result_cache = None
-            turn.sql = None
-            turn.sql_fingerprint = None
-            turn.datasource_context = {"dataSourcesUsed": []}
-            turn.status = "success"
-            return
 
     if run.get("status") != "success":
         turn.status = "error"

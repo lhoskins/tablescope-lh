@@ -124,12 +124,13 @@ async def test_create_conversation_with_initial_message(client, service_headers,
     assert body["turns"][0]["chart_config"]["type"] == "bar"
 
 
-async def test_generation_error_surfaces_matching_insight_card_over_prose(
+async def test_generation_error_reports_the_real_reason_not_a_matched_card(
     client, db_session, service_headers, monkeypatch
 ):
-    """A question the fresh SQL path can't answer, but that an existing
-    Insight Card already answered, must point back to that card — chart and
-    breadcrumb id included — instead of degrading to unattributed KG prose."""
+    """A question the fresh SQL path can't answer must surface *why* --
+    not stand in an unrelated but topically-similar Insight Card and mark
+    the turn a success. Matching a card here made a failed live query look
+    like a working answer, and hid the real reason the user asked for."""
     from app.models.business_insight_result import BusinessInsightResult
 
     tenant, _, project, headers = await _setup(client, service_headers, "conv-insight-match")
@@ -156,13 +157,18 @@ async def test_generation_error_surfaces_matching_insight_card_over_prose(
     await db_session.commit()
 
     async def _fake_generation_error(*args, **kwargs):
-        return {"status": "generation_error", "sql": "", "error": "no source matched"}
+        return {
+            "status": "generation_error",
+            "sql": "",
+            "error": "Model did not return a runnable SQL query.",
+            "errorDetails": {"validationError": "empty completion"},
+        }
 
     async def _fail_if_called(*args, **kwargs):
-        raise AssertionError("prose fallback must not run when a card matches")
-
-    async def _fake_select(**kwargs):
-        return {"insight_id": "mat-cost-001", "confidence": 0.9, "reason": "on topic"}
+        raise AssertionError(
+            "insight-card and prose fallback must not run for a generation_error -- "
+            "the real reason must be reported instead of a substitute answer"
+        )
 
     monkeypatch.setattr(
         "app.services.conversational_analytics._ask_and_run_core",
@@ -172,10 +178,10 @@ async def test_generation_error_surfaces_matching_insight_card_over_prose(
         "app.services.conversational_analytics._forward_prose_answer",
         _fail_if_called,
     )
-    from app.services import insight_card_match as icm
-
-    monkeypatch.setattr(icm.ai_intelligence_client, "is_enabled", lambda: True)
-    monkeypatch.setattr(icm.ai_intelligence_client, "select_matching_insight_card", _fake_select)
+    monkeypatch.setattr(
+        "app.services.conversational_analytics.find_matching_insight_cards",
+        _fail_if_called,
+    )
 
     r = await client.post(
         "/api/conversational-analytics/conversations",
@@ -187,20 +193,13 @@ async def test_generation_error_surfaces_matching_insight_card_over_prose(
     )
     assert r.status_code == 200, r.text
     turn = r.json()["turns"][0]
-    assert turn["status"] == "success"
-    assert turn["matched_insight"]["insightId"] == "mat-cost-001"
-    assert turn["matched_insight"]["title"] == "Material cost on the rise"
-    assert turn["matched_insight"]["chart"] == {"type": "line", "data": {"rows": []}}
-    assert "Material cost on the rise" in turn["assistant_message"]
+    assert turn["status"] == "error"
+    assert turn["matched_insight"] is None
+    assert turn["assistant_message"] == "Model did not return a runnable SQL query."
     assert turn["sql"] is None
     assert turn["chart_config"] is None
-
-    # The failure reason is server-side metadata only; the user-facing message
-    # should be clean and focused on the existing Insight Card answer.
-    assert "couldn't build a live query" not in turn["assistant_message"]
-    assert "I found an existing analysis that answers this" in turn["assistant_message"]
-    assert turn["error_code"] == "live_query_fallback_generation_error"
-    assert turn["result_metadata"]["fallbackError"] == "no source matched"
+    assert turn["error_code"] == "generation_error"
+    assert turn["result_metadata"]["errorDetails"] == {"validationError": "empty completion"}
 
 
 async def test_ai_unavailable_hard_errors_instead_of_matching_an_insight_card(
