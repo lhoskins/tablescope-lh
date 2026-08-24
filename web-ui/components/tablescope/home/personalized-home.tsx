@@ -15,14 +15,21 @@ import {
   IconSparkles,
   IconTargetArrow,
 } from "@tabler/icons-react";
-import { InsightChartView } from "@/components/tablescope/home/intelligence-card";
+import { buildMultiDimWidget } from "@/components/tablescope/home/intelligence-card/build-multi-dim-widget";
 import { Button } from "@/components/ui/button";
+import {
+  OperationalChart,
+  toOperationalChartData,
+  type OperationalChartData,
+} from "@/components/dashboard/OperationalInsightGrid";
+import type { WidgetConfig, WidgetType } from "@/components/dashboard/types";
 import { getHomeActionSummary, type HomeActionItem } from "@/lib/api/home-actions";
 import {
   getIntelligenceSnapshot,
   getPreferences,
   updatePreferences,
 } from "@/lib/api/home-intelligence";
+import type { InsightChart } from "@/lib/api/home-intelligence";
 import { useAllDocuments } from "@/lib/ui/use-shell-data";
 import {
   buildHomeDevelopments,
@@ -32,6 +39,46 @@ import {
   selectPerformanceInsight,
 } from "./home-persona";
 import { HomeSettingsDialog } from "./home-settings-dialog";
+
+/**
+ * Company performance renders through the same ITSM chart renderer the
+ * ITSM preset dashboards use (skinny horizontal bars, the subtle 10%-opacity
+ * line-area fill) instead of the generic WidgetRenderer/EChartsWidget engine
+ * InsightChartView uses everywhere else -- so this one card matches the ITSM
+ * visual language the rest of the Home briefing was built to, rather than
+ * looking like a plain Business Insight card. Reuses the same two building
+ * blocks InsightChartView itself uses (buildMultiDimWidget for a tabular
+ * chart, or a synthetic single-series widget) so any chart type Home might
+ * rank to the top still renders -- just through the ITSM-styled path.
+ */
+function toItsmPerformanceChart(chart: InsightChart): OperationalChartData | null {
+  const dataRows = chart.data.rows;
+  if (dataRows && dataRows.length > 0) {
+    return toOperationalChartData(buildMultiDimWidget(chart, dataRows), dataRows);
+  }
+
+  const series = chart.data.series;
+  if (!series || series.length === 0) return null;
+  const valueName = chart.seriesLabels?.value ?? chart.roles?.y ?? "value";
+  const xName = chart.roles?.x ?? "label";
+  const rows = series.map((item) => ({ [xName]: item.label, [valueName]: item.value }));
+  const widget: WidgetConfig = {
+    id: "company-performance",
+    type: chart.type as WidgetType,
+    chartSubtype: (chart.subtype || undefined) as WidgetConfig["chartSubtype"],
+    title: "",
+    dataSource: { kind: "custom_sql" },
+    xColumn: xName,
+    xColumnType: "string",
+    yColumn: valueName,
+    aggregation: "sum",
+    sortBy: "x_asc",
+    filters: [],
+    colSpan: 1,
+    position: 0,
+  };
+  return toOperationalChartData(widget, rows);
+}
 
 const DEFAULT_FOCUS = [
   "Revenue vs backlog",
@@ -114,6 +161,10 @@ export function PersonalizedHome({
     () => selectPerformanceInsight(rankedInsights),
     [rankedInsights],
   );
+  const performanceChart = useMemo(
+    () => (performanceInsight?.chart ? toItsmPerformanceChart(performanceInsight.chart) : null),
+    [performanceInsight],
+  );
   const developments = useMemo(
     () => buildHomeDevelopments(allInsights, documents, persona, focusItems),
     [allInsights, documents, focusItems, persona],
@@ -177,7 +228,7 @@ export function PersonalizedHome({
         </Button>
       </header>
 
-      <section className="rounded-xl border border-line-tertiary bg-bg-secondary p-5">
+      <section className="rounded-xl border border-line-tertiary bg-white p-5">
         <div className="flex items-center gap-2 text-caption font-medium uppercase tracking-wide text-ink-tertiary">
           <IconBriefcase size={15} className="text-brand-500" />
           Executive brief
@@ -200,7 +251,7 @@ export function PersonalizedHome({
         {profile.metricLabels.map((label, index) => (
           <article
             key={label}
-            className="rounded-xl border border-brand-100 bg-brand-50 px-4 py-3.5"
+            className="rounded-xl border border-[#DBE4F2] bg-[#DBE4F2] px-4 py-3.5"
           >
             <p className="text-caption font-medium uppercase tracking-wide text-ink-secondary">
               {label}
@@ -233,20 +284,22 @@ export function PersonalizedHome({
               </Link>
             ) : null}
           </div>
-          <div className="mt-4 min-h-[230px]">
-            {performanceInsight?.chart ? (
-              <InsightChartView chart={performanceInsight.chart} height={230} />
+          <div className="mt-4 min-h-[230px] rounded-lg bg-[#F1F1F2] p-2">
+            {performanceChart ? (
+              <div style={{ height: 230 }}>
+                <OperationalChart chart={performanceChart} className="h-full" />
+              </div>
             ) : insightsLoading ? (
               <div className="h-[230px] animate-pulse rounded-lg bg-bg-secondary" />
             ) : (
-              <div className="flex h-[230px] items-center justify-center rounded-lg bg-bg-secondary px-8 text-center text-small text-ink-tertiary">
+              <div className="flex h-[230px] items-center justify-center rounded-lg px-8 text-center text-small text-ink-tertiary">
                 Generate or pin a chart-backed insight to establish the primary company performance view.
               </div>
             )}
           </div>
         </article>
 
-        <article className="rounded-xl border border-line-tertiary bg-bg-secondary p-4">
+        <article className="rounded-xl border border-line-tertiary bg-[#FCFCFC] p-4">
           <div className="flex items-center gap-2">
             <IconSparkles size={16} className="text-brand-500" />
             <h2 className="text-h3 text-ink-primary">Key developments</h2>
@@ -300,7 +353,7 @@ export function PersonalizedHome({
       </section>
 
       <section className="grid gap-3 lg:grid-cols-3">
-        <article className="rounded-xl border border-line-tertiary bg-bg-secondary p-4">
+        <article className="rounded-xl border border-line-tertiary bg-[#FCFCFC] p-4">
           <div className="flex items-center justify-between gap-3">
             <span className="flex items-center gap-2 text-[13px] font-medium text-ink-primary">
               <IconAlertTriangle size={16} className="text-danger" /> Material risks
@@ -320,7 +373,7 @@ export function PersonalizedHome({
           ) : null}
         </article>
 
-        <article className="rounded-xl border border-line-tertiary bg-bg-secondary p-4">
+        <article className="rounded-xl border border-line-tertiary bg-[#FCFCFC] p-4">
           <div className="flex items-center justify-between gap-3">
             <span className="flex items-center gap-2 text-[13px] font-medium text-ink-primary">
               <IconTargetArrow size={16} className="text-emerald-600" /> Opportunities
@@ -342,7 +395,7 @@ export function PersonalizedHome({
           ) : null}
         </article>
 
-        <article className="rounded-xl border border-line-tertiary bg-bg-secondary p-4">
+        <article className="rounded-xl border border-line-tertiary bg-[#FCFCFC] p-4">
           <div className="flex items-center justify-between gap-3">
             <span className="flex items-center gap-2 text-[13px] font-medium text-ink-primary">
               <IconCalendarDue size={16} className="text-amber-600" /> Assigned actions

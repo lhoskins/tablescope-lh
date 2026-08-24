@@ -17,6 +17,13 @@ const {
   useAllDocuments: vi.fn(),
 }));
 
+const { chartMock, initMock, useMock } = vi.hoisted(() => {
+  const chartMock = { setOption: vi.fn(), on: vi.fn(), resize: vi.fn(), dispose: vi.fn() };
+  const initMock = vi.fn(() => chartMock);
+  const useMock = vi.fn();
+  return { chartMock, initMock, useMock };
+});
+
 vi.mock("@/lib/api/home-actions", () => ({ getHomeActionSummary }));
 vi.mock("@/lib/api/home-intelligence", () => ({
   getIntelligenceSnapshot,
@@ -24,11 +31,7 @@ vi.mock("@/lib/api/home-intelligence", () => ({
   updatePreferences,
 }));
 vi.mock("@/lib/ui/use-shell-data", () => ({ useAllDocuments }));
-vi.mock("@/components/tablescope/home/intelligence-card", () => ({
-  InsightChartView: ({ chart }: { chart: { title?: string } }) => (
-    <div data-testid="company-performance-chart">{chart.title}</div>
-  ),
-}));
+vi.mock("echarts/core", () => ({ use: useMock, init: initMock }));
 
 import { PersonalizedHome } from "./personalized-home";
 
@@ -139,12 +142,10 @@ describe("PersonalizedHome", () => {
       { wrapper },
     );
 
-    await waitFor(() =>
-      expect(screen.getAllByText("Revenue and backlog trend").length).toBeGreaterThan(0),
-    );
+    await waitFor(() => expect(initMock).toHaveBeenCalled());
     expect(screen.getByText("CEO perspective · Personal business briefing")).toBeTruthy();
     expect(screen.getByText("Projects monitored")).toBeTruthy();
-    expect(screen.getByTestId("company-performance-chart")).toBeTruthy();
+    expect(screen.getByText("Company performance")).toBeTruthy();
     expect(screen.getByText("Q3 Performance Review")).toBeTruthy();
     expect(
       screen.getAllByText("Revenue conversion softened while backlog remained elevated").length,
