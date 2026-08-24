@@ -383,16 +383,19 @@ def _is_read_only_select(sql: str) -> bool:
     return bool(_READONLY_START_RE.match(body))
 
 
-def _ai_generation_error(exc: HTTPException) -> tuple[str, dict[str, Any]]:
-    """Translate an AI-server generation failure into a friendly message + details.
+def _ai_generation_error(detail: Any) -> tuple[str, dict[str, Any]]:
+    """Translate an AI-server generation failure's ``detail`` into a friendly
+    message + details.
 
     Returns ``(message, details)`` where ``message`` is safe to show a user and
     ``details`` carries expandable technical context (matched sources, validation
-    error) — never a raw dict repr or stack trace.
+    error) — never a raw dict repr or stack trace. ``detail`` may come from an
+    ``HTTPException`` raised locally or from an ``AIUnavailableError.detail``
+    parsed out of the AI server's own 4xx response body -- both use the same
+    ``{"message", "reason", "suggested_sources"}`` shape.
     """
     friendly = "We could not safely build a query for this question."
     details: dict[str, Any] = {}
-    detail = exc.detail
     if isinstance(detail, dict):
         message = detail.get("message")
         if message:
@@ -600,12 +603,32 @@ async def _ask_and_run_core(
             grounding_evidence=grounding_evidence,
         )
     except ai.AIUnavailableError as exc:
-        # Distinct from "generation_error": the AI service itself could not
-        # be reached/completed the request, so a matched Insight Card or KG
-        # prose answer would be standing in for the AI, not summarizing it --
-        # exactly the silent-fallback behavior that made an AI-server outage
-        # look like a working (if irrelevant) answer. Callers must surface
-        # this as a hard error, not fall further back.
+        if exc.declined:
+            # The AI server was reached and responded -- it just rejected
+            # this specific request (e.g. the SQL generator's structured 422
+            # "needs clarification"). That's the same shape as the
+            # HTTPException branch below, so it gets the same friendly
+            # message and the same downstream Insight-Card fallback instead
+            # of a false "the AI service is unavailable".
+            friendly, details = _ai_generation_error(exc.detail)
+            return {
+                "question": question,
+                "sql": "",
+                "columns": [],
+                "rows": [],
+                "suggestedVisualization": {"type": "table"},
+                "explanation": "",
+                "dataSourcesUsed": [],
+                "status": "generation_error",
+                "error": friendly,
+                "errorDetails": details,
+                "groundingManifest": grounding_manifest,
+            }
+        # A genuine outage (unreachable, timed out, busy): a matched Insight
+        # Card or KG prose answer would be standing in for the AI, not
+        # summarizing it -- exactly the silent-fallback behavior that made
+        # an AI-server outage look like a working (if irrelevant) answer.
+        # Callers must surface this as a hard error, not fall further back.
         return {
             "question": question,
             "sql": "",
@@ -620,7 +643,7 @@ async def _ask_and_run_core(
             "groundingManifest": grounding_manifest,
         }
     except HTTPException as exc:
-        friendly, details = _ai_generation_error(exc)
+        friendly, details = _ai_generation_error(exc.detail)
         return {
             "question": question,
             "sql": "",
@@ -1034,6 +1057,21 @@ async def ai_generate_query_preview(
             relevant_columns=resolver.relevant_columns,
         )
     except ai.AIUnavailableError as exc:
+        if exc.declined:
+            friendly, details = _ai_generation_error(exc.detail)
+            return {
+                "title": title,
+                "description": req.description or "",
+                "sql": "",
+                "columns": [],
+                "rows": [],
+                "suggestedVisualization": {"type": "table"},
+                "dataSourcesUsed": [],
+                "explanation": "",
+                "status": "generation_error",
+                "error": friendly,
+                "errorDetails": details,
+            }
         return {
             "title": title,
             "description": req.description or "",
@@ -1048,7 +1086,7 @@ async def ai_generate_query_preview(
             "errorDetails": {"aiError": str(exc)},
         }
     except HTTPException as exc:
-        friendly, details = _ai_generation_error(exc)
+        friendly, details = _ai_generation_error(exc.detail)
         return {
             "title": title,
             "description": req.description or "",

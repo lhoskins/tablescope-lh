@@ -702,9 +702,7 @@ def test_is_read_only_select_rejects_prose_and_writes():
 
 
 def test_ai_generation_error_from_string_detail():
-    friendly, details = _ai_generation_error(
-        HTTPException(status_code=503, detail="AI server unreachable")
-    )
+    friendly, details = _ai_generation_error("AI server unreachable")
     assert friendly == "We could not safely build a query for this question."
     assert details["validationError"] == "AI server unreachable"
 
@@ -820,3 +818,73 @@ async def test_ask_and_run_hard_errors_when_ai_is_unavailable(
     body = r.json()
     assert body["status"] == "ai_unavailable"
     assert body["error"]
+
+
+async def test_generate_query_preview_declined_is_a_generation_error_not_unavailable(
+    client, service_headers, monkeypatch
+):
+    """A 4xx from the AI server (it responded, but rejected this request) must
+    not be reported as an outage -- that's what AIUnavailableError.declined
+    exists to distinguish from a real unreachable/busy/timed-out failure."""
+    _, _, project, headers = await _setup(client, service_headers, "prevdeclined")
+
+    async def fake_generate(*args, **kwargs):
+        raise aic.AIUnavailableError(
+            "AI server request failed with HTTP 422.",
+            status_code=422,
+            detail={
+                "code": "needs_clarification",
+                "message": "Model did not return a runnable SQL query.",
+                "reason": "empty completion",
+                "suggested_sources": [],
+            },
+        )
+
+    monkeypatch.setattr(aic, "generate_sql", fake_generate)
+
+    r = await client.post(
+        "/api/ai/actions/generate-query-preview",
+        json={
+            "project_id": project["id"],
+            "question": "monthly revenue",
+            "title": "Monthly Revenue",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "generation_error"
+    assert body["error"] == "Model did not return a runnable SQL query."
+
+
+async def test_ask_and_run_declined_falls_back_instead_of_hard_erroring(
+    client, service_headers, monkeypatch
+):
+    """A declined (4xx) AIUnavailableError is the AI server working as
+    intended -- it should still fall back to the documents/KG prose answer,
+    same as any other generation_error, not skip that fallback like a real
+    outage does."""
+    _, _, project, headers = await _setup(client, service_headers, "askdeclined")
+
+    async def fake_generate(*args, **kwargs):
+        raise aic.AIUnavailableError(
+            "AI server request failed with HTTP 422.",
+            status_code=422,
+            detail={"message": "Model did not return a runnable SQL query."},
+        )
+
+    async def fake_ask(*args, **kwargs):
+        return {"answer": "Shipments were late due to a supplier delay.", "model_used": "m"}
+
+    monkeypatch.setattr(aic, "generate_sql", fake_generate)
+    monkeypatch.setattr(aic, "ask", fake_ask)
+
+    r = await client.post(
+        "/api/ai/actions/ask-and-run",
+        json={"project_id": project["id"], "question": "Why are shipments late?"},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "success"
+    assert body["explanation"] == "Shipments were late due to a supplier delay."
