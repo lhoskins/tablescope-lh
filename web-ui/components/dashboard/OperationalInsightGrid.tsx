@@ -72,6 +72,18 @@ function niceName(column: string): string {
   return column.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+// Bar subtypes that lay out horizontally -- mirrors the grid-placement check
+// in the backend's `_widget_configs` (ai_proxy_dashboard_designer.py) so a
+// chart classified as horizontal there for layout purposes renders
+// horizontally here too. Anything else (the "column" default, "stacked_bar",
+// "grouped_bar", "positive_negative", "waterfall", or no subtype at all) is
+// vertical.
+const HORIZONTAL_BAR_SUBTYPES = new Set([
+  "horizontal_bar",
+  "stacked_horizontal",
+  "population_pyramid",
+]);
+
 /** Adapts a dashboard widget + its fetched rows into the shape ItsmChart
  *  renders, so any AI-Designer chart gets the exact ServiceNow chart
  *  styling rather than an approximation of it. Pivots into one series per
@@ -121,9 +133,14 @@ export function toOperationalChartData(
     series = [{ name: widget.title || yKey || "Value", x, y }];
   }
 
+  // Previously every "bar" widget was hard-mapped to "skinny_bar"
+  // (horizontal) regardless of the subtype the user picked in the
+  // chart-type picker, silently discarding that choice.
   const chartType =
     widget.type === "bar"
-      ? "skinny_bar"
+      ? HORIZONTAL_BAR_SUBTYPES.has(widget.chartSubtype ?? "")
+        ? "skinny_bar"
+        : "column"
       : widget.type === "combo"
         ? "combo"
         : widget.type === "pie"
@@ -146,16 +163,49 @@ export function toOperationalChartData(
 }
 
 /**
- * One chart card, as its own component rather than an inline-rendered
- * function, so `useMemo`/`useCallback` can keep the `ItsmChart` instance
+ * The chart itself -- data adaptation + click handler + `ItsmChart` --
+ * without the surrounding Card/header chrome. Its own component (rather
+ * than inlined) so `useMemo`/`useCallback` keep the `ItsmChart` instance
  * stable across renders that don't actually change this widget's config or
- * data. Without that, every unrelated re-render of the parent grid (a
+ * data; without that, every unrelated re-render of the parent grid (a
  * cross-filter click, another widget's data arriving, a dialog opening)
  * rebuilt the chart-data object and the click handler from scratch, which
  * forced `ItsmChart` to fully dispose and re-`echarts.init()` on every
  * tick -- harmless in isolation, but the visible symptom (flashing/frozen
  * chart) when combined with a render loop elsewhere.
+ *
+ * Exported so DashboardViewer's Edit Layout grid can render the exact same
+ * ITSM-styled chart inside its own draggable/resizable grid item, instead
+ * of falling back to the generic WidgetRenderer/EChartsWidget engine (which
+ * has different chart defaults, e.g. vertical bars vs ItsmChart's
+ * horizontal ones) and visibly changing the dashboard's appearance just
+ * from entering edit mode.
  */
+export function OperationalWidgetChart({
+  widget,
+  rows,
+  className,
+  onElementClick,
+}: {
+  widget: WidgetConfig;
+  rows: Array<Record<string, unknown>>;
+  className?: string;
+  onElementClick: (widget: WidgetConfig, event: ChartClickEvent) => void;
+}) {
+  const chartData = useMemo(() => toOperationalChartData(widget, rows), [widget, rows]);
+  const handleElementClick = useCallback(
+    (name: string, value: number | null) =>
+      onElementClick(widget, {
+        sourceField: widget.xColumn || widget.xKey || "",
+        value: value ?? name,
+        label: name,
+      }),
+    [widget, onElementClick],
+  );
+
+  return <OperationalChart chart={chartData} className={className} onElementClick={handleElementClick} />;
+}
+
 function OperationalChartCard({
   widget,
   rows,
@@ -173,17 +223,6 @@ function OperationalChartCard({
   onDeleteWidget?: (widget: WidgetConfig) => void;
   onElementClick: (widget: WidgetConfig, event: ChartClickEvent) => void;
 }) {
-  const chartData = useMemo(() => toOperationalChartData(widget, rows), [widget, rows]);
-  const handleElementClick = useCallback(
-    (name: string, value: number | null) =>
-      onElementClick(widget, {
-        sourceField: widget.xColumn || widget.xKey || "",
-        value: value ?? name,
-        label: name,
-      }),
-    [widget, onElementClick],
-  );
-
   return (
     <Card className="overflow-hidden p-3">
       <div className="mb-1 flex items-start justify-between gap-3">
@@ -222,7 +261,7 @@ function OperationalChartCard({
         </div>
       </div>
       <div className={heightClass}>
-        <OperationalChart chart={chartData} className="h-full" onElementClick={handleElementClick} />
+        <OperationalWidgetChart widget={widget} rows={rows} className="h-full" onElementClick={onElementClick} />
       </div>
     </Card>
   );

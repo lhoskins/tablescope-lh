@@ -91,4 +91,31 @@ describe("toOperationalChartData", () => {
 
     expect(chart.visualizationOptions).toBeUndefined();
   });
+
+  it("renders a plain bar widget vertically (\"column\") by default", () => {
+    const widget = baseWidget({ type: "bar", yColumn: "count" });
+
+    const chart = toOperationalChartData(widget, [{ month: "2026-01", count: 7 }]);
+
+    expect(chart.chartType).toBe("column");
+  });
+
+  it("renders a bar widget vertically when chartSubtype is a vertical variant", () => {
+    const widget = baseWidget({ type: "bar", chartSubtype: "stacked_bar", yColumn: "count" });
+
+    const chart = toOperationalChartData(widget, [{ month: "2026-01", count: 7 }]);
+
+    expect(chart.chartType).toBe("column");
+  });
+
+  it("renders a bar widget horizontally when chartSubtype is horizontal_bar", () => {
+    // Previously every "bar" widget was force-mapped to skinny_bar
+    // (horizontal) regardless of chartSubtype, silently discarding the
+    // vertical/horizontal choice made in the chart-type picker.
+    const widget = baseWidget({ type: "bar", chartSubtype: "horizontal_bar", yColumn: "count" });
+
+    const chart = toOperationalChartData(widget, [{ month: "2026-01", count: 7 }]);
+
+    expect(chart.chartType).toBe("skinny_bar");
+  });
 });

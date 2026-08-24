@@ -88,6 +88,50 @@ export function ItsmChart({ chart, onElementClick, className }: ItsmChartProps) 
         visualMap: { min: 0, max: maximum, show: false, inRange: { color: ["#eff6ff", "#93c5fd", "#2563eb"] } },
         series: [{ type: "heatmap", data: heatData, label: { show: true, fontSize: 10 }, emphasis: { itemStyle: { shadowBlur: 8, shadowColor: "rgba(15, 23, 42, 0.18)" } } }],
       };
+    } else if (chart.chartType === "column") {
+      // Vertical bars -- the axes are swapped relative to "bar"/"skinny_bar"
+      // below, which are both horizontal. Distinct from those two so a
+      // widget explicitly configured as a vertical bar (chartSubtype other
+      // than a horizontal variant) renders that way here too, instead of
+      // this renderer silently forcing every bar horizontal.
+      option = {
+        tooltip: {
+          trigger: "axis",
+          axisPointer: { type: "shadow" },
+          ...(opts ? { formatter: (params: unknown) => tooltipFormatter(params, opts.yAxisFormat, opts.valueScale, opts.currencySymbol) } : {}),
+        },
+        grid: { left: 8, right: 12, bottom: 8, top: 8, containLabel: true },
+        xAxis: {
+          type: "category",
+          data: categories,
+          axisTick: { show: false },
+          axisLabel: { fontSize: 11 },
+        },
+        yAxis: {
+          type: "value",
+          name: chart.yAxisLabel ?? undefined,
+          nameGap: 10,
+          splitLine: { lineStyle: { color: "#e8edf3" } },
+          ...(opts ? { axisLabel: { formatter: (v: number) => formatAxisNumber(v, opts) } } : {}),
+        },
+        series: chart.series.map((series, index) => ({
+          type: "bar",
+          name: series.name,
+          data: series.y,
+          barMaxWidth: 32,
+          itemStyle: {
+            color: OPERATIONAL_INSIGHT_THEME.palette[index % OPERATIONAL_INSIGHT_THEME.palette.length],
+            borderRadius: [4, 4, 0, 0],
+          },
+          label: {
+            show: true,
+            position: "top",
+            fontSize: 10,
+            color: "#475569",
+            ...(opts ? { formatter: (p: { value?: unknown }) => formatNumber(Number(p.value ?? 0), opts.yAxisFormat, opts.valueScale, opts.currencySymbol) } : {}),
+          },
+        })),
+      };
     } else if (chart.chartType === "bar" || chart.chartType === "skinny_bar") {
       option = {
         tooltip: {

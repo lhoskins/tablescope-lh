@@ -36,7 +36,10 @@ import type {
 } from "./types";
 import type { QueryScope, QueryScopeFilterResponse } from "@/types/query-scope";
 import { WidgetRenderer } from "./WidgetRenderer";
-import { OperationalInsightGrid } from "./OperationalInsightGrid";
+import {
+  OperationalInsightGrid,
+  OperationalWidgetChart,
+} from "./OperationalInsightGrid";
 import { WidgetChartOptionsDialog } from "./WidgetChartOptionsDialog";
 import { FilterBar } from "./FilterBar";
 import { DateRangeControl } from "./DateRangeControl";
@@ -1009,12 +1012,26 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
                   </div>
                   {/* Chart */}
                   <div className={operational ? "overflow-hidden px-3 pb-3 pt-1" : "overflow-hidden p-3"} style={{ height: operational ? "calc(100% - 38px)" : "calc(100% - 52px)" }}>
-                    <WidgetRenderer
-                      widget={w}
-                      data={widgetData[w.id] ?? []}
-                      operational={operational}
-                      onElementClick={(ev) => handleElementClick(w, ev)}
-                    />
+                    {operational && w.type !== "kpi" ? (
+                      // Render through the same ITSM-styled chart the
+                      // non-editing view uses (OperationalInsightGrid), not
+                      // the generic WidgetRenderer -- entering Edit Layout
+                      // must only add drag/resize, not change how the chart
+                      // itself looks.
+                      <OperationalWidgetChart
+                        widget={w}
+                        rows={widgetData[w.id] ?? []}
+                        className="h-full"
+                        onElementClick={handleElementClick}
+                      />
+                    ) : (
+                      <WidgetRenderer
+                        widget={w}
+                        data={widgetData[w.id] ?? []}
+                        operational={operational}
+                        onElementClick={(ev) => handleElementClick(w, ev)}
+                      />
+                    )}
                   </div>
                 </div>
               </div>

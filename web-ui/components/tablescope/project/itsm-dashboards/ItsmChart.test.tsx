@@ -55,6 +55,25 @@ describe("ItsmChart", () => {
     expect(call.series[0].label?.formatter?.({ value: 8_675_866.14 })).toBe("8.7M");
   });
 
+  it("renders a \"column\" chart with vertical (category x-axis, value y-axis) orientation", () => {
+    // Distinct from "bar"/"skinny_bar" (both horizontal) -- a widget
+    // explicitly configured as a vertical bar must actually render
+    // vertically, not fall through to the horizontal layout every other
+    // bar type used.
+    const chart = baseChart({
+      chartType: "column",
+      visualizationOptions: { valueScale: "millions" },
+    });
+    render(<ItsmChart chart={chart} />);
+    const call = chartMock.setOption.mock.calls.at(-1)?.[0] as {
+      xAxis?: { type?: string };
+      yAxis?: { type?: string; axisLabel?: { formatter?: (v: number) => string } };
+    };
+    expect(call.xAxis?.type).toBe("category");
+    expect(call.yAxis?.type).toBe("value");
+    expect(call.yAxis?.axisLabel?.formatter?.(8_675_866.14)).toBe("8.7M");
+  });
+
   it("scales the line chart's y-axis to millions with a currency symbol when both are set", () => {
     const chart = baseChart({
       visualizationOptions: { valueScale: "millions", yAxisFormat: "currency", currencySymbol: "€" },
