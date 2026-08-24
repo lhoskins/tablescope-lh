@@ -178,6 +178,53 @@ async def test_explicit_max_tokens_is_passed_through_unchanged(_patch_async_clie
 
 
 @pytest.mark.asyncio
+async def test_generate_omits_min_tokens_when_unset(_patch_async_client):
+    """A plain generate() call is unaffected by the SQL-path fix below --
+    min_tokens must stay opt-in, not a blanket default for every caller."""
+    _patch_async_client["response"] = _chat_completion({"content": "hi"})
+
+    await llm_client.generate(prompt="p", model="m", ollama_url="http://vllm/v1")
+
+    assert "min_tokens" not in _patch_async_client["json"]
+
+
+@pytest.mark.asyncio
+async def test_generate_sql_sends_min_tokens(_patch_async_client):
+    """Reproduces the live fix: generate_sql must set min_tokens so vLLM
+    can't stop after a short reasoning-only burst, well under max_tokens,
+    before ever reaching the SQL answer (confirmed live -- see llm_client's
+    _SQL_MIN_TOKENS comment)."""
+    _patch_async_client["response"] = _chat_completion({"content": "SELECT 1"})
+
+    await llm_client.generate_sql(
+        prompt="revenue by quarter",
+        context="",
+        allowed_tables=["sales_revenue_monthly_CSV"],
+        model="sql-model",
+        ollama_url="http://vllm/v1",
+    )
+
+    assert _patch_async_client["json"]["min_tokens"] == llm_client._SQL_MIN_TOKENS
+
+
+@pytest.mark.asyncio
+async def test_repair_sql_sends_min_tokens(_patch_async_client):
+    _patch_async_client["response"] = _chat_completion({"content": "SELECT 1"})
+
+    await llm_client.repair_sql(
+        prompt="revenue by quarter",
+        context="",
+        allowed_tables=["sales_revenue_monthly_CSV"],
+        failed_sql="SELECT 1",
+        validation_error="TEIID30492",
+        model="sql-model",
+        ollama_url="http://vllm/v1",
+    )
+
+    assert _patch_async_client["json"]["min_tokens"] == llm_client._SQL_MIN_TOKENS
+
+
+@pytest.mark.asyncio
 async def test_no_num_ctx_and_no_max_tokens_omits_max_tokens_entirely(_patch_async_client):
     _patch_async_client["response"] = _chat_completion({"content": "ok"})
 
