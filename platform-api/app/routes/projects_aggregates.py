@@ -546,6 +546,11 @@ async def list_all_documents(
                 projects.get(a.project_id), a.owner_user_id, user_names
             )[1],
             "createdAt": a.created_at.isoformat() if a.created_at else None,
+            "updatedAt": a.updated_at.isoformat() if a.updated_at else None,
+            # The Home briefing uses the AI-produced document summary as a
+            # development. Returning it here avoids an N+1 asset-detail fetch
+            # while preserving the same project/tenant visibility filter.
+            "aiSummary": a.ai_summary,
         }
         for a in rows
     ]

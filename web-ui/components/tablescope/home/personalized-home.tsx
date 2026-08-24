@@ -1,25 +1,46 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  IconAlertCircle,
+  IconAlertTriangle,
+  IconArrowUpRight,
+  IconBriefcase,
   IconCalendarDue,
-  IconCheck,
+  IconChartLine,
   IconCircleCheck,
-  IconPlus,
+  IconFileText,
+  IconSettings2,
   IconSparkles,
-  IconX,
+  IconTargetArrow,
 } from "@tabler/icons-react";
+import { InsightChartView } from "@/components/tablescope/home/intelligence-card";
 import { Button } from "@/components/ui/button";
 import { getHomeActionSummary, type HomeActionItem } from "@/lib/api/home-actions";
 import {
+  getIntelligenceSnapshot,
   getPreferences,
   updatePreferences,
 } from "@/lib/api/home-intelligence";
+import { useAllDocuments } from "@/lib/ui/use-shell-data";
+import {
+  buildHomeDevelopments,
+  homePersonaProfile,
+  normalizeHomePersona,
+  rankHomeInsights,
+  selectPerformanceInsight,
+} from "./home-persona";
+import { HomeSettingsDialog } from "./home-settings-dialog";
 
-const DEFAULT_FOCUS = ["Revenue vs backlog", "ITSM SLA risk", "Actions due this week"];
+const DEFAULT_FOCUS = [
+  "Revenue vs backlog",
+  "ITSM SLA risk",
+  "Actions due this week",
+];
+
+const RISK_SEVERITIES = new Set(["critical", "urgent", "warning", "watch"]);
+const OPPORTUNITY_SEVERITIES = new Set(["opportunity", "recommendation"]);
 
 function dueLabel(value: string | null): { text: string; overdue: boolean } {
   if (!value) return { text: "No due date", overdue: false };
@@ -29,26 +50,40 @@ function dueLabel(value: string | null): { text: string; overdue: boolean } {
   if (days < 0) return { text: `${Math.abs(days)}d overdue`, overdue: true };
   if (days === 0) return { text: "Due today", overdue: false };
   if (days === 1) return { text: "Due tomorrow", overdue: false };
-  return { text: `Due ${due.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`, overdue: false };
+  return {
+    text: `Due ${due.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+    })}`,
+    overdue: false,
+  };
 }
 
-function actionUpdateLabel(action: HomeActionItem): string {
-  if (action.status === "completed") return "Action completed";
-  if (action.status === "blocked") return "Action needs attention";
-  if (action.status === "in_progress") return "Action is in progress";
-  return "Action updated";
+function assignedSummary(actions: HomeActionItem[]): string {
+  if (!actions.length) return "No active actions are assigned to you.";
+  const overdue = actions.filter((action) => dueLabel(action.due_date).overdue).length;
+  if (overdue) return `${overdue} overdue action${overdue === 1 ? "" : "s"} require your response.`;
+  return `${actions.length} active action${actions.length === 1 ? "" : "s"} are waiting for your response.`;
+}
+
+function truncate(value: string, length = 145): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > length
+    ? `${normalized.slice(0, length).trimEnd()}…`
+    : normalized;
 }
 
 export function PersonalizedHome({
   projectCount,
+  greetingText,
   onPersonalize,
 }: {
   projectCount: number;
+  greetingText: string;
   onPersonalize?: (handler: () => void) => void;
 }) {
   const queryClient = useQueryClient();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [draftFocus, setDraftFocus] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const { data: actionSummary, isLoading: actionsLoading } = useQuery({
     queryKey: ["home-action-summary"],
     queryFn: getHomeActionSummary,
@@ -57,135 +92,300 @@ export function PersonalizedHome({
     queryKey: ["user-preferences"],
     queryFn: getPreferences,
   });
-  const focusItems = preferences
-    ? preferences.intelligence.home_focus
-    : DEFAULT_FOCUS;
+  const { data: snapshotResponse, isLoading: insightsLoading } = useQuery({
+    queryKey: ["home-intelligence-snapshot"],
+    queryFn: getIntelligenceSnapshot,
+  });
+  const { data: documents = [], isLoading: documentsLoading } = useAllDocuments();
 
-  const saveFocus = useMutation({
-    mutationFn: (items: string[]) => updatePreferences({ home_focus: items }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["user-preferences"] }),
+  const persona = normalizeHomePersona(preferences?.intelligence.home_persona);
+  const profile = homePersonaProfile(persona);
+  const focusItems = preferences?.intelligence.home_focus ?? DEFAULT_FOCUS;
+  const snapshot = snapshotResponse?.snapshot;
+  const allInsights = useMemo(
+    () => snapshot?.results.flatMap((result) => result.insights) ?? [],
+    [snapshot],
+  );
+  const rankedInsights = useMemo(
+    () => rankHomeInsights(allInsights, persona, focusItems),
+    [allInsights, focusItems, persona],
+  );
+  const performanceInsight = useMemo(
+    () => selectPerformanceInsight(rankedInsights),
+    [rankedInsights],
+  );
+  const developments = useMemo(
+    () => buildHomeDevelopments(allInsights, documents, persona, focusItems),
+    [allInsights, documents, focusItems, persona],
+  );
+  const risks = rankedInsights.filter((card) => RISK_SEVERITIES.has(card.severity));
+  const opportunities = rankedInsights.filter((card) =>
+    OPPORTUNITY_SEVERITIES.has(card.severity),
+  );
+  const topInsight = rankedInsights[0];
+  const briefHeadline =
+    topInsight?.title ?? "Your executive briefing is ready for new project signals";
+  const briefBody =
+    topInsight?.summary ??
+    snapshot?.synthesis?.body ??
+    "Tablescope will summarize material developments here as AI insights and indexed project documents become available.";
+
+  const saveSettings = useMutation({
+    mutationFn: (settings: { persona: typeof persona; focusItems: string[] }) =>
+      updatePreferences({
+        home_persona: settings.persona,
+        home_focus: settings.focusItems,
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["user-preferences"] });
+      setSettingsOpen(false);
+    },
   });
 
-  const personalize = () => inputRef.current?.focus();
-  useEffect(() => onPersonalize?.(personalize), [onPersonalize]);
-
-  function addFocus() {
-    const value = draftFocus.trim();
-    if (!value || focusItems.some((item) => item.toLowerCase() === value.toLowerCase())) return;
-    saveFocus.mutate([...focusItems, value]);
-    setDraftFocus("");
-  }
-
-  function removeFocus(item: string) {
-    saveFocus.mutate(focusItems.filter((candidate) => candidate !== item));
-  }
+  useEffect(() => {
+    onPersonalize?.(() => setSettingsOpen(true));
+  }, [onPersonalize]);
 
   const highlights = actionSummary?.highlights ?? {
     needs_attention: 0,
     due_this_week: 0,
     recently_completed: 0,
   };
+  const metricValues = [
+    projectCount,
+    risks.length,
+    opportunities.length,
+    highlights.due_this_week,
+  ];
 
   return (
-    <div className="space-y-6">
-      <section className="grid gap-5 rounded-xl border border-line-tertiary bg-bg-primary p-5 shadow-sm xl:grid-cols-[minmax(0,1fr)_260px] xl:items-center">
+    <div className="space-y-5">
+      <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <div className="mb-2 flex items-center gap-2 text-caption font-medium uppercase tracking-wide text-ink-tertiary">
+          <div className="mb-1.5 flex items-center gap-2 text-caption font-medium uppercase tracking-wide text-ink-tertiary">
             <IconSparkles size={14} className="text-brand-500" />
-            My focus · AI monitored
+            {profile.label} perspective · Personal business briefing
           </div>
-          <h2 className="text-h2 text-ink-primary">What would you like Tablescope to watch for?</h2>
-          <p className="mt-1 max-w-3xl text-body text-ink-secondary">
-            Define the decisions, risks, KPIs, or business questions that matter to you. Tablescope uses these interests to prioritize Home.
+          <h1 className="text-h1 text-ink-primary">{greetingText}</h1>
+          <p className="mt-1 max-w-4xl text-body text-ink-tertiary">
+            {profile.purpose}
           </p>
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            {focusItems.map((item) => (
-              <span key={item} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-bg-secondary px-3 text-small text-ink-primary">
-                {item}
-                <button type="button" aria-label={`Remove ${item}`} onClick={() => removeFocus(item)} className="text-ink-tertiary hover:text-ink-primary">
-                  <IconX size={13} />
-                </button>
-              </span>
-            ))}
-            <div className="flex items-center gap-1">
-              <input
-                ref={inputRef}
-                value={draftFocus}
-                onChange={(event) => setDraftFocus(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") addFocus();
-                }}
-                placeholder="Add a focus"
-                aria-label="Add a Home focus"
-                className="h-8 w-36 rounded-md border border-line-tertiary bg-bg-primary px-2 text-small outline-none transition focus:w-56 focus:border-brand-500"
-              />
-              <Button variant="secondary" size="sm" onClick={addFocus} disabled={!draftFocus.trim() || saveFocus.isPending}>
-                <IconPlus size={14} />
-                Add
-              </Button>
-            </div>
-          </div>
         </div>
-        <dl className="space-y-3 border-t border-line-tertiary pt-4 xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0">
-          <div className="flex items-baseline justify-between gap-4"><dt className="text-small text-ink-tertiary">Projects monitored</dt><dd className="text-h3 text-ink-primary">{projectCount}</dd></div>
-          <div className="flex items-baseline justify-between gap-4"><dt className="text-small text-ink-tertiary">Action updates</dt><dd className="text-h3 text-ink-primary">{actionSummary?.updates.length ?? 0}</dd></div>
-          <div className="flex items-baseline justify-between gap-4"><dt className="text-small text-ink-tertiary">Focus topics</dt><dd className="text-h3 text-ink-primary">{focusItems.length}</dd></div>
-        </dl>
+        <Button variant="brandSoft" size="md" onClick={() => setSettingsOpen(true)}>
+          <IconSettings2 size={15} />
+          {profile.label} view
+        </Button>
+      </header>
+
+      <section className="rounded-xl border border-line-tertiary bg-bg-secondary p-5">
+        <div className="flex items-center gap-2 text-caption font-medium uppercase tracking-wide text-ink-tertiary">
+          <IconBriefcase size={15} className="text-brand-500" />
+          Executive brief
+        </div>
+        <h2 className="mt-2 max-w-5xl text-h2 text-ink-primary">{briefHeadline}</h2>
+        <p className="mt-1.5 max-w-5xl text-body leading-relaxed text-ink-secondary">
+          {truncate(briefBody, 260)}
+        </p>
+        {topInsight ? (
+          <Link
+            href={`/business-insight/analysis/${encodeURIComponent(topInsight.insightId || topInsight.id)}`}
+            className="mt-3 inline-flex items-center gap-1 text-small font-medium text-brand-700 hover:underline"
+          >
+            Review supporting insight <IconArrowUpRight size={14} />
+          </Link>
+        ) : null}
       </section>
 
-      <section>
-        <div className="mb-3 flex items-end justify-between gap-4">
-          <div><h2 className="text-h3 text-ink-primary">Action highlights</h2><p className="mt-0.5 text-small text-ink-tertiary">Signals derived from project actions—not a separate task board.</p></div>
-        </div>
-        <div className="grid gap-3 md:grid-cols-3">
-          {[
-            { label: "Needs attention", value: highlights.needs_attention, icon: IconAlertCircle, tone: "text-danger", copy: "Blocked or overdue work across your visible projects." },
-            { label: "Due in 7 days", value: highlights.due_this_week, icon: IconCalendarDue, tone: "text-amber-600", copy: "Active actions that need an owner response this week." },
-            { label: "Recently completed", value: highlights.recently_completed, icon: IconCircleCheck, tone: "text-emerald-600", copy: "Actions completed during the last seven days." },
-          ].map((item) => (
-            <article key={item.label} className="min-h-32 rounded-xl border border-line-tertiary bg-bg-primary p-4 shadow-sm">
-              <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2 text-[13px] font-medium text-ink-primary"><item.icon size={16} className={item.tone} />{item.label}</div><span className="text-h1 text-ink-primary">{actionsLoading ? "—" : item.value}</span></div>
-              <p className="mt-3 text-small leading-relaxed text-ink-tertiary">{item.copy}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(300px,.65fr)]">
-        <div>
-          <div className="mb-3 flex items-end justify-between gap-3"><div><h2 className="text-h3 text-ink-primary">Assigned to me</h2><p className="mt-0.5 text-small text-ink-tertiary">A concise list of work requiring your response.</p></div></div>
-          <div className="overflow-hidden rounded-xl border border-line-tertiary bg-bg-primary shadow-sm">
-            {actionSummary?.assigned.length ? actionSummary.assigned.map((action) => {
-              const due = dueLabel(action.due_date);
-              return (
-                <Link key={action.id} href={`/projects/${action.project_id}/actions`} className="grid grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-3 border-b border-line-tertiary px-4 py-3 last:border-b-0 hover:bg-bg-secondary">
-                  <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full border border-line-secondary text-transparent"><IconCheck size={11} /></span>
-                  <span className="min-w-0"><span className="block truncate text-[13px] font-medium text-ink-primary">{action.title}</span><span className="mt-0.5 block text-caption text-ink-tertiary">{action.project_name} · Priority: {action.priority}</span></span>
-                  <span className={`text-caption ${due.overdue ? "font-medium text-danger" : "text-ink-tertiary"}`}>{due.text}</span>
-                </Link>
-              );
-            }) : <p className="px-4 py-8 text-center text-small text-ink-tertiary">No active actions are assigned to you.</p>}
-          </div>
-        </div>
-        <div>
-          <div className="mb-3">
-            <h2 className="text-h3 text-ink-primary">Updates for you</h2>
-            <p className="mt-0.5 text-small text-ink-tertiary">
-              {actionSummary?.updates_matched_focus
-                ? "Only changes connected to your focus."
-                : "Recent changes across your project actions."}
+      <section aria-label="Executive metrics" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {profile.metricLabels.map((label, index) => (
+          <article
+            key={label}
+            className="rounded-xl border border-brand-100 bg-brand-50 px-4 py-3.5"
+          >
+            <p className="text-caption font-medium uppercase tracking-wide text-ink-secondary">
+              {label}
             </p>
-          </div>
-          <div className="overflow-hidden rounded-xl border border-line-tertiary bg-bg-primary px-4 shadow-sm">
-            {actionSummary?.updates.length ? actionSummary.updates.slice(0, 4).map((action) => (
-              <Link key={action.id} href={`/projects/${action.project_id}/actions`} className="flex gap-3 border-b border-line-tertiary py-3 last:border-b-0">
-                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-bg-secondary text-brand-500"><IconSparkles size={14} /></span>
-                <span className="min-w-0"><strong className="block truncate text-small font-medium text-ink-primary">{actionUpdateLabel(action)}: {action.title}</strong><span className="mt-0.5 block text-caption text-ink-tertiary">{action.project_name}</span></span>
-              </Link>
-            )) : <p className="py-8 text-center text-small text-ink-tertiary">No project action updates yet.</p>}
-          </div>
-        </div>
+            <p className="mt-1 text-[26px] font-bold leading-tight text-ink-primary">
+              {actionsLoading && index === 3 ? "—" : metricValues[index]}
+            </p>
+          </article>
+        ))}
       </section>
+
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(340px,.75fr)]">
+        <article className="min-h-[330px] rounded-xl border border-line-tertiary bg-bg-primary p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <IconChartLine size={16} className="text-brand-500" />
+                <h2 className="text-h3 text-ink-primary">Company performance</h2>
+              </div>
+              <p className="mt-0.5 text-small text-ink-tertiary">
+                {performanceInsight?.title ?? "The highest-priority performance trend for this view."}
+              </p>
+            </div>
+            {performanceInsight ? (
+              <Link
+                href={`/business-insight/analysis/${encodeURIComponent(performanceInsight.insightId || performanceInsight.id)}`}
+                className="inline-flex shrink-0 items-center gap-1 text-caption font-medium text-brand-700 hover:underline"
+              >
+                Explore <IconArrowUpRight size={13} />
+              </Link>
+            ) : null}
+          </div>
+          <div className="mt-4 min-h-[230px]">
+            {performanceInsight?.chart ? (
+              <InsightChartView chart={performanceInsight.chart} height={230} />
+            ) : insightsLoading ? (
+              <div className="h-[230px] animate-pulse rounded-lg bg-bg-secondary" />
+            ) : (
+              <div className="flex h-[230px] items-center justify-center rounded-lg bg-bg-secondary px-8 text-center text-small text-ink-tertiary">
+                Generate or pin a chart-backed insight to establish the primary company performance view.
+              </div>
+            )}
+          </div>
+        </article>
+
+        <article className="rounded-xl border border-line-tertiary bg-bg-secondary p-4">
+          <div className="flex items-center gap-2">
+            <IconSparkles size={16} className="text-brand-500" />
+            <h2 className="text-h3 text-ink-primary">Key developments</h2>
+          </div>
+          <p className="mt-0.5 text-small text-ink-tertiary">
+            Ranked AI findings and project documents for the {profile.label} lens.
+          </p>
+          <div className="mt-3 divide-y divide-line-tertiary">
+            {developments.length ? (
+              developments.map((development) => {
+                const DevelopmentIcon =
+                  development.kind === "document" ? IconFileText : IconSparkles;
+                return (
+                  <Link
+                    key={`${development.kind}-${development.id}`}
+                    href={development.href}
+                    className="group flex gap-3 py-3 first:pt-1 last:pb-0"
+                  >
+                    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-bg-primary text-brand-500">
+                      <DevelopmentIcon size={15} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center justify-between gap-2">
+                        <strong className="truncate text-small font-medium text-ink-primary group-hover:text-brand-700">
+                          {development.title}
+                        </strong>
+                        <span className="shrink-0 rounded-full bg-bg-primary px-2 py-0.5 text-[10px] font-medium capitalize text-ink-tertiary">
+                          {development.badge}
+                        </span>
+                      </span>
+                      <span className="mt-0.5 block text-caption text-ink-tertiary">
+                        {development.projectName} · {truncate(development.summary, 105)}
+                      </span>
+                    </span>
+                  </Link>
+                );
+              })
+            ) : insightsLoading || documentsLoading ? (
+              <div className="space-y-3 py-2">
+                {[0, 1, 2].map((item) => (
+                  <div key={item} className="h-14 animate-pulse rounded-lg bg-bg-primary" />
+                ))}
+              </div>
+            ) : (
+              <p className="py-10 text-center text-small text-ink-tertiary">
+                Key developments will appear as insights and documents are analyzed.
+              </p>
+            )}
+          </div>
+        </article>
+      </section>
+
+      <section className="grid gap-3 lg:grid-cols-3">
+        <article className="rounded-xl border border-line-tertiary bg-bg-secondary p-4">
+          <div className="flex items-center justify-between gap-3">
+            <span className="flex items-center gap-2 text-[13px] font-medium text-ink-primary">
+              <IconAlertTriangle size={16} className="text-danger" /> Material risks
+            </span>
+            <strong className="text-h2 text-ink-primary">{risks.length}</strong>
+          </div>
+          <p className="mt-3 min-h-10 text-small leading-relaxed text-ink-tertiary">
+            {risks[0] ? truncate(risks[0].summary) : "No material AI risk signals are available for this view."}
+          </p>
+          {risks[0] ? (
+            <Link
+              href={`/business-insight/analysis/${encodeURIComponent(risks[0].insightId || risks[0].id)}`}
+              className="mt-3 inline-flex items-center gap-1 text-caption font-medium text-brand-700 hover:underline"
+            >
+              Review risk <IconArrowUpRight size={13} />
+            </Link>
+          ) : null}
+        </article>
+
+        <article className="rounded-xl border border-line-tertiary bg-bg-secondary p-4">
+          <div className="flex items-center justify-between gap-3">
+            <span className="flex items-center gap-2 text-[13px] font-medium text-ink-primary">
+              <IconTargetArrow size={16} className="text-emerald-600" /> Opportunities
+            </span>
+            <strong className="text-h2 text-ink-primary">{opportunities.length}</strong>
+          </div>
+          <p className="mt-3 min-h-10 text-small leading-relaxed text-ink-tertiary">
+            {opportunities[0]
+              ? truncate(opportunities[0].summary)
+              : "No AI opportunity signals are available for this view."}
+          </p>
+          {opportunities[0] ? (
+            <Link
+              href={`/business-insight/analysis/${encodeURIComponent(opportunities[0].insightId || opportunities[0].id)}`}
+              className="mt-3 inline-flex items-center gap-1 text-caption font-medium text-brand-700 hover:underline"
+            >
+              Review opportunity <IconArrowUpRight size={13} />
+            </Link>
+          ) : null}
+        </article>
+
+        <article className="rounded-xl border border-line-tertiary bg-bg-secondary p-4">
+          <div className="flex items-center justify-between gap-3">
+            <span className="flex items-center gap-2 text-[13px] font-medium text-ink-primary">
+              <IconCalendarDue size={16} className="text-amber-600" /> Assigned actions
+            </span>
+            <strong className="text-h2 text-ink-primary">
+              {actionsLoading ? "—" : actionSummary?.assigned.length ?? 0}
+            </strong>
+          </div>
+          <p className="mt-3 min-h-10 text-small leading-relaxed text-ink-tertiary">
+            {assignedSummary(actionSummary?.assigned ?? [])}
+          </p>
+          {actionSummary?.assigned[0] ? (() => {
+            const action = actionSummary.assigned[0];
+            const due = dueLabel(action.due_date);
+            return (
+              <Link
+                href={`/projects/${action.project_id}/actions`}
+                className="mt-3 flex items-center justify-between gap-3 text-caption"
+              >
+                <span className="min-w-0 truncate font-medium text-brand-700 hover:underline">
+                  {action.title}
+                </span>
+                <span className={due.overdue ? "shrink-0 font-medium text-danger" : "shrink-0 text-ink-tertiary"}>
+                  {due.text}
+                </span>
+              </Link>
+            );
+          })() : (
+            <span className="mt-3 inline-flex items-center gap-1 text-caption text-emerald-700">
+              <IconCircleCheck size={13} /> You are up to date
+            </span>
+          )}
+        </article>
+      </section>
+
+      <HomeSettingsDialog
+        open={settingsOpen}
+        persona={persona}
+        focusItems={focusItems}
+        saving={saveSettings.isPending}
+        onClose={() => setSettingsOpen(false)}
+        onSave={(settings) => saveSettings.mutate(settings)}
+      />
     </div>
   );
 }

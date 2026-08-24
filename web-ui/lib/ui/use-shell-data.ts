@@ -136,6 +136,8 @@ export interface HomeDocumentRow {
   ownerId: number | null;
   ownerName: string;
   createdAt: string | null;
+  updatedAt: string | null;
+  aiSummary: string | null;
 }
 
 export interface HomeDataSourceRow {

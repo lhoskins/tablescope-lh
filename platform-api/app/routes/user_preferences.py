@@ -21,6 +21,22 @@ _DEFAULT_INTELLIGENCE = {
     "email_digest": False,
     "granularity": 3,
     "home_focus": [],
+    # Presentation lens only. It affects Home ranking and terminology but never
+    # expands the projects, documents, tables, or rows the caller may access.
+    "home_persona": "executive",
+}
+
+_HOME_PERSONAS = {
+    "ceo",
+    "cfo",
+    "cio",
+    "cdo",
+    "executive",
+    "it_manager",
+    "it_director",
+    "manufacturing_director",
+    "business_analyst",
+    "engineer",
 }
 
 
@@ -58,6 +74,9 @@ async def update_preferences(
 
     prefs = _with_defaults(user.preferences or {})
     if body.intelligence is not None:
+        requested_persona = body.intelligence.get("home_persona")
+        if requested_persona is not None and requested_persona not in _HOME_PERSONAS:
+            raise HTTPException(status_code=422, detail="Unsupported Home persona")
         prefs["intelligence"] = {
             **prefs["intelligence"],
             **body.intelligence,

@@ -63,7 +63,7 @@ export default function HomePage() {
         <>
           <Button variant="secondary" size="md" onClick={() => personalizeRef.current()}>
             <IconAdjustmentsHorizontal size={15} />
-            Personalize Home
+            Home settings
           </Button>
           <StatusDot tone="online" className="ml-1 mr-1" />
           <Button
@@ -78,16 +78,9 @@ export default function HomePage() {
       }
     >
       <div className="space-y-6 pb-8">
-        <div>
-          <h1 className="text-h1 text-ink-primary">
-            {user.name ? greeting(user.name) : "Home"}
-          </h1>
-          <p className="mt-1 text-body text-ink-tertiary">
-            Your priorities, assigned work, and the insights you chose to follow.
-          </p>
-        </div>
         <PersonalizedHome
           projectCount={allProjects?.length ?? 0}
+          greetingText={user.name ? greeting(user.name) : "Home"}
           onPersonalize={registerPersonalize}
         />
         <HomePinsGrid />
