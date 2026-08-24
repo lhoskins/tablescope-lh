@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toOperationalChartData } from "./OperationalInsightGrid";
+import { rowSpanFor, toOperationalChartData } from "./OperationalInsightGrid";
 import type { WidgetConfig } from "./types";
 
 function baseWidget(overrides: Partial<WidgetConfig> = {}): WidgetConfig {
@@ -117,5 +117,24 @@ describe("toOperationalChartData", () => {
     const chart = toOperationalChartData(widget, [{ month: "2026-01", count: 7 }]);
 
     expect(chart.chartType).toBe("skinny_bar");
+  });
+});
+
+describe("rowSpanFor", () => {
+  it("gives shorter cards a smaller row span than taller ones", () => {
+    // Distinct spans are what let CSS Grid's `dense` auto-placement actually
+    // backfill a short card into the gap next to a taller one -- if every
+    // card claimed the same span regardless of height, there would be no
+    // gap to detect.
+    expect(rowSpanFor(96)).toBeLessThan(rowSpanFor(320));
+  });
+
+  it("never returns less than one row", () => {
+    expect(rowSpanFor(0)).toBeGreaterThanOrEqual(1);
+    expect(rowSpanFor(-50)).toBeGreaterThanOrEqual(1);
+  });
+
+  it("two cards of the same height claim the same span", () => {
+    expect(rowSpanFor(224)).toBe(rowSpanFor(224));
   });
 });

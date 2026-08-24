@@ -141,7 +141,7 @@ describe("OperationalInsightGrid", () => {
     expect(options.gridHeightPx).toBeGreaterThan(96);
   });
 
-  it("does not stretch a KPI card to a neighboring chart's height", () => {
+  it("sizes each card's grid-row span from its own height, not a neighbor's", () => {
     const widgets = [
       kpiWidget({ id: "kpi-1", title: "Total Revenue", position: 0 }),
       chartWidget({ id: "chart-1", title: "Monthly Revenue", position: 1 }),
@@ -155,11 +155,17 @@ describe("OperationalInsightGrid", () => {
         onElementClick={noop}
       />,
     );
-    const grid = document.querySelector('[class*="kpiGrid"]') as HTMLElement;
-    expect(grid.style.alignItems).toBe("start");
-
-    const kpiCard = screen.getByText("Total Revenue").closest("div.relative") as HTMLElement;
-    expect(kpiCard.style.height).toBe("96px");
+    // The KPI card's default height (96px) and the lone/"main" chart's
+    // default height (320px) must produce different row spans -- if the KPI
+    // card were still stretching to the chart's height (the bug this grid
+    // used to have), both would come out the same.
+    const kpiCell = screen.getByText("Total Revenue").closest("div.relative")
+      ?.parentElement as HTMLElement;
+    const chartCell = screen.getByText("Monthly Revenue").closest("div.relative")
+      ?.parentElement as HTMLElement;
+    expect(kpiCell.style.gridRow).toBeTruthy();
+    expect(chartCell.style.gridRow).toBeTruthy();
+    expect(kpiCell.style.gridRow).not.toBe(chartCell.style.gridRow);
   });
 
   it("drags a chart's resize handle and reports the new width and height", () => {
@@ -213,6 +219,36 @@ describe("OperationalInsightGrid", () => {
     const saved = onLayoutChange.mock.calls.at(-1)?.[0] as WidgetConfig[];
     expect(saved.map((w) => w.id)).toEqual(["b", "a"]);
     expect(saved.map((w) => w.position)).toEqual([0, 1]);
+  });
+
+  it("dropping on empty grid space (not on another card) moves the widget to the end", () => {
+    // Only individual cards had a drop target before -- releasing over a
+    // gap between cards (e.g. the open space dense packing leaves below a
+    // short card) did nothing at all.
+    const onLayoutChange = vi.fn();
+    const widgets = [
+      kpiWidget({ id: "a", title: "A", position: 0 }),
+      kpiWidget({ id: "b", title: "B", position: 1 }),
+      kpiWidget({ id: "c", title: "C", position: 2 }),
+    ];
+    render(
+      <OperationalInsightGrid
+        widgets={widgets}
+        widgetData={{}}
+        operationalWidgets={[]}
+        editingLayout
+        onEditWidget={noop}
+        onElementClick={noop}
+        onLayoutChange={onLayoutChange}
+      />,
+    );
+    const cardA = screen.getByText("A").closest("[draggable]") as HTMLElement;
+    const grid = document.querySelector('[class*="kpiGrid"]') as HTMLElement;
+    fireEvent.dragStart(cardA);
+    fireEvent.drop(grid);
+
+    const saved = onLayoutChange.mock.calls.at(-1)?.[0] as WidgetConfig[];
+    expect(saved.map((w) => w.id)).toEqual(["b", "c", "a"]);
   });
 
   it("does not allow dragging when not in edit mode", () => {

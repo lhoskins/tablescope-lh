@@ -1,0 +1,18 @@
+/*
+ * Additive on top of the shared `ItsmDashboardScreen.module.css` `.kpiGrid`
+ * class (display/gap/columns) -- kept in a separate file, not merged into
+ * the shared one, because that class is also used as-is by the native ITSM
+ * preset dashboards (`ItsmDashboardContent`/`ItsmInsightsDashboardContent`),
+ * whose cards size by natural content height with no explicit row span.
+ * Forcing fixed-height row tracks there would break their layout.
+ *
+ * `dense` + a fine-grained fixed row unit let CSS Grid's own auto-placement
+ * backfill a smaller card into open space next to a taller neighbor --
+ * e.g. two KPI cards stacked under one another beside a tall chart --
+ * purely from array order and each item's explicit `gridRow: span N`
+ * (computed from its height), with no manual x/y placement needed.
+ */
+.denseGrid {
+  grid-auto-flow: dense;
+  grid-auto-rows: 8px;
+}
