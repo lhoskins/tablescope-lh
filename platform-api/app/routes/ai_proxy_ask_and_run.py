@@ -9,7 +9,7 @@ import logging
 import re
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -339,15 +339,21 @@ async def _execute_with_repair(
             last_error = str(exc.detail)
             if attempt >= 2:
                 break
-            fixed = await ai.fix_sql(
-                tenant_id=context.tenant_id,
-                user_id=context.user_id,
-                project_id=project_id,
-                sql=current,
-                error=last_error,
-                allowed_tables=allowed_tables,
-                table_schema=table_schema,
-            )
+            try:
+                fixed = await ai.fix_sql(
+                    tenant_id=context.tenant_id,
+                    user_id=context.user_id,
+                    project_id=project_id,
+                    sql=current,
+                    error=last_error,
+                    allowed_tables=allowed_tables,
+                    table_schema=table_schema,
+                )
+            except ai.AIUnavailableError:
+                # The AI service dropped mid-repair -- stop retrying rather
+                # than let this propagate uncaught (this loop's contract is
+                # to never raise) and report the last real Teiid error.
+                break
             normalized = (fixed or "").strip().rstrip(";")
             if (
                 not normalized
@@ -472,30 +478,27 @@ async def _generate_sql_for_question(
     source_catalog = await _build_source_catalog(
         session, tenant_id=context.tenant_id, project_id=project_id
     )
-    try:
-        ai_result = await ai.generate_sql(
-            tenant_id=context.tenant_id,
-            user_id=context.user_id,
-            project_id=project_id,
-            prompt=question,
-            allowed_tables=allowed_tables,
-            source_catalog=source_catalog,
-            preferred_sources=preferred_sources or [],
-            relevant_columns=relevant_columns or [],
-            knowledge_graph_context=await _kg_context(session, context, project_id),
-            grounding_evidence=grounding_evidence,
-            relationship_hints=relationship_hints,
-        )
-    except ai.AIUnavailableError as exc:
-        raise HTTPException(
-            status_code=exc.status_code or status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
+    # AIUnavailableError propagates as-is (not wrapped in HTTPException) so
+    # callers can tell "the AI service itself is unreachable" apart from "the
+    # AI service responded but declined/failed to build a valid query" --
+    # collapsing both into the same generic failure is what let an AI-server
+    # outage silently resolve to a matched Insight Card instead of a clear
+    # error, with no way for the caller to know that's what happened.
+    ai_result = await ai.generate_sql(
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        project_id=project_id,
+        prompt=question,
+        allowed_tables=allowed_tables,
+        source_catalog=source_catalog,
+        preferred_sources=preferred_sources or [],
+        relevant_columns=relevant_columns or [],
+        knowledge_graph_context=await _kg_context(session, context, project_id),
+        grounding_evidence=grounding_evidence,
+        relationship_hints=relationship_hints,
+    )
     if not isinstance(ai_result, dict):
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="AI server is unavailable",
-        )
+        raise ai.AIUnavailableError("AI server returned an invalid response")
     ai_result["_allowed_tables"] = allowed_tables
     return ai_result
 
@@ -596,6 +599,26 @@ async def _ask_and_run_core(
             relevant_columns=resolver.relevant_columns,
             grounding_evidence=grounding_evidence,
         )
+    except ai.AIUnavailableError as exc:
+        # Distinct from "generation_error": the AI service itself could not
+        # be reached/completed the request, so a matched Insight Card or KG
+        # prose answer would be standing in for the AI, not summarizing it --
+        # exactly the silent-fallback behavior that made an AI-server outage
+        # look like a working (if irrelevant) answer. Callers must surface
+        # this as a hard error, not fall further back.
+        return {
+            "question": question,
+            "sql": "",
+            "columns": [],
+            "rows": [],
+            "suggestedVisualization": {"type": "table"},
+            "explanation": "",
+            "dataSourcesUsed": [],
+            "status": "ai_unavailable",
+            "error": "The AI service is currently unavailable. Please try again shortly.",
+            "errorDetails": {"aiError": str(exc)},
+            "groundingManifest": grounding_manifest,
+        }
     except HTTPException as exc:
         friendly, details = _ai_generation_error(exc)
         return {
@@ -834,6 +857,12 @@ async def _forward_prose_answer(
     Used as a fallback for analytical/document questions that don't map to a
     single SQL source, so they get a real answer instead of a hard error.
     Grounds the answer in the project's Knowledge Graph when one exists.
+
+    Returns ``{"ai_unavailable": True}`` when the AI service itself could not
+    be reached, distinct from an empty ``{}`` "no answer" -- callers must
+    treat the two differently: "we tried and had nothing to say" is fine to
+    fall further back from, but "we could not even ask" must surface as a
+    hard error instead of silently degrading to whatever fallback runs next.
     """
     try:
         result = await ai.ask(
@@ -849,7 +878,7 @@ async def _forward_prose_answer(
             grounding_evidence=grounding_evidence,
         )
     except ai.AIUnavailableError:
-        return {}
+        return {"ai_unavailable": True}
     return {
         "answer": _strip_model_markup(str((result or {}).get("answer") or "")),
         "model_used": (result or {}).get("model_used", ""),
@@ -865,16 +894,23 @@ async def ai_ask_and_run(
     """Generate SQL for a question, execute it, and return the results.
 
     Never raises on a generation/execution failure: returns a structured
-    ``status`` (``success`` / ``generation_error`` / ``execution_error``) with
-    the SQL (when available) and an error message so the modal can render an
-    inline error and reveal the SQL instead of navigating away.
+    ``status`` (``success`` / ``generation_error`` / ``execution_error`` /
+    ``ai_unavailable``) with the SQL (when available) and an error message so
+    the modal can render an inline error and reveal the SQL instead of
+    navigating away.
 
-    When the live query fails, an existing verified Insight Card that answers
-    the same question is checked first (scoped to this one project only), and
-    only then does the question fall back to the free-text documents/
-    knowledge-graph answer — the same precedence the AI Assistant uses — so
-    analytical questions are answered as prose instead of showing a
-    "couldn't match a source" error.
+    When the live query fails because the AI could not build/run a valid
+    query (``generation_error``/``execution_error``), an existing verified
+    Insight Card that answers the same question is checked first (scoped to
+    this one project only), and only then does the question fall back to the
+    free-text documents/knowledge-graph answer — the same precedence the AI
+    Assistant uses — so analytical questions are answered as prose instead of
+    showing a "couldn't match a source" error.
+
+    ``ai_unavailable`` (the AI service itself is unreachable, not just
+    declining the request) skips both of those fallbacks and returns as-is:
+    substituting a matched card or KG prose for an AI-server outage would
+    make the outage look like a working (if unrelated) answer.
     """
     await _check_project_access(session, context, req.project_id)
     result = await _ask_and_run_core(
@@ -997,6 +1033,20 @@ async def ai_generate_query_preview(
             preferred_sources=resolver.preferred_sources,
             relevant_columns=resolver.relevant_columns,
         )
+    except ai.AIUnavailableError as exc:
+        return {
+            "title": title,
+            "description": req.description or "",
+            "sql": "",
+            "columns": [],
+            "rows": [],
+            "suggestedVisualization": {"type": "table"},
+            "dataSourcesUsed": [],
+            "explanation": "",
+            "status": "ai_unavailable",
+            "error": "The AI service is currently unavailable. Please try again shortly.",
+            "errorDetails": {"aiError": str(exc)},
+        }
     except HTTPException as exc:
         friendly, details = _ai_generation_error(exc)
         return {

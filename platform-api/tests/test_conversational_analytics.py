@@ -203,14 +203,19 @@ async def test_generation_error_surfaces_matching_insight_card_over_prose(
     assert turn["result_metadata"]["fallbackError"] == "no source matched"
 
 
-async def test_matched_insight_fallback_surfaces_ai_server_unavailable_detail(
+async def test_ai_unavailable_hard_errors_instead_of_matching_an_insight_card(
     client, db_session, service_headers, monkeypatch
 ):
-    """_ai_generation_error()'s "friendly" message defaults to a generic
-    string in exactly the AI-server-unavailable case -- the real reason only
-    ever lands in errorDetails.validationError. That must reach the visible
-    message, not just a DB column nobody reads, or an outage looks identical
-    to "no relevant source" and is impossible to tell apart from the UI."""
+    """An AI-server outage must surface as a plain error, never a matched
+    Insight Card standing in for it.
+
+    Previously any generation/execution failure -- including the AI service
+    itself being unreachable -- fell back to a matched Insight Card and
+    returned status="success", making an outage look identical to a working
+    (if unrelated) answer. _ask_and_run_core now returns a distinct
+    "ai_unavailable" status for exactly this case, and execute_turn must
+    short-circuit to a hard error before ever calling the insight-card
+    matcher, rather than silently degrading."""
     from app.models.business_insight_result import BusinessInsightResult
 
     tenant, _, project, headers = await _setup(client, service_headers, "conv-ai-down")
@@ -238,14 +243,16 @@ async def test_matched_insight_fallback_surfaces_ai_server_unavailable_detail(
 
     async def _fake_ai_server_down(*args, **kwargs):
         return {
-            "status": "generation_error",
+            "status": "ai_unavailable",
             "sql": "",
-            "error": "We could not safely build a query for this question.",
-            "errorDetails": {"validationError": "AI server is unavailable"},
+            "error": "The AI service is currently unavailable. Please try again shortly.",
+            "errorDetails": {"aiError": "AI server is unavailable; retry shortly."},
         }
 
     async def _fake_select(**kwargs):
-        return {"insight_id": "backup-001", "confidence": 0.9, "reason": "on topic"}
+        raise AssertionError(
+            "insight-card matching must not run when the AI is unavailable"
+        )
 
     monkeypatch.setattr(
         "app.services.conversational_analytics._ask_and_run_core",
@@ -266,12 +273,42 @@ async def test_matched_insight_fallback_surfaces_ai_server_unavailable_detail(
     )
     assert r.status_code == 200, r.text
     turn = r.json()["turns"][0]
-    assert turn["status"] == "success"
-    assert turn["matched_insight"]["insightId"] == "backup-001"
-    # The AI-server outage detail is surfaced in result_metadata for
-    # troubleshooting, not in the user-facing assistant message.
-    assert "AI server is unavailable" not in turn["assistant_message"]
-    assert turn["result_metadata"]["fallbackErrorDetails"]["validationError"] == "AI server is unavailable"
+    assert turn["status"] == "error"
+    assert turn["matched_insight"] is None
+    assert "unavailable" in turn["assistant_message"].lower()
+
+
+async def test_document_question_hard_errors_when_ai_is_unavailable(
+    client, service_headers, monkeypatch
+):
+    """The document-Q&A path bypasses SQL generation entirely, but it must
+    apply the same rule: an AI outage is a hard error, not a "no relevant
+    document found" success -- those read identically to the user otherwise,
+    hiding a real outage behind what looks like a completed (empty) search.
+    """
+    _, _, project, headers = await _setup(client, service_headers, "conv-doc-ai-down")
+
+    async def _fake_ai_unavailable(*args, **kwargs):
+        return {"ai_unavailable": True}
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._forward_prose_answer",
+        _fake_ai_unavailable,
+    )
+
+    r = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={
+            "project_id": project["id"],
+            "initial_message": "Show me our compliance documents",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    turn = r.json()["turns"][0]
+    assert turn["status"] == "error"
+    assert "unavailable" in turn["assistant_message"].lower()
+    assert "couldn't find a relevant document" not in turn["assistant_message"].lower()
 
 
 async def test_list_and_get_conversations(client, service_headers, monkeypatch):

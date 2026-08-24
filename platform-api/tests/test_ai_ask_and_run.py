@@ -759,16 +759,44 @@ async def test_generate_query_preview_success(
     assert body["rows"][0]["revenue"] == 10
 
 
-async def test_ask_and_run_degrades_to_prose_when_ai_is_busy(
+async def test_generate_query_preview_hard_errors_when_ai_is_unavailable(
     client, service_headers, monkeypatch
 ):
-    """KG-precache contention must not hard-fail ask-and-run.
+    _, _, project, headers = await _setup(client, service_headers, "prevunavailable")
 
-    When the SQL generation path returns a retryable 503/busy error (after the
-    client has exhausted its own retries), the endpoint falls back to the
-    KG-grounded prose path and returns a successful text answer.
+    async def fake_generate(*args, **kwargs):
+        raise aic.AIUnavailableError("AI server is unavailable; retry shortly.")
+
+    monkeypatch.setattr(aic, "generate_sql", fake_generate)
+
+    r = await client.post(
+        "/api/ai/actions/generate-query-preview",
+        json={
+            "project_id": project["id"],
+            "question": "monthly revenue",
+            "title": "Monthly Revenue",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "ai_unavailable"
+    assert body["error"]
+
+
+async def test_ask_and_run_hard_errors_when_ai_is_unavailable(
+    client, service_headers, monkeypatch
+):
+    """An AI-service outage must surface as a hard error, not silently
+    degrade to a matched Insight Card or KG-prose fallback.
+
+    Substituting either for the AI made an outage look like a working (if
+    unrelated) answer -- exactly the confusing behavior this guards against.
+    Previously this degraded to the KG-grounded prose path and returned a
+    successful text answer; that fallback is now reserved for a generation/
+    execution failure where the AI *was* reachable but declined the request.
     """
-    _, _, project, headers = await _setup(client, service_headers, "askbusy")
+    _, _, project, headers = await _setup(client, service_headers, "askunavailable")
 
     async def fake_generate(*args, **kwargs):
         raise aic.AIUnavailableError(
@@ -776,7 +804,9 @@ async def test_ask_and_run_degrades_to_prose_when_ai_is_busy(
         )
 
     async def fake_ask(*args, **kwargs):
-        return {"answer": "Carrier shortages are the main driver."}
+        raise AssertionError(
+            "the prose fallback must never be attempted when the AI is unavailable"
+        )
 
     monkeypatch.setattr(aic, "generate_sql", fake_generate)
     monkeypatch.setattr(aic, "ask", fake_ask)
@@ -788,6 +818,5 @@ async def test_ask_and_run_degrades_to_prose_when_ai_is_busy(
     )
     assert r.status_code == 200
     body = r.json()
-    assert body["status"] == "success"
-    assert body["answerType"] == "text"
-    assert "Carrier shortages" in body["explanation"]
+    assert body["status"] == "ai_unavailable"
+    assert body["error"]

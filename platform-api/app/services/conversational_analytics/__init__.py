@@ -463,6 +463,15 @@ async def execute_turn(
             include_dashboard_context=False,
             grounding_evidence=grounding_dict,
         )
+        if isinstance(prose, dict) and prose.get("ai_unavailable"):
+            # Distinct from "no relevant document found" -- the AI service
+            # itself could not be reached, so claiming success with a
+            # "couldn't find a relevant document" message would misrepresent
+            # an outage as a completed (if empty) search.
+            turn.status = "error"
+            turn.error_code = "ai_unavailable"
+            turn.assistant_message = "The AI service is currently unavailable. Please try again shortly."
+            return
         answer = (
             prose.get("answer") if isinstance(prose, dict) else (str(prose) if prose else "")
         )
@@ -493,6 +502,23 @@ async def execute_turn(
     turn.sql = run.get("sql") or None
     turn.project_context_version = project_context.get("version") if project_context else None
     turn.sql_fingerprint = _sql_fingerprint(turn.sql)
+
+    if run.get("status") == "ai_unavailable":
+        # The AI service itself could not be reached -- distinct from
+        # "generation_error"/"execution_error" below, where the AI responded
+        # but couldn't build/run a valid query. Falling through to the
+        # Insight Card/KG-prose fallback here would substitute a matched
+        # card for the AI and make an outage look like a working (if
+        # unrelated) answer, which is exactly the confusing behavior this
+        # guards against -- surface a plain error instead.
+        turn.status = "error"
+        turn.error_code = "ai_unavailable"
+        turn.assistant_message = (
+            run.get("error")
+            or "The AI service is currently unavailable. Please try again shortly."
+        )
+        turn.result_metadata = {"error": run.get("error"), "errorDetails": run.get("errorDetails")}
+        return
 
     if run.get("status") in ("generation_error", "execution_error"):
         # A question that cannot be grounded or executed on an authorized source
