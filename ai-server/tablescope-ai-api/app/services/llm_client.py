@@ -19,6 +19,17 @@ logger = logging.getLogger(__name__)
 
 TIMEOUT = httpx.Timeout(180.0, connect=10.0)
 
+# vLLM's min_tokens suppresses an early stop (EOS or a matched stop sequence)
+# until this many tokens are generated. muse-glimmer sometimes stops right
+# after a short reasoning burst -- observed live as a 102-char reasoning-only
+# completion with finish_reason=stop at ~30 tokens used, well under its 1024
+# max_tokens budget -- and never reaches the content channel. Confirmed live
+# against this deployment: the same prompt with min_tokens=150 forced it
+# through to a complete, correct SQL query. Applied only to SQL generation/
+# repair (the two calls this was reproduced against); a plain generate()
+# call is unaffected unless a caller passes min_tokens explicitly.
+_SQL_MIN_TOKENS = 150
+
 
 def _is_openai_target(target_url: str) -> bool:
     """Heuristic: vLLM/OpenAI-compatible endpoints expose a /v1 base path."""
@@ -32,6 +43,7 @@ async def _generate_openai(
     target_url: str = "",
     temperature: float = 0.1,
     max_tokens: int | None = None,
+    min_tokens: int | None = None,
     stop: list[str] | None = None,
     response_format: str | None = None,
 ) -> str:
@@ -49,6 +61,8 @@ async def _generate_openai(
     }
     if max_tokens is not None:
         payload["max_tokens"] = max_tokens
+    if min_tokens is not None:
+        payload["min_tokens"] = min_tokens
     if stop:
         payload["stop"] = stop
     if response_format == "json":
@@ -89,11 +103,17 @@ async def _generate_openai(
             #
             # finish_reason distinguishes the two ways this happens: "length"
             # means generation was cut off before it could reach the content
-            # channel (a max_tokens/budget problem, fixable from this
-            # client); "stop" means the model produced a complete response
-            # that was reasoning-only by its own choice (a prompt/template/
-            # generation-config problem on the model-serving side, not
-            # something this retry-less client call can fix).
+            # channel (a max_tokens/budget problem); "stop" means the model
+            # reached a natural stopping point after only a short reasoning
+            # burst, well under its max_tokens budget. Confirmed live against
+            # this deployment (project 41 "revenue by quarter"): a bare
+            # request stopped at 102 chars of reasoning with finish_reason
+            # "stop" and max_tokens=1024 unused; the same request with
+            # min_tokens=150 suppressed that early stop and produced a
+            # complete, correct SQL query. generate_sql/repair_sql now pass
+            # min_tokens for exactly this reason -- if this warning still
+            # fires for either of those, min_tokens needs to go higher, not
+            # max_tokens.
             logger.warning(
                 "vLLM target %s returned no content, only reasoning (%d chars, "
                 "finish_reason=%s, requested max_tokens=%s); treating as an "
@@ -160,6 +180,7 @@ async def generate(
     ollama_url: str | None = None,
     temperature: float = 0.1,
     max_tokens: int | None = None,
+    min_tokens: int | None = None,
     stop: list[str] | None = None,
     num_ctx: int | None = None,
     response_format: str | None = None,
@@ -196,6 +217,7 @@ async def generate(
             target_url=target_url,
             temperature=temperature,
             max_tokens=max_tokens,
+            min_tokens=min_tokens,
             stop=stop,
             response_format=response_format,
         )
@@ -435,6 +457,7 @@ async def generate_sql(
         ollama_url=ollama_url,
         temperature=0.0,
         max_tokens=1024,
+        min_tokens=_SQL_MIN_TOKENS,
         stop=[";"],
     )
 
@@ -495,6 +518,7 @@ async def repair_sql(
         ollama_url=ollama_url,
         temperature=0.0,
         max_tokens=1024,
+        min_tokens=_SQL_MIN_TOKENS,
         stop=[";"],
     )
 
