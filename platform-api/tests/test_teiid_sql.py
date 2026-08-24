@@ -108,6 +108,36 @@ def test_normalize_rewrites_date_format_to_formattimestamp(
     assert "DATE_FORMAT" not in out.upper()
 
 
+@pytest.mark.parametrize(
+    ("sql", "expected_substr"),
+    [
+        (
+            # The pattern reported failing in production for "revenue by
+            # quarter": EXTRACT with the datetime field double-quoted, which
+            # Teiid's grammar requires as a bare keyword (TEIID31100).
+            'SELECT EXTRACT("MONTH" FROM PARSETIMESTAMP("SubmittedDate", '
+            "'yyyy-MM-dd')) FROM t",
+            'EXTRACT(MONTH FROM PARSETIMESTAMP("SubmittedDate", \'yyyy-MM-dd\'))',
+        ),
+        (
+            "SELECT EXTRACT('QUARTER' FROM \"OrderDate\") FROM t",
+            'EXTRACT(QUARTER FROM "OrderDate")',
+        ),
+        (
+            "SELECT EXTRACT(YEAR FROM \"OrderDate\") FROM t",
+            'EXTRACT(YEAR FROM "OrderDate")',
+        ),
+    ],
+)
+def test_normalize_rewrites_extract_quoted_datepart(
+    sql: str, expected_substr: str
+) -> None:
+    out = normalize_teiid_timestamps(sql)
+    assert expected_substr in out
+    assert '"MONTH"' not in out
+    assert "'QUARTER'" not in out
+
+
 def test_normalize_unknown_literal_left_unchanged() -> None:
     sql = "SELECT * FROM t WHERE d > CAST('not-a-date' AS timestamp)"
     assert normalize_teiid_timestamps(sql) == sql
