@@ -3,7 +3,7 @@
 import { useEffect, useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { IconHelpCircle } from "@tabler/icons-react";
+import { IconHelpCircle, IconSparkles } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
 import { StatusDot } from "@/components/tablescope/status-dot";
 import { Button } from "@/components/ui/button";
@@ -242,6 +242,18 @@ export default function BusinessInsightPage() {
     >
       <div className="space-y-6 pb-24">
         <div className="mx-auto w-full max-w-content space-y-6">
+          <header className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="mb-1.5 flex items-center gap-2 text-caption font-medium uppercase tracking-wide text-ink-tertiary">
+                <IconSparkles size={14} className="text-brand-500" />
+                Executive perspective · AI briefing
+              </div>
+              <h1 className="text-h1 text-ink-primary">Business Insights</h1>
+              <p className="mt-1 text-body text-ink-tertiary">
+                Material changes across the projects and data you are authorized to view.
+              </p>
+            </div>
+          </header>
           <HomeAiSuggestions onAsk={handleAsk} cardActions={cardActions} />
           {(chatTurns.length > 0 || chatBusy || chatError) && (
             <div className="space-y-4 rounded-xl border border-line-tertiary bg-bg-primary p-4">
@@ -279,6 +291,7 @@ export default function BusinessInsightPage() {
           onCreateAction={handleCreateAction}
           availableProjects={allProjects ?? []}
           actionsDisclosure="collapsible"
+          presentation="executive"
         />
       </div>
 

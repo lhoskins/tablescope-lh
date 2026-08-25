@@ -20,6 +20,7 @@ const SHOW_STATISTICS_STORAGE_KEY = "tablescope-pcs-show-statistics";
 interface PercentChangeSummaryPanelProps {
   projectIds: number[];
   snapshotFingerprint?: string | null;
+  presentation?: "default" | "executive";
 }
 
 const EXCLUSION_REASON_LABELS: Record<string, string> = {
@@ -34,6 +35,7 @@ const EXCLUSION_REASON_LABELS: Record<string, string> = {
 export function PercentChangeSummaryPanel({
   projectIds,
   snapshotFingerprint,
+  presentation = "default",
 }: PercentChangeSummaryPanelProps) {
   const [interval, setInterval] = useState<TimeSeriesInterval>("month");
   const [range, setRange] = useState<TimeSeriesRange>("1y");
@@ -184,15 +186,8 @@ export function PercentChangeSummaryPanel({
     );
   };
 
-  return (
-    <InsightPanel
-      title={title}
-      icon={<IconChartBar size={16} className="text-brand-500" />}
-      collapsible
-      defaultOpen
-      count={count}
-    >
-      <div className="space-y-3">
+  const panelContent = (
+    <div className="space-y-3">
         {data && data.page.total_eligible > 0 && (
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
@@ -266,8 +261,27 @@ export function PercentChangeSummaryPanel({
           </div>
         )}
 
-        {renderContent()}
+      {renderContent()}
+    </div>
+  );
+
+  if (presentation === "executive") {
+    return (
+      <div className="rounded-xl border border-line-tertiary bg-bg-primary p-4 shadow-sm">
+        {panelContent}
       </div>
+    );
+  }
+
+  return (
+    <InsightPanel
+      title={title}
+      icon={<IconChartBar size={16} className="text-brand-500" />}
+      collapsible
+      defaultOpen
+      count={count}
+    >
+      {panelContent}
     </InsightPanel>
   );
 }

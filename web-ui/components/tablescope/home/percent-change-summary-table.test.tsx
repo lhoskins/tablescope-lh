@@ -80,17 +80,16 @@ describe("PercentChangeSummaryTable", () => {
     renderTable(rows, vi.fn());
 
     const positiveCell = screen.getByLabelText("Positive +5.0%").closest("td");
-    expect(positiveCell?.classList.contains("bg-success-bg")).toBe(true);
-    expect(positiveCell?.classList.contains("text-success")).toBe(true);
+    expect(positiveCell?.classList.contains("bg-[#74C990]")).toBe(true);
+    expect(positiveCell?.classList.contains("text-white")).toBe(true);
 
     const negativeCell = screen.getByLabelText("Negative -3.0%").closest("td");
-    expect(negativeCell?.classList.contains("bg-danger-bg")).toBe(true);
-    expect(negativeCell?.classList.contains("text-danger")).toBe(true);
+    expect(negativeCell?.classList.contains("bg-[#EA7975]")).toBe(true);
+    expect(negativeCell?.classList.contains("text-white")).toBe(true);
 
     const zeroCell = screen.getByLabelText("No change, +0.0%").closest("td");
-    expect(zeroCell?.classList.contains("text-ink-secondary")).toBe(true);
-    expect(zeroCell?.classList.contains("bg-success-bg")).toBe(false);
-    expect(zeroCell?.classList.contains("bg-danger-bg")).toBe(false);
+    expect(zeroCell?.classList.contains("bg-[#626365]")).toBe(true);
+    expect(zeroCell?.classList.contains("text-white")).toBe(true);
 
     const noDataCell = screen.getByLabelText("No data").closest("td");
     expect(noDataCell?.classList.contains("text-ink-tertiary")).toBe(true);

@@ -49,6 +49,21 @@ describe("IntelligenceCard pin control", () => {
 });
 
 describe("IntelligenceCard Option 2 toolbar", () => {
+  it("applies the executive treatment without removing actions", () => {
+    render(
+      <IntelligenceCard
+        card={baseCard}
+        presentation="executive"
+        onSaveToDashboard={() => {}}
+      />,
+    );
+    const article = document.querySelector("article");
+    expect(article?.classList.contains("border-l-4")).toBe(true);
+    expect(screen.queryByText("Title:")).toBeNull();
+    expect(screen.queryByText("Summary:")).toBeNull();
+    expect(screen.getByRole("button", { name: "Explain" })).toBeTruthy();
+  });
+
   it("renders Create Action, Explain, and source row by default", () => {
     const onCreateAction = vi.fn();
     const onExplain = vi.fn();

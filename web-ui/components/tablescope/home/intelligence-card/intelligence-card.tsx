@@ -69,6 +69,7 @@ export function IntelligenceCard({
   governance,
   onCreateAction,
   actionsDisclosure,
+  presentation = "default",
 }: IntelligenceCardProps) {
   const [explainOpen, setExplainOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -105,6 +106,7 @@ export function IntelligenceCard({
   }, [card, selectedChart, timeSeriesView]);
 
   const sev = CARD_SEVERITY[card.severity] ?? CARD_SEVERITY.info;
+  const executive = presentation === "executive" && !frozen;
 
   const canCreateAction = Boolean(
     onCreateAction &&
@@ -162,20 +164,35 @@ export function IntelligenceCard({
       className={
         frozen
           ? "flex h-full flex-col p-3"
-          : "rounded-lg border border-line-tertiary bg-white p-4"
+          : cn(
+              executive
+                ? "overflow-hidden rounded-xl border border-line-tertiary border-l-4 bg-bg-primary p-5 shadow-sm"
+                : "rounded-lg border border-line-tertiary bg-white p-4",
+              executive && sev.accent,
+            )
       }
     >
       <header className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-2 text-small text-ink-tertiary">
+          <div
+            className={cn(
+              "flex items-center gap-2 text-small text-ink-tertiary",
+              executive && "font-medium uppercase tracking-wide",
+            )}
+          >
             <span
               className="h-2 w-2 shrink-0 rounded-full"
               style={{ backgroundColor: card.projectColor }}
             />
             <span className="truncate">{card.projectName}</span>
           </div>
-          <h3 className="mt-1 text-h3 text-ink-primary">
-            <span className="text-ink-tertiary">Title: </span>
+          <h3
+            className={cn(
+              "mt-1 text-h3 text-ink-primary",
+              executive && "mt-2 text-[20px] leading-7",
+            )}
+          >
+            {!executive && <span className="text-ink-tertiary">Title: </span>}
             {renderBold(card.title)}
           </h3>
         </div>
@@ -220,14 +237,26 @@ export function IntelligenceCard({
         </div>
       </header>
 
-      <p className="mt-2 text-body text-ink-secondary">
-        <span className="text-ink-tertiary">Summary: </span>
+      <p
+        className={cn(
+          "mt-2 text-body text-ink-secondary",
+          executive && "max-w-5xl leading-6",
+        )}
+      >
+        {!executive && <span className="text-ink-tertiary">Summary: </span>}
         {renderBold(card.summary)}
       </p>
 
       <div className={cn("mt-3 flex flex-col", frozen && "relative flex-1 overflow-hidden")}>
         {displayCard.chart && (
-          <div className={cn("min-h-0", frozen && "flex-1 overflow-hidden")}>
+          <div
+            className={cn(
+              "min-h-0",
+              frozen && "flex-1 overflow-hidden",
+              executive &&
+                "rounded-xl border border-line-tertiary bg-bg-secondary/35 p-3",
+            )}
+          >
             {displayCard.chart.title && displayCard.chart.type !== "kpi_grid" && (
               <div className="mb-1 text-small text-ink-tertiary">
                 {displayCard.chart.title}
@@ -239,6 +268,8 @@ export function IntelligenceCard({
               <InsightTimeSeriesChart
                 card={displayCard}
                 projectId={Number(displayCard.projectId)}
+                height={executive ? 260 : undefined}
+                presentation={executive ? "operational" : "default"}
                 onViewChange={setTimeSeriesView}
               />
             )}
@@ -268,7 +299,12 @@ export function IntelligenceCard({
       {!hideActions && <InsightAnalysisStrip card={card} />}
 
       {!hideActions && (
-        <div className={cn(frozen && "mt-auto")}>
+        <div
+          className={cn(
+            frozen && "mt-auto",
+            executive && "mt-4 border-t border-line-tertiary pt-3",
+          )}
+        >
           <InsightCardActionToolbar
             card={displayCard}
             actionsDisclosure={actionsDisclosure}

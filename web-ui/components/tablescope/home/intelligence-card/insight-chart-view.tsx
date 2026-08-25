@@ -42,7 +42,115 @@ import {
   insightCsvFilename,
 } from "@/lib/insights/export-csv";
 import { useToasts, ToastViewport } from "@/components/ui/toast";
-import { CARD_SEVERITY } from "@/lib/ui/insight-tones";import { buildMultiDimWidget } from "./build-multi-dim-widget";
+import { CARD_SEVERITY } from "@/lib/ui/insight-tones";
+import { buildMultiDimWidget } from "./build-multi-dim-widget";
+import {
+  OperationalChart,
+  toOperationalChartData,
+  type OperationalChartData,
+} from "@/components/dashboard/OperationalInsightGrid";
+
+const OPERATIONAL_INSIGHT_TYPES = new Set([
+  "line",
+  "area",
+  "bar",
+  "combo",
+  "pie",
+  "heatmap",
+]);
+
+function buildOperationalInsightChart(
+  chart: InsightChart,
+  options?: Partial<VisualizationOptions>,
+): OperationalChartData | null {
+  if (!OPERATIONAL_INSIGHT_TYPES.has(chart.type)) return null;
+
+  const dataRows = chart.data.rows;
+  if (dataRows && dataRows.length > 0) {
+    const widget = buildMultiDimWidget(chart, dataRows);
+    if (options) {
+      widget.visualizationOptions = {
+        ...widget.visualizationOptions,
+        ...options,
+      };
+    }
+    return toOperationalChartData(widget, dataRows);
+  }
+
+  const series = chart.data.series;
+  if (!series || series.length === 0) return null;
+
+  const hasValue2 = series.some((item) => typeof item.value2 === "number");
+  const valueName = chart.seriesLabels?.value ?? chart.roles?.y ?? "value";
+  const value2Name = chart.seriesLabels?.value2 ?? chart.roles?.y2 ?? "value2";
+  const xName = chart.roles?.x ?? "label";
+  const rows = series.map((item) => ({
+    [xName]: item.label,
+    [valueName]: item.value,
+    ...(hasValue2 ? { [value2Name]: item.value2 ?? 0 } : {}),
+  }));
+  const widget: WidgetConfig = {
+    id: "operational-insight-chart",
+    type: chart.type as WidgetType,
+    chartSubtype: (chart.subtype || undefined) as WidgetConfig["chartSubtype"],
+    title: "",
+    dataSource: { kind: "custom_sql" },
+    xColumn: xName,
+    xColumnType: "string",
+    yColumn: valueName,
+    y2Column: chart.type === "combo" && hasValue2 ? value2Name : undefined,
+    y2Aggregation: chart.type === "combo" && hasValue2 ? "sum" : undefined,
+    aggregation: "sum",
+    sortBy: "x_asc",
+    filters: [],
+    visualizationOptions: { showLegend: false, showGrid: true, ...options },
+    colSpan: 1,
+    position: 0,
+  };
+  return toOperationalChartData(widget, rows);
+}
+
+export function OperationalInsightChartView({
+  chart,
+  height: heightProp,
+  options,
+}: {
+  chart: InsightChart;
+  height?: number;
+  options?: Partial<VisualizationOptions>;
+}) {
+  const operationalChart = useMemo(
+    () => buildOperationalInsightChart(chart, options),
+    [chart, options],
+  );
+
+  if (!operationalChart) {
+    return (
+      <InsightChartView
+        chart={chart}
+        height={heightProp}
+        options={options}
+      />
+    );
+  }
+
+  const rows = chart.data.rows ?? chart.data.series ?? [];
+  const isHorizontalBar =
+    chart.type === "bar" &&
+    (chart.subtype === "horizontal_bar" ||
+      chart.subtype === "stacked_horizontal");
+  const height =
+    heightProp ??
+    (isHorizontalBar
+      ? Math.min(520, Math.max(180, rows.length * 28 + 48))
+      : 220);
+
+  return (
+    <div className="w-full" style={{ height }}>
+      <OperationalChart chart={operationalChart} className="h-full" />
+    </div>
+  );
+}
 
 
 

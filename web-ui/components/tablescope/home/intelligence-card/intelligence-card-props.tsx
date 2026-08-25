@@ -74,4 +74,6 @@ export interface IntelligenceCardProps {
   onCreateAction?: () => void;
   /** Collapse data sources and actions behind a "More Actions" toggle. */
   actionsDisclosure?: "always-visible" | "collapsible";
+  /** Presentation-only treatment used by Business Insights. */
+  presentation?: "default" | "executive";
 }

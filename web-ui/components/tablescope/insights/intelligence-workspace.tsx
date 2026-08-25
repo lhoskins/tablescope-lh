@@ -16,7 +16,11 @@ import {
 } from "./insight-section";
 import { classifyInsightCards } from "@/lib/insights/classify-insight-cards";
 import { useReturnTarget, useScrollToReturnTarget } from "@/lib/insights/return-target";
-import type { InsightCard } from "@/lib/api/home-intelligence";
+import type {
+  CrossProjectSynthesis,
+  InsightCard,
+} from "@/lib/api/home-intelligence";
+import { BusinessIntelligenceWorkspace } from "./business-intelligence-workspace";
 
 export type IntelligenceWorkspaceToolbar = IntelligenceStripProps;
 
@@ -44,6 +48,8 @@ export interface IntelligenceWorkspaceProps {
   analysisChildren?: ReactNode;
   actionsDisclosure?: "always-visible" | "collapsible";
   showToolbar?: boolean;
+  presentation?: "default" | "executive";
+  synthesis?: CrossProjectSynthesis | null;
 }
 
 export function IntelligenceWorkspace({
@@ -63,6 +69,8 @@ export function IntelligenceWorkspace({
   analysisChildren,
   actionsDisclosure,
   showToolbar = true,
+  presentation = "default",
+  synthesis = null,
 }: IntelligenceWorkspaceProps) {
   const { risks, trends, opportunities, analysis } = classifyInsightCards(cards);
   const hasCards = cards.length > 0;
@@ -70,6 +78,29 @@ export function IntelligenceWorkspace({
   const fingerprint = snapshotFingerprint ?? (lastUpdated ? lastUpdated.toISOString() : null);
 
   useScrollToReturnTarget(returnTarget, hasCards);
+
+  if (scope === "business" && presentation === "executive") {
+    return (
+      <BusinessIntelligenceWorkspace
+        projectIds={projectIds}
+        cards={cards}
+        running={running}
+        lastUpdated={lastUpdated}
+        snapshotFingerprint={snapshotFingerprint}
+        toolbar={toolbar}
+        actions={actions}
+        feedback={feedback}
+        emptyMessages={emptyMessages}
+        pinnedByFingerprint={pinnedByFingerprint}
+        emptySelection={emptySelection}
+        empty={empty}
+        analysisChildren={analysisChildren}
+        actionsDisclosure={actionsDisclosure}
+        showToolbar={showToolbar}
+        synthesis={synthesis}
+      />
+    );
+  }
 
   return (
     <div className="space-y-4">

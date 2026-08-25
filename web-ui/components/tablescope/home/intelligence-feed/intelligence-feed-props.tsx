@@ -36,4 +36,6 @@ export interface IntelligenceFeedProps {
   /** Accessible projects used to populate the filter and default selection. */
   availableProjects?: FilterableProject[];
   actionsDisclosure?: "always-visible" | "collapsible";
+  /** Presentation-only layout. Data loading and card actions are unchanged. */
+  presentation?: "default" | "executive";
 }

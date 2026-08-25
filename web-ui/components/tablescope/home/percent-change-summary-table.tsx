@@ -120,15 +120,15 @@ export function PercentChangeSummaryTable({
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-3 text-[11px] text-ink-tertiary">
         <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block h-3 w-3 rounded bg-success-bg text-success" aria-hidden />
+          <span className="inline-block h-3 w-3 rounded bg-[#74C990]" aria-hidden />
           Positive
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block h-3 w-3 rounded bg-danger-bg text-danger" aria-hidden />
+          <span className="inline-block h-3 w-3 rounded bg-[#EA7975]" aria-hidden />
           Negative
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="inline-flex h-3 w-3 items-center justify-center rounded border border-line-tertiary bg-bg-primary text-[9px] text-ink-secondary" aria-hidden>
+          <span className="inline-flex h-3 w-3 items-center justify-center rounded bg-[#626365] text-[9px] text-white" aria-hidden>
             0
           </span>
           No change

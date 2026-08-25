@@ -14,6 +14,7 @@ export function IntelligenceFeed({
   onCreateAction,
   availableProjects: propAvailableProjects,
   actionsDisclosure,
+  presentation = "default",
 }: IntelligenceFeedProps = {}) {
   const state = useIntelligenceFeedState({
     onPin,
@@ -70,15 +71,23 @@ export function IntelligenceFeed({
       </div>
     ) : null;
 
+  const visibleSynthesis =
+    synthesis &&
+    selectedProjectIds.size > 0 &&
+    synthesis.projectIds &&
+    synthesis.projectIds.length === selectedProjectIds.size &&
+    synthesis.projectIds.every((id) => selectedProjectIds.has(id))
+      ? synthesis
+      : null;
+
   return (
     <div className="space-y-4">
-      {synthesis && selectedProjectIds.size > 0 &&
-        synthesis.projectIds &&
-        synthesis.projectIds.length === selectedProjectIds.size &&
-        synthesis.projectIds.every((id) => selectedProjectIds.has(id)) && (
+      {presentation === "default" && visibleSynthesis && (
         <div className="rounded-md border border-line-tertiary bg-bg-primary p-3 text-[13px] text-ink-secondary">
-          <p className="font-medium text-ink-primary">{synthesis.headline}</p>
-          <p className="mt-1">{synthesis.body}</p>
+          <p className="font-medium text-ink-primary">
+            {visibleSynthesis.headline}
+          </p>
+          <p className="mt-1">{visibleSynthesis.body}</p>
         </div>
       )}
 
@@ -124,6 +133,8 @@ export function IntelligenceFeed({
         emptySelection={emptySelection}
         empty={empty}
         actionsDisclosure={actionsDisclosure}
+        presentation={presentation}
+        synthesis={visibleSynthesis}
       />
 
       {pending.length > 0 && (

@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { InsightChartView } from "@/components/tablescope/home/intelligence-card";
+import {
+  InsightChartView,
+  OperationalInsightChartView,
+} from "@/components/tablescope/home/intelligence-card";
 import type { VisualizationOptions } from "@/components/dashboard/types";
 import type { InsightChart } from "@/lib/api/home-intelligence";
 import {
@@ -131,6 +134,7 @@ export interface InsightTimeSeriesChartProps {
   projectId: number;
   height?: number;
   onViewChange?: (view: TimeSeriesViewState) => void;
+  presentation?: "default" | "operational";
 }
 
 export function InsightTimeSeriesChart({
@@ -138,6 +142,7 @@ export function InsightTimeSeriesChart({
   projectId,
   height,
   onViewChange,
+  presentation = "default",
 }: InsightTimeSeriesChartProps) {
   const eligible = useMemo(() => isTimeSeriesEligible(card), [card]);
   const initialInterval = useMemo(
@@ -192,9 +197,14 @@ export function InsightTimeSeriesChart({
     return undefined;
   }, [mode, response]);
 
+  const ChartView =
+    presentation === "operational" && mode === "value"
+      ? OperationalInsightChartView
+      : InsightChartView;
+
   if (!eligible || !card.chart) {
     if (!card.chart) return null;
-    return <InsightChartView chart={card.chart} height={height} />;
+    return <ChartView chart={card.chart} height={height} />;
   }
 
   return (
@@ -215,9 +225,9 @@ export function InsightTimeSeriesChart({
         onRangeChange={setRange}
       />
       {chart ? (
-        <InsightChartView chart={chart} options={options} height={height} />
+        <ChartView chart={chart} options={options} height={height} />
       ) : (
-        <InsightChartView chart={card.chart} height={height} />
+        <ChartView chart={card.chart} height={height} />
       )}
       {mode === "percent_change" && response?.calculation && (
         <CalculationSummary calculation={response.calculation} />

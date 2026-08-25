@@ -22,7 +22,7 @@ import {
 
 export function signedCellClasses(ratio: number | null | undefined): string {
   if (ratio === null || ratio === undefined) return "text-ink-tertiary";
-  if (Math.abs(ratio) <= ZERO_TOLERANCE) return "text-ink-secondary";
-  if (ratio > 0) return "bg-success-bg text-success";
-  return "bg-danger-bg text-danger";
+  if (Math.abs(ratio) <= ZERO_TOLERANCE) return "bg-[#626365] text-white";
+  if (ratio > 0) return "bg-[#74C990] text-white";
+  return "bg-[#EA7975] text-white";
 }
