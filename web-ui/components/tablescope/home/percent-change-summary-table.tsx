@@ -40,6 +40,7 @@ export function PercentChangeSummaryTable({
   sort,
   onSort,
   showStatistics = true,
+  presentation = "default",
 }: PercentChangeSummaryTableProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scrollLeft, setScrollLeft] = useState(0);
@@ -120,15 +121,35 @@ export function PercentChangeSummaryTable({
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-3 text-[11px] text-ink-tertiary">
         <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block h-3 w-3 rounded bg-[#74C990]" aria-hidden />
+          <span
+            className={cn(
+              "inline-block h-3 w-3 rounded",
+              presentation === "executive" ? "bg-[#74C990]" : "bg-success-bg text-success",
+            )}
+            aria-hidden
+          />
           Positive
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block h-3 w-3 rounded bg-[#EA7975]" aria-hidden />
+          <span
+            className={cn(
+              "inline-block h-3 w-3 rounded",
+              presentation === "executive" ? "bg-[#EA7975]" : "bg-danger-bg text-danger",
+            )}
+            aria-hidden
+          />
           Negative
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="inline-flex h-3 w-3 items-center justify-center rounded bg-[#626365] text-[9px] text-white" aria-hidden>
+          <span
+            className={cn(
+              "inline-flex h-3 w-3 items-center justify-center rounded text-[9px]",
+              presentation === "executive"
+                ? "bg-[#626365] text-white"
+                : "border border-line-tertiary bg-bg-primary text-ink-secondary",
+            )}
+            aria-hidden
+          >
             0
           </span>
           No change
@@ -338,7 +359,7 @@ export function PercentChangeSummaryTable({
                       key={period.key}
                       className={cn(
                         "border-t border-line-tertiary p-2 text-center align-top",
-                        signedCellClasses(ratio),
+                        signedCellClasses(ratio, presentation),
                       )}
                       title={cellTooltip(row, period, cell)}
                       aria-label={valueAriaLabel(ratio)}
@@ -366,6 +387,7 @@ export function PercentChangeSummaryTable({
                       (row.statistics[field] as number | null | undefined) ??
                       null
                     }
+                    presentation={presentation}
                   />
                 ))}
               </tr>

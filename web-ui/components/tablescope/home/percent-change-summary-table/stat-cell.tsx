@@ -27,9 +27,11 @@ import { valueAriaLabel } from "./value-aria-label";
 export function StatCell({
   field,
   value,
+  presentation = "default",
 }: {
   field: keyof PercentChangeSummaryStatistics;
   value: number | null;
+  presentation?: "default" | "executive";
 }) {
   const isSigned = SIGNED_STAT_FIELDS.has(field);
   const isNeutral = field === "standard_deviation" || field === "valid_count";
@@ -49,7 +51,7 @@ export function StatCell({
 
   const className = cn(
     "p-2 text-center align-top",
-    isSigned ? signedCellClasses(displayValue) : "text-ink-secondary",
+    isSigned ? signedCellClasses(displayValue, presentation) : "text-ink-secondary",
   );
 
   const ariaLabel =

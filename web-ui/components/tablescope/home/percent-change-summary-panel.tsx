@@ -162,6 +162,7 @@ export function PercentChangeSummaryPanel({
           sort={sort}
           onSort={setSort}
           showStatistics={showStatistics}
+          presentation={presentation}
         />
         {data.page.next_cursor && (
           <div className="flex items-center justify-between text-[13px]">

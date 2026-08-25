@@ -20,9 +20,16 @@ import {
 
 
 
-export function signedCellClasses(ratio: number | null | undefined): string {
+export function signedCellClasses(
+  ratio: number | null | undefined,
+  presentation: "default" | "executive" = "default",
+): string {
   if (ratio === null || ratio === undefined) return "text-ink-tertiary";
-  if (Math.abs(ratio) <= ZERO_TOLERANCE) return "bg-[#626365] text-white";
-  if (ratio > 0) return "bg-[#74C990] text-white";
-  return "bg-[#EA7975] text-white";
+  const zero = Math.abs(ratio) <= ZERO_TOLERANCE;
+  if (presentation === "executive") {
+    if (zero) return "bg-[#626365] text-white";
+    return ratio > 0 ? "bg-[#74C990] text-white" : "bg-[#EA7975] text-white";
+  }
+  if (zero) return "text-ink-secondary";
+  return ratio > 0 ? "bg-success-bg text-success" : "bg-danger-bg text-danger";
 }

@@ -25,4 +25,5 @@ export interface PercentChangeSummaryTableProps {
   sort: PercentChangeSummarySort;
   onSort: (sort: PercentChangeSummarySort) => void;
   showStatistics?: boolean;
+  presentation?: "default" | "executive";
 }

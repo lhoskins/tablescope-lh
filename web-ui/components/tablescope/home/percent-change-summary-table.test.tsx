@@ -63,6 +63,7 @@ function row(id: string, title: string, ratios: (number | null)[]): PercentChang
 function renderTable(
   rows: PercentChangeSummaryRow[],
   onSort: (sort: { field: string; direction: "asc" | "desc" }) => void,
+  presentation: "default" | "executive" = "default",
 ) {
   return render(
     <PercentChangeSummaryTable
@@ -70,14 +71,15 @@ function renderTable(
       rows={rows}
       sort={{ field: "latest_absolute_change", direction: "desc" }}
       onSort={onSort}
+      presentation={presentation}
     />,
   );
 }
 
 describe("PercentChangeSummaryTable", () => {
-  it("renders full-cell conditional formatting and no direction arrows", () => {
+  it("renders full-cell conditional formatting and no direction arrows (executive presentation)", () => {
     const rows = [row("r1", "Revenue", [0.05, -0.03, 0.0, null])];
-    renderTable(rows, vi.fn());
+    renderTable(rows, vi.fn(), "executive");
 
     const positiveCell = screen.getByLabelText("Positive +5.0%").closest("td");
     expect(positiveCell?.classList.contains("bg-[#74C990]")).toBe(true);
@@ -99,6 +101,31 @@ describe("PercentChangeSummaryTable", () => {
     bodyCells.forEach((cell) => {
       expect(cell.querySelector("svg")).toBeNull();
     });
+  });
+
+  it("keeps the original theme-token colors under the default (Project Insights) presentation", () => {
+    // The approved #74C990/#EA7975/#626365 palette is specific to the
+    // Business Insight executive briefing (see business-intelligence-workspace.tsx,
+    // which is the only caller that passes presentation="executive"). Project
+    // Insights and any other default caller must keep the original
+    // success/danger design tokens so this restyle doesn't leak beyond its
+    // stated scope.
+    const rows = [row("r1", "Revenue", [0.05, -0.03, 0.0, null])];
+    renderTable(rows, vi.fn(), "default");
+
+    const positiveCell = screen.getByLabelText("Positive +5.0%").closest("td");
+    expect(positiveCell?.classList.contains("bg-success-bg")).toBe(true);
+    expect(positiveCell?.classList.contains("text-success")).toBe(true);
+    expect(positiveCell?.classList.contains("bg-[#74C990]")).toBe(false);
+
+    const negativeCell = screen.getByLabelText("Negative -3.0%").closest("td");
+    expect(negativeCell?.classList.contains("bg-danger-bg")).toBe(true);
+    expect(negativeCell?.classList.contains("text-danger")).toBe(true);
+    expect(negativeCell?.classList.contains("bg-[#EA7975]")).toBe(false);
+
+    const zeroCell = screen.getByLabelText("No change, +0.0%").closest("td");
+    expect(zeroCell?.classList.contains("text-ink-secondary")).toBe(true);
+    expect(zeroCell?.classList.contains("bg-[#626365]")).toBe(false);
   });
 
   it("announces unavailable cells as No data", () => {
