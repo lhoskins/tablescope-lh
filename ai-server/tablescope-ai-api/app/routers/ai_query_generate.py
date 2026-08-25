@@ -279,9 +279,10 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
     def _clarify(reason: str) -> HTTPException:
         suggestions = _suggest_sources(req.prompt, allowed_tables)
         logger.warning(
-            "SQL generation needs clarification | tenant=%d project=%d | %s | "
-            "suggested=%s",
-            req.tenant_id, req.project_id, reason, suggestions,
+            "SQL generation needs clarification | tenant=%d project=%d "
+            "conversation=%s turn=%s | %s | suggested=%s",
+            req.tenant_id, req.project_id, req.conversation_id, req.turn_id,
+            reason, suggestions,
         )
         return HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -360,8 +361,10 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
     update_activity(req.user_id, req.tenant_id, req.project_id)
 
     logger.info(
-        "SQL generated | tenant=%d project=%d repaired=%s sources=%s",
-        req.tenant_id, req.project_id, repaired, [s.name for s in selected],
+        "SQL generated | tenant=%d project=%d conversation=%s turn=%s "
+        "repaired=%s sources=%s",
+        req.tenant_id, req.project_id, req.conversation_id, req.turn_id,
+        repaired, [s.name for s in selected],
     )
 
     grounding_manifest: dict[str, Any] | None = None

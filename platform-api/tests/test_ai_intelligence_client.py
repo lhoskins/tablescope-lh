@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -137,3 +138,60 @@ async def test_ask_retries_503_then_succeeds(ai_enabled, monkeypatch):
     assert call_count == 2
     assert result is not None
     assert result["answer"] == "Retry worked."
+
+
+async def test_generate_sql_forwards_conversation_and_turn_id(ai_enabled, monkeypatch):
+    """conversation_id/turn_id must reach the AI server's request body so its
+    logs can be traced back to the exact platform-api turn -- without this, a
+    log line like "needs clarification | project=44" can't be told apart from
+    an unrelated request in another tenant's session that just happened to
+    land nearby in time (see the Q4-follow-up misdiagnosis this was added
+    for)."""
+    captured: dict = {}
+
+    async def fake_post(self, url, **kwargs):
+        captured["body"] = json.loads(kwargs["content"])
+        request = httpx.Request("POST", url)
+        return httpx.Response(200, json={"sql": "SELECT 1", "explanation": ""}, request=request)
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+    await aic.generate_sql(
+        tenant_id=1,
+        user_id=1,
+        project_id=1,
+        prompt="test",
+        allowed_tables=["t"],
+        conversation_id=42,
+        turn_id=7,
+    )
+    assert captured["body"]["conversation_id"] == 42
+    assert captured["body"]["turn_id"] == 7
+
+
+async def test_classify_conversation_turn_forwards_conversation_and_turn_id(
+    ai_enabled, monkeypatch
+):
+    captured: dict = {}
+
+    async def fake_post(self, url, **kwargs):
+        captured["body"] = json.loads(kwargs["content"])
+        request = httpx.Request("POST", url)
+        return httpx.Response(
+            200,
+            json={"intent": "new_analysis", "chart": {}, "confidence": 0.9, "reason": ""},
+            request=request,
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+    await aic.classify_conversation_turn(
+        tenant_id=1,
+        user_id=1,
+        project_id=1,
+        message="test",
+        conversation_id=42,
+        turn_id=7,
+    )
+    assert captured["body"]["conversation_id"] == 42
+    assert captured["body"]["turn_id"] == 7

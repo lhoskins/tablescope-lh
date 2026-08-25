@@ -174,6 +174,8 @@ async def _run_analytical_turn(
     datasource_id: int | None,
     *,
     project_context: dict[str, Any] | None = None,
+    conversation_id: int | None = None,
+    turn_id: int | None = None,
 ) -> dict[str, Any]:
     """Run a data-changing turn by delegating to the existing ask-and-run core."""
     context_block = _format_context_prompt(project_context)
@@ -198,6 +200,8 @@ async def _run_analytical_turn(
         question=prompt,
         max_rows=_MAX_PREVIEW_ROWS,
         source=None,  # source override can be added once the route exposes it
+        conversation_id=conversation_id,
+        turn_id=turn_id,
     )
     return run
 
@@ -247,6 +251,8 @@ async def _synthesize_answer(
     *,
     data_result: dict[str, Any] | None = None,
     matched_insights: list[dict[str, Any]] | None = None,
+    conversation_id: int | None = None,
+    turn_id: int | None = None,
 ) -> str | None:
     """Ask the LLM to synthesize the final answer from data and/or insight cards.
 
@@ -262,6 +268,8 @@ async def _synthesize_answer(
             scope="project",
             data_result=data_result,
             matched_insights=matched_insights,
+            conversation_id=conversation_id,
+            turn_id=turn_id,
         )
         if response and response.get("answer"):
             return str(response["answer"]).strip()
@@ -315,6 +323,8 @@ async def execute_turn(
         tenant_id=context.tenant_id,
         user_id=context.user_id,
         project_id=conversation.project_id or 0,
+        conversation_id=conversation.id,
+        turn_id=turn.id,
     )
     # The classifier strips chart/presentation wording from the user message and
     # returns a focused data_question. Use it for SQL generation so the model
@@ -497,6 +507,8 @@ async def execute_turn(
         prior_turn,
         datasource_id,
         project_context=project_context,
+        conversation_id=conversation.id,
+        turn_id=turn.id,
     )
 
     turn.sql = run.get("sql") or None
@@ -649,6 +661,8 @@ async def execute_turn(
         question,
         data_result=data_result,
         matched_insights=matched_insights_for_synthesis,
+        conversation_id=conversation.id,
+        turn_id=turn.id,
     )
     turn.assistant_message = (
         synthesized

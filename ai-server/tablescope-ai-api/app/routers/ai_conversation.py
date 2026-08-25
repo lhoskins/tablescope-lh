@@ -1,6 +1,7 @@
 """Conversational turn classification."""
 
 import json
+import logging
 import uuid
 from typing import Any
 
@@ -18,6 +19,7 @@ from app.services.prompt_loader import load_prompt_reference
 
 from .ai_shared import _parse_json_response
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -223,6 +225,13 @@ async def classify_conversation_turn(
     data_question = str(parsed.get("data_question") or "").strip() or None
     if data_question and intent in {"chart_change", "explain"}:
         data_question = None
+
+    logger.info(
+        "Conversation turn classified | tenant=%d project=%d conversation=%s "
+        "turn=%s | intent=%s confidence=%.2f",
+        req.tenant_id, req.project_id, req.conversation_id, req.turn_id,
+        intent, confidence,
+    )
 
     return ConversationTurnClassifyResponse(
         intent=intent,

@@ -140,6 +140,8 @@ async def classify_turn(
     tenant_id: int,
     user_id: int,
     project_id: int,
+    conversation_id: int | None = None,
+    turn_id: int | None = None,
 ) -> tuple[str, dict[str, Any], str | None]:
     """Classify a turn LLM-first; degrade deterministically when AI is off.
 
@@ -156,6 +158,8 @@ async def classify_turn(
                 user_id=user_id,
                 project_id=project_id,
                 message=question,
+                conversation_id=conversation_id,
+                turn_id=turn_id,
                 **state,
             )
         except AIUnavailableError as exc:
@@ -176,7 +180,10 @@ async def classify_turn(
                     intent = ConversationalIntent.NEW_ANALYSIS
                 chart = decision.get("chart") or {}
                 logger.info(
-                    "Conversation turn classified intent=%s confidence=%s reason=%s",
+                    "Conversation turn classified conversation=%s turn=%s "
+                    "intent=%s confidence=%s reason=%s",
+                    conversation_id,
+                    turn_id,
                     intent,
                     decision.get("confidence"),
                     decision.get("reason"),

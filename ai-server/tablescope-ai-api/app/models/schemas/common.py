@@ -10,6 +10,13 @@ class AIBaseRequest(BaseModel):
     project_id: int
     signature: str = ""
     timestamp: float = 0.0
+    # The platform-api conversation/turn this call was made for, when the
+    # caller is a conversational-analytics turn. Optional and log-only --
+    # threaded through so a log line can be traced back to the exact turn
+    # instead of guessed from timestamp proximity across every tenant's
+    # concurrent requests.
+    conversation_id: int | None = None
+    turn_id: int | None = None
     # Optional model override and routing capability supplied by the platform
     # LLM Framework. When omitted, the AI server falls back to static config.
     model: str | None = None

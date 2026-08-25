@@ -193,6 +193,8 @@ async def classify_conversation_turn(
     categorical_columns: list[str] | None = None,
     row_count: int = 0,
     current_chart: dict[str, Any] | None = None,
+    conversation_id: int | None = None,
+    turn_id: int | None = None,
 ) -> dict[str, Any] | None:
     """Ask the LLM to classify a conversational-analytics turn.
 
@@ -214,6 +216,8 @@ async def classify_conversation_turn(
             "categorical_columns": categorical_columns or [],
             "row_count": row_count,
             "current_chart": current_chart or {},
+            "conversation_id": conversation_id,
+            "turn_id": turn_id,
         },
     )
     if not isinstance(result, dict) or not result.get("intent"):
@@ -329,6 +333,8 @@ async def generate_sql(
     knowledge_graph_context: dict[str, Any] | None = None,
     grounding_evidence: dict[str, Any] | None = None,
     relationship_hints: list[dict[str, Any]] | None = None,
+    conversation_id: int | None = None,
+    turn_id: int | None = None,
 ) -> dict[str, Any] | None:
     """Generate SQL for a natural-language question.
 
@@ -351,6 +357,8 @@ async def generate_sql(
                 "knowledge_graph_context": knowledge_graph_context or {},
                 "grounding_evidence": grounding_evidence,
                 "relationship_hints": relationship_hints or [],
+                "conversation_id": conversation_id,
+                "turn_id": turn_id,
             },
         )
 
@@ -422,6 +430,8 @@ async def ask(
     grounding_evidence: dict[str, Any] | None = None,
     data_result: dict[str, Any] | None = None,
     matched_insights: list[dict[str, Any]] | None = None,
+    conversation_id: int | None = None,
+    turn_id: int | None = None,
 ) -> dict[str, Any] | None:
     """Free-text answer or synthesized data/insight summary from the AI server.
 
@@ -445,5 +455,7 @@ async def ask(
                 "grounding_evidence": grounding_evidence,
                 "data_result": data_result,
                 "matched_insights": matched_insights,
+                "conversation_id": conversation_id,
+                "turn_id": turn_id,
             },
         )

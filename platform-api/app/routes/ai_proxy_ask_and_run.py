@@ -453,6 +453,8 @@ async def _generate_sql_for_question(
     preferred_sources: list[str] | None = None,
     relevant_columns: list[str] | None = None,
     grounding_evidence: dict[str, Any] | None = None,
+    conversation_id: int | None = None,
+    turn_id: int | None = None,
 ) -> dict[str, Any]:
     """Generate SQL for a natural-language question via the AI server.
 
@@ -499,6 +501,8 @@ async def _generate_sql_for_question(
         knowledge_graph_context=await _kg_context(session, context, project_id),
         grounding_evidence=grounding_evidence,
         relationship_hints=relationship_hints,
+        conversation_id=conversation_id,
+        turn_id=turn_id,
     )
     if not isinstance(ai_result, dict):
         raise ai.AIUnavailableError("AI server returned an invalid response")
@@ -547,6 +551,8 @@ async def _ask_and_run_core(
     max_rows: int,
     source: str | None = None,
     card_context: Any | None = None,
+    conversation_id: int | None = None,
+    turn_id: int | None = None,
 ) -> dict[str, Any]:
     """Resolve a source, generate SQL, execute it, and return the result dict.
 
@@ -601,6 +607,8 @@ async def _ask_and_run_core(
             preferred_sources=resolver.preferred_sources,
             relevant_columns=resolver.relevant_columns,
             grounding_evidence=grounding_evidence,
+            conversation_id=conversation_id,
+            turn_id=turn_id,
         )
     except ai.AIUnavailableError as exc:
         if exc.declined:
