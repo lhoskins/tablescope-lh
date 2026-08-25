@@ -224,11 +224,13 @@ export function deleteChatAttachment(attachmentId: number): Promise<void> {
 }
 
 export function submitCanonicalTurn(
-  data: SubmitCanonicalTurnRequest
+  data: SubmitCanonicalTurnRequest,
+  signal?: AbortSignal,
 ): Promise<SubmitCanonicalTurnResponse> {
   return apiClient.post<SubmitCanonicalTurnResponse>(
     "/api/conversational-analytics/canonical-turns",
-    data
+    data,
+    { signal },
   );
 }
 

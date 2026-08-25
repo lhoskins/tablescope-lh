@@ -6,7 +6,6 @@ import {
   IconArrowRight,
   IconBriefcase,
   IconBulb,
-  IconChartBar,
   IconFileText,
   IconSparkles,
   IconTrendingUp,
@@ -37,7 +36,8 @@ type BusinessInsightTab =
   | "risks"
   | "trends"
   | "opportunities"
-  | "change";
+  | "change"
+  | "analysis";
 
 interface BusinessIntelligenceWorkspaceProps {
   projectIds: number[];
@@ -61,6 +61,8 @@ interface BusinessIntelligenceWorkspaceProps {
   actionsDisclosure?: "always-visible" | "collapsible";
   showToolbar?: boolean;
   synthesis?: CrossProjectSynthesis | null;
+  /** Page title block rendered on the same row as the toolbar. */
+  header?: ReactNode;
 }
 
 const TABS: Array<{ id: BusinessInsightTab; label: string }> = [
@@ -69,6 +71,7 @@ const TABS: Array<{ id: BusinessInsightTab; label: string }> = [
   { id: "trends", label: "Trends" },
   { id: "opportunities", label: "Opportunities" },
   { id: "change", label: "Change summary" },
+  { id: "analysis", label: "Deeper analysis" },
 ];
 
 function pinFingerprintKey(card: InsightCard): string | undefined {
@@ -188,6 +191,7 @@ export function BusinessIntelligenceWorkspace({
   actionsDisclosure,
   showToolbar = true,
   synthesis,
+  header,
 }: BusinessIntelligenceWorkspaceProps) {
   const [activeTab, setActiveTab] = useState<BusinessInsightTab>("overview");
   const returnTarget = useReturnTarget();
@@ -197,6 +201,11 @@ export function BusinessIntelligenceWorkspace({
   );
   const fingerprint =
     snapshotFingerprint ?? (lastUpdated ? lastUpdated.toISOString() : null);
+  const hasDeeperAnalysis = analysis.length > 0 || Boolean(analysisChildren);
+  const visibleTabs = useMemo(
+    () => TABS.filter((tab) => tab.id !== "analysis" || hasDeeperAnalysis),
+    [hasDeeperAnalysis],
+  );
 
   useEffect(() => {
     if (!returnTarget) return;
@@ -210,8 +219,12 @@ export function BusinessIntelligenceWorkspace({
       opportunities.some((card) => (card.insightId || card.id) === returnTarget)
     ) {
       setActiveTab("opportunities");
+    } else if (
+      analysis.some((card) => (card.insightId || card.id) === returnTarget)
+    ) {
+      setActiveTab("analysis");
     }
-  }, [opportunities, returnTarget, risks, trends]);
+  }, [analysis, opportunities, returnTarget, risks, trends]);
 
   const counts: Record<BusinessInsightTab, number | null> = {
     overview: null,
@@ -219,6 +232,7 @@ export function BusinessIntelligenceWorkspace({
     trends: trends.length,
     opportunities: opportunities.length,
     change: null,
+    analysis: analysis.length,
   };
 
   const developments = [
@@ -250,7 +264,7 @@ export function BusinessIntelligenceWorkspace({
       ? {
           card: analysis[0],
           label: "Analysis",
-          tab: "overview" as const,
+          tab: "analysis" as const,
           icon: <IconFileText size={17} />,
         }
       : null,
@@ -287,7 +301,8 @@ export function BusinessIntelligenceWorkspace({
   return (
     <div className="space-y-5">
       {showToolbar && (
-        <div className="border-b border-line-tertiary pb-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          {header}
           <IntelligenceStrip {...toolbar} scope="business" />
         </div>
       )}
@@ -297,7 +312,7 @@ export function BusinessIntelligenceWorkspace({
         role="tablist"
         aria-label="Business Insight sections"
       >
-        {TABS.map((tab) => {
+        {visibleTabs.map((tab) => {
           const selected = activeTab === tab.id;
           const count = counts[tab.id];
           return (
@@ -336,7 +351,7 @@ export function BusinessIntelligenceWorkspace({
           aria-labelledby="business-insight-tab-overview"
           className="space-y-5"
         >
-          <section className="rounded-2xl border border-line-secondary bg-bg-secondary/60 px-5 py-6 shadow-sm">
+          <section className="rounded-2xl border border-line-secondary bg-[#E5E5E5] px-5 py-6 shadow-sm">
             <div className="flex items-center gap-2 text-caption font-medium uppercase tracking-wide text-ink-tertiary">
               <IconBriefcase size={16} />
               Executive brief
@@ -419,7 +434,7 @@ export function BusinessIntelligenceWorkspace({
                     key={`${item.label}-${item.card.insightId || item.card.id}`}
                     type="button"
                     onClick={() => setActiveTab(item.tab)}
-                    className="group rounded-xl border border-line-tertiary bg-bg-secondary/45 p-4 text-left transition-colors hover:border-line-secondary hover:bg-bg-secondary focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    className="group rounded-xl border border-line-tertiary bg-[#F0F0F1] p-4 text-left transition-colors hover:border-line-secondary hover:bg-bg-secondary focus:outline-none focus:ring-2 focus:ring-brand-500"
                   >
                     <span className="text-caption font-medium uppercase tracking-wide text-ink-tertiary">
                       {item.label}
@@ -439,21 +454,6 @@ export function BusinessIntelligenceWorkspace({
             </section>
           )}
 
-          {(analysis.length > 0 || analysisChildren) && (
-            <section>
-              <div className="mb-3 flex items-center gap-2">
-                <IconChartBar size={18} className="text-brand-500" />
-                <h2 className="text-h2 text-ink-primary">Deeper analysis</h2>
-              </div>
-              <InsightGrid
-                cards={analysis}
-                emptyText={emptyMessages.analysis}
-                {...cardGridProps}
-              >
-                {analysisChildren}
-              </InsightGrid>
-            </section>
-          )}
         </section>
       )}
 
@@ -508,6 +508,26 @@ export function BusinessIntelligenceWorkspace({
             emptyText={emptyMessages.opportunities}
             {...cardGridProps}
           />
+        </section>
+      )}
+
+      {projectIds.length > 0 && activeTab === "analysis" && (
+        <section
+          id="business-insight-panel-analysis"
+          role="tabpanel"
+          aria-labelledby="business-insight-tab-analysis"
+        >
+          <PageHeading
+            title="Deeper analysis"
+            description="Diagnostic findings that inform the executive brief but aren't a risk, trend, or opportunity on their own."
+          />
+          <InsightGrid
+            cards={analysis}
+            emptyText={emptyMessages.analysis}
+            {...cardGridProps}
+          >
+            {analysisChildren}
+          </InsightGrid>
         </section>
       )}
 

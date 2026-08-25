@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { formatLastUpdated } from "@/lib/format-datetime";
 import { SaveInsightToDashboardModal } from "./save-insight-to-dashboard-modal";
 import { LoadingCard } from "./intelligence-card";
@@ -15,6 +16,7 @@ export function IntelligenceFeed({
   availableProjects: propAvailableProjects,
   actionsDisclosure,
   presentation = "default",
+  header,
 }: IntelligenceFeedProps = {}) {
   const state = useIntelligenceFeedState({
     onPin,
@@ -135,6 +137,7 @@ export function IntelligenceFeed({
         actionsDisclosure={actionsDisclosure}
         presentation={presentation}
         synthesis={visibleSynthesis}
+        header={header}
       />
 
       {pending.length > 0 && (

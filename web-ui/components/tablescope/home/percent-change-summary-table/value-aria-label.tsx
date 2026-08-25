@@ -23,8 +23,13 @@ import {
 export function valueAriaLabel(
   ratio: number | null | undefined,
   label?: string,
+  presentation: "default" | "executive" = "default",
 ): string {
   if (ratio === null || ratio === undefined) {
+    if (presentation === "executive") {
+      const description = `No change, ${formatPercentChange(0)}`;
+      return label ? `${label}: ${description}` : description;
+    }
     return label ? `${label}: No data` : "No data";
   }
   const formatted = formatPercentChange(ratio);

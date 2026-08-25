@@ -24,7 +24,15 @@ export function signedCellClasses(
   ratio: number | null | undefined,
   presentation: "default" | "executive" = "default",
 ): string {
-  if (ratio === null || ratio === undefined) return "text-ink-tertiary";
+  const blank = ratio === null || ratio === undefined;
+  if (blank) {
+    // Executive Business Insight presentation treats a blank (no comparable
+    // prior period) the same as a literal 0.0% change -- shown and colored
+    // identically -- rather than a dash. Project Insights (default) keeps
+    // the original "no data" treatment.
+    if (presentation === "executive") return "bg-[#626365] text-white";
+    return "text-ink-tertiary";
+  }
   const zero = Math.abs(ratio) <= ZERO_TOLERANCE;
   if (presentation === "executive") {
     if (zero) return "bg-[#626365] text-white";

@@ -99,6 +99,7 @@ describe("WorkspaceAssistantPanel", () => {
           active_resource_type: "table",
           active_resource_id: 1,
         }),
+        expect.any(AbortSignal),
       ),
     );
     await waitFor(() => expect(screen.getByTestId("turn-1")).toHaveTextContent("What changed?"));
@@ -132,8 +133,29 @@ describe("WorkspaceAssistantPanel", () => {
           project_id: undefined,
           message: "What needs attention?",
         }),
+        expect.any(AbortSignal),
       ),
     );
+  });
+
+  it("exposes voice input and a stop button while a turn is in flight", async () => {
+    window.localStorage.setItem("tablescope:workspace-assistant-collapsed", "false");
+    submitCanonicalTurn.mockImplementation(() => new Promise(() => {}));
+
+    render(<WorkspaceAssistantPanel projectId="7" activeItem={null} />);
+
+    expect(screen.getByLabelText("Speak your question")).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("Ask the AI Assistant"), {
+      target: { value: "What changed?" },
+    });
+    fireEvent.keyDown(screen.getByLabelText("Ask the AI Assistant"), { key: "Enter" });
+
+    const stopButton = await screen.findByLabelText("Stop");
+    const [, signal] = submitCanonicalTurn.mock.calls[0] as [unknown, AbortSignal];
+    expect(signal.aborted).toBe(false);
+    fireEvent.click(stopButton);
+    expect(signal.aborted).toBe(true);
   });
 
   it("collapsing the panel persists the collapsed state", () => {

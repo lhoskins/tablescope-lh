@@ -1,7 +1,7 @@
 "use client";
 
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   clearBusinessInsightCache,
@@ -38,4 +38,6 @@ export interface IntelligenceFeedProps {
   actionsDisclosure?: "always-visible" | "collapsible";
   /** Presentation-only layout. Data loading and card actions are unchanged. */
   presentation?: "default" | "executive";
+  /** Executive presentation only: page title block rendered beside the toolbar. */
+  header?: ReactNode;
 }

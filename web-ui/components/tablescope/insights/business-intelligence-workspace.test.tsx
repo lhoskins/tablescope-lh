@@ -105,4 +105,106 @@ describe("BusinessIntelligenceWorkspace", () => {
       .toBe("executive");
     expect(screen.queryByTestId("insight-card")).toBeNull();
   });
+
+  it("only shows the Deeper analysis tab when there is analysis-type content", () => {
+    const { rerender } = render(
+      <BusinessIntelligenceWorkspace
+        projectIds={[1]}
+        cards={[card("risk-1", "risk_delivery", "urgent")]}
+        running={false}
+        lastUpdated={new Date("2026-08-25T00:00:00Z")}
+        toolbar={{
+          running: false,
+          lastUpdatedLabel: null,
+          onRefresh: vi.fn(),
+          granularity: 50,
+          onGranularityChange: vi.fn(),
+          availableProjects: [],
+          selectedProjectIds: new Set<string>(),
+          onToggleProject: vi.fn(),
+          onSelectAll: vi.fn(),
+          onClear: vi.fn(),
+        }}
+        actions={{}}
+        feedback={{ feedbackById: {}, savingFeedback: false }}
+        emptyMessages={{
+          risks: "No risks",
+          trends: "No trends",
+          opportunities: "No opportunities",
+          analysis: "No analysis",
+        }}
+        showToolbar={false}
+      />,
+    );
+    expect(screen.queryByRole("tab", { name: /Deeper analysis/ })).toBeNull();
+
+    rerender(
+      <BusinessIntelligenceWorkspace
+        projectIds={[1]}
+        cards={[
+          card("risk-1", "risk_delivery", "urgent"),
+          card("analysis-1", "documentation", "info"),
+        ]}
+        running={false}
+        lastUpdated={new Date("2026-08-25T00:00:00Z")}
+        toolbar={{
+          running: false,
+          lastUpdatedLabel: null,
+          onRefresh: vi.fn(),
+          granularity: 50,
+          onGranularityChange: vi.fn(),
+          availableProjects: [],
+          selectedProjectIds: new Set<string>(),
+          onToggleProject: vi.fn(),
+          onSelectAll: vi.fn(),
+          onClear: vi.fn(),
+        }}
+        actions={{}}
+        feedback={{ feedbackById: {}, savingFeedback: false }}
+        emptyMessages={{
+          risks: "No risks",
+          trends: "No trends",
+          opportunities: "No opportunities",
+          analysis: "No analysis",
+        }}
+        showToolbar={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: /Deeper analysis/ }));
+    expect(document.getElementById("business-insight-panel-analysis")).toBeTruthy();
+    expect(screen.getByText("analysis-1 title")).toBeTruthy();
+  });
+
+  it("renders the passed header beside the toolbar", () => {
+    render(
+      <BusinessIntelligenceWorkspace
+        projectIds={[1]}
+        cards={[]}
+        running={false}
+        lastUpdated={null}
+        toolbar={{
+          running: false,
+          lastUpdatedLabel: null,
+          onRefresh: vi.fn(),
+          granularity: 50,
+          onGranularityChange: vi.fn(),
+          availableProjects: [],
+          selectedProjectIds: new Set<string>(),
+          onToggleProject: vi.fn(),
+          onSelectAll: vi.fn(),
+          onClear: vi.fn(),
+        }}
+        actions={{}}
+        feedback={{ feedbackById: {}, savingFeedback: false }}
+        emptyMessages={{
+          risks: "No risks",
+          trends: "No trends",
+          opportunities: "No opportunities",
+          analysis: "No analysis",
+        }}
+        header={<h1>Business Insights</h1>}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Business Insights" })).toBeTruthy();
+  });
 });

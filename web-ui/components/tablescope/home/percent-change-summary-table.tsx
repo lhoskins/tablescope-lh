@@ -362,11 +362,13 @@ export function PercentChangeSummaryTable({
                         signedCellClasses(ratio, presentation),
                       )}
                       title={cellTooltip(row, period, cell)}
-                      aria-label={valueAriaLabel(ratio)}
+                      aria-label={valueAriaLabel(ratio, undefined, presentation)}
                     >
                       <span aria-hidden>
                         {ratio === null || ratio === undefined
-                          ? "-"
+                          ? presentation === "executive"
+                            ? formatPercentChange(0)
+                            : "-"
                           : formatPercentChange(ratio)}
                       </span>
                     </td>

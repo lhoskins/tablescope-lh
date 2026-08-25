@@ -7,10 +7,9 @@ import { IconHelpCircle, IconSparkles } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
 import { StatusDot } from "@/components/tablescope/status-dot";
 import { Button } from "@/components/ui/button";
-import { HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
 import { IntelligenceFeed } from "@/components/tablescope/home/intelligence-feed";
+import { WorkspaceAssistantPanel } from "@/components/tablescope/project/workspace/workspace-assistant-panel";
 import { getUserMeta } from "@/lib/auth";
-import { greeting } from "@/lib/ui/format";
 import {
   useCurrentUser,
   useProjectSummaries,
@@ -19,15 +18,6 @@ import type { CurrentUser, TenantSummary } from "@/lib/ui/types";
 import { createHomePin, getHomePins } from "@/lib/api/home-pins";
 import type { InsightCard } from "@/lib/api/home-intelligence";
 import { useToasts, ToastViewport } from "@/components/ui/toast";
-import { TurnBubble } from "@/components/tablescope/conversation/conversation-turn";
-import {
-  submitCanonicalTurn,
-  getConversation,
-  type Conversation,
-  type ConversationTurn,
-} from "@/lib/api/conversational-analytics";
-import { buildAiAssistantHref } from "@/lib/navigation/ai-assistant";
-import { IconLoader2 } from "@tabler/icons-react";
 import {
   CreateActionFromInsightDialog,
   type ActionableInsight,
@@ -119,15 +109,9 @@ export default function BusinessInsightPage() {
     [pinMutation, pinnedByFingerprint, pushToast],
   );
 
-  const [chatTurns, setChatTurns] = useState<ConversationTurn[]>([]);
-  const [chatConversationId, setChatConversationId] = useState<number | null>(null);
-  const [chatBusy, setChatBusy] = useState(false);
-  const [chatError, setChatError] = useState<string | null>(null);
   const [createActionOpen, setCreateActionOpen] = useState(false);
 
   const [selectedInsight, setSelectedInsight] = useState<ActionableInsight | null>(null);
-
-
 
   const handleCreateAction = useCallback((card: InsightCard) => {
     const insight: ActionableInsight = {
@@ -150,66 +134,6 @@ export default function BusinessInsightPage() {
     setCreateActionOpen(true);
   }, []);
 
-  const cardActions = useMemo(
-    () => ({
-      onPin: handlePinInsight,
-      onCreateAction: handleCreateAction,
-      pinnedByFingerprint,
-      actionsDisclosure: "collapsible" as const,
-    }),
-    [handlePinInsight, handleCreateAction, pinnedByFingerprint],
-  );
-
-  const pollTurn = useCallback(
-    async (conversationId: number, turnId: number): Promise<ConversationTurn> => {
-      for (let i = 0; i < 60; i++) {
-        const data = await getConversation(conversationId);
-        const turn = data.turns.find((t) => t.id === turnId);
-        if (turn && turn.status !== "pending") return turn;
-        await new Promise((r) => setTimeout(r, 1000));
-      }
-      const data = await getConversation(conversationId);
-      return data.turns.find((t) => t.id === turnId) ?? data.turns[data.turns.length - 1];
-    },
-    [],
-  );
-
-  const handleAsk = useCallback(
-    async (message: string) => {
-      setChatBusy(true);
-      setChatError(null);
-      const requestId = crypto.randomUUID();
-      try {
-        const res = await submitCanonicalTurn({
-          surface: "business_insights",
-          message,
-          client_request_id: requestId,
-        });
-        setChatConversationId(res.conversation_id);
-        setChatTurns((prev) => {
-          const exists = prev.some((t) => t.id === res.turn.id);
-          return exists ? prev : [...prev, res.turn];
-        });
-        if (res.turn.status === "pending") {
-          const polled = await pollTurn(res.conversation_id, res.turn.id);
-          setChatTurns((prev) =>
-            prev.map((t) => (t.id === polled.id ? polled : t))
-          );
-        }
-      } catch (err) {
-        setChatError(err instanceof Error ? err.message : "Ask failed");
-      } finally {
-        setChatBusy(false);
-      }
-    },
-    [pollTurn],
-  );
-
-  const openInAssistant = useCallback(() => {
-    if (chatConversationId == null) return;
-    router.push(buildAiAssistantHref({ conversationId: chatConversationId }));
-  }, [chatConversationId, router]);
-
   const user = identity?.user ?? FALLBACK_USER;
   const tenant = identity?.tenant ?? FALLBACK_TENANT;
 
@@ -221,11 +145,6 @@ export default function BusinessInsightPage() {
       user={user}
       scrollable={true}
       counts={{ projects: allProjects?.length }}
-      topBarLeft={
-        <span className="text-[15px] text-ink-secondary">
-          {user.name ? greeting(user.name) : "Business Insight"}
-        </span>
-      }
       topBarRight={
         <>
           <StatusDot tone="online" className="mr-1" />
@@ -239,60 +158,36 @@ export default function BusinessInsightPage() {
           </Button>
         </>
       }
+      contextPanel={
+        <WorkspaceAssistantPanel
+          surface="business_insights"
+          contextLabel="Business Insights"
+        />
+      }
     >
       <div className="space-y-6 pb-24">
-        <div className="mx-auto w-full max-w-content space-y-6">
-          <header className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <div className="mb-1.5 flex items-center gap-2 text-caption font-medium uppercase tracking-wide text-ink-tertiary">
-                <IconSparkles size={14} className="text-brand-500" />
-                Executive perspective · AI briefing
-              </div>
-              <h1 className="text-h1 text-ink-primary">Business Insights</h1>
-              <p className="mt-1 text-body text-ink-tertiary">
-                Material changes across the projects and data you are authorized to view.
-              </p>
-            </div>
-          </header>
-          <HomeAiSuggestions onAsk={handleAsk} cardActions={cardActions} />
-          {(chatTurns.length > 0 || chatBusy || chatError) && (
-            <div className="space-y-4 rounded-xl border border-line-tertiary bg-bg-primary p-4">
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="text-h3 text-ink-primary">Ask Anything</h3>
-                {chatConversationId && (
-                  <Button variant="ghost" size="sm" onClick={openInAssistant}>
-                    Open in AI Assistant
-                  </Button>
-                )}
-              </div>
-              {chatTurns.map((t, i) => (
-                <TurnBubble
-                  key={t.id}
-                  turn={t}
-                  isLast={i === chatTurns.length - 1}
-                  onFollowUp={handleAsk}
-                />
-              ))}
-              {chatBusy && (
-                <div className="flex items-center gap-2 text-small text-ink-tertiary">
-                  <IconLoader2 size={16} className="animate-spin" />
-                  TableScope is thinking…
+        <div className="mx-auto w-full max-w-content">
+          <IntelligenceFeed
+            onPin={handlePinInsight}
+            pinnedByFingerprint={pinnedByFingerprint}
+            onCreateAction={handleCreateAction}
+            availableProjects={allProjects ?? []}
+            actionsDisclosure="collapsible"
+            presentation="executive"
+            header={
+              <div>
+                <div className="mb-1.5 flex items-center gap-2 text-caption font-medium uppercase tracking-wide text-ink-tertiary">
+                  <IconSparkles size={14} className="text-brand-500" />
+                  Executive perspective · AI briefing
                 </div>
-              )}
-              {chatError && (
-                <p className="text-small text-danger">{chatError}</p>
-              )}
-            </div>
-          )}
+                <h1 className="text-h1 text-ink-primary">Business Insights</h1>
+                <p className="mt-1 text-body text-ink-tertiary">
+                  Material changes across the projects and data you are authorized to view.
+                </p>
+              </div>
+            }
+          />
         </div>
-        <IntelligenceFeed
-          onPin={handlePinInsight}
-          pinnedByFingerprint={pinnedByFingerprint}
-          onCreateAction={handleCreateAction}
-          availableProjects={allProjects ?? []}
-          actionsDisclosure="collapsible"
-          presentation="executive"
-        />
       </div>
 
       <CreateActionFromInsightDialog

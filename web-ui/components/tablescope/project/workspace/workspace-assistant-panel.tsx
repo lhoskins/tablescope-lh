@@ -4,13 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   IconChevronRight,
   IconChevronLeft,
-  IconArrowUp,
   IconSparkles,
   IconPlus,
 } from "@tabler/icons-react";
-import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
 import { TurnBubble } from "@/components/tablescope/conversation/conversation-turn";
+import { AskAnythingComposer } from "@/components/ai/ask-anything-composer";
 import {
   getConversation,
   listConversations,
@@ -57,6 +56,7 @@ export function WorkspaceAssistantPanel({
   const [error, setError] = useState<string | null>(null);
   const resizingRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     setCollapsed(loadAssistantCollapsed());
@@ -143,15 +143,20 @@ export function WorkspaceAssistantPanel({
     setInput("");
     setBusy(true);
     setError(null);
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     try {
-      const result = await submitCanonicalTurn({
-        surface,
-        project_id: hasProject ? projectIdNum : undefined,
-        message,
-        client_request_id: newRequestId(),
-        active_resource_type: activeItem?.type,
-        active_resource_id: activeItem?.numericId,
-      });
+      const result = await submitCanonicalTurn(
+        {
+          surface,
+          project_id: hasProject ? projectIdNum : undefined,
+          message,
+          client_request_id: newRequestId(),
+          active_resource_type: activeItem?.type,
+          active_resource_id: activeItem?.numericId,
+        },
+        controller.signal,
+      );
       setConversation((prev) => {
         if (!prev || prev.id !== result.conversation_id) {
           return {
@@ -170,11 +175,21 @@ export function WorkspaceAssistantPanel({
         return { ...prev, turns: [...prev.turns, result.turn], updated_at: new Date().toISOString() };
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      // A user-initiated stop is not a failure -- the request is simply
+      // abandoned client-side, the same as every other onCancel usage of
+      // AskAnythingComposer in this app.
+      if (!(err instanceof DOMException && err.name === "AbortError")) {
+        setError(err instanceof Error ? err.message : "Something went wrong.");
+      }
     } finally {
+      abortControllerRef.current = null;
       setPendingMessage(null);
       setBusy(false);
     }
+  }
+
+  function cancelSend() {
+    abortControllerRef.current?.abort();
   }
 
   function startNew() {
@@ -292,33 +307,20 @@ export function WorkspaceAssistantPanel({
         )}
       </div>
 
-      <div className="flex items-end gap-2 border-t border-line-tertiary px-3 py-2">
-        <textarea
+      <div className="border-t border-line-tertiary px-3 py-2">
+        <AskAnythingComposer
           value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              void send(input);
-            }
-          }}
-          rows={2}
+          onChange={setInput}
+          onSubmit={(v) => void send(v)}
+          onCancel={cancelSend}
+          busy={busy}
+          voiceEnabled
           placeholder="Ask anything…"
-          aria-label="Ask the AI Assistant"
-          disabled={busy}
-          className={cn(
-            "max-h-32 min-h-[36px] flex-1 resize-none bg-transparent text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:outline-none",
-          )}
+          ariaLabel="Ask the AI Assistant"
+          submitAriaLabel="Send"
+          cancelAriaLabel="Stop"
+          projectId={hasProject ? projectIdNum : undefined}
         />
-        <button
-          type="button"
-          onClick={() => void send(input)}
-          disabled={busy || !input.trim()}
-          aria-label="Send"
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-brand text-brand-fg hover:bg-brand-700 disabled:opacity-40"
-        >
-          <IconArrowUp size={15} />
-        </button>
       </div>
     </div>
   );

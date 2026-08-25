@@ -89,12 +89,16 @@ describe("PercentChangeSummaryTable", () => {
     expect(negativeCell?.classList.contains("bg-[#EA7975]")).toBe(true);
     expect(negativeCell?.classList.contains("text-white")).toBe(true);
 
-    const zeroCell = screen.getByLabelText("No change, +0.0%").closest("td");
-    expect(zeroCell?.classList.contains("bg-[#626365]")).toBe(true);
-    expect(zeroCell?.classList.contains("text-white")).toBe(true);
-
-    const noDataCell = screen.getByLabelText("No data").closest("td");
-    expect(noDataCell?.classList.contains("text-ink-tertiary")).toBe(true);
+    // The blank (null) cell is also treated as 0.0% in executive
+    // presentation (see the dedicated test below), so both it and the real
+    // 0.0% cell share this label/styling here.
+    const zeroCells = screen.getAllByLabelText("No change, +0.0%");
+    expect(zeroCells.length).toBe(2);
+    zeroCells.forEach((cell) => {
+      const td = cell.closest("td");
+      expect(td?.classList.contains("bg-[#626365]")).toBe(true);
+      expect(td?.classList.contains("text-white")).toBe(true);
+    });
 
     // No IconArrowUp/IconArrowDown should appear inside body cells.
     const bodyCells = document.querySelectorAll("tbody td");
@@ -126,6 +130,22 @@ describe("PercentChangeSummaryTable", () => {
     const zeroCell = screen.getByLabelText("No change, +0.0%").closest("td");
     expect(zeroCell?.classList.contains("text-ink-secondary")).toBe(true);
     expect(zeroCell?.classList.contains("bg-[#626365]")).toBe(false);
+  });
+
+  it("shows blank (no comparable prior period) cells as 0.0% in #626365 under executive presentation", () => {
+    const rows = [row("r1", "Revenue", [0.05, null, 0.0, null])];
+    renderTable(rows, vi.fn(), "executive");
+
+    const blankCells = screen.getAllByLabelText("No change, +0.0%");
+    // The real 0.0% cell plus the two null (blank) cells all announce and
+    // render identically in executive presentation.
+    expect(blankCells.length).toBe(3);
+    blankCells.forEach((cell) => {
+      const td = cell.closest("td");
+      expect(td?.classList.contains("bg-[#626365]")).toBe(true);
+      expect(td?.classList.contains("text-white")).toBe(true);
+      expect(td?.textContent).toBe("+0.0%");
+    });
   });
 
   it("announces unavailable cells as No data", () => {

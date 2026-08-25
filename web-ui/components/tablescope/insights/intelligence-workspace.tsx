@@ -50,6 +50,8 @@ export interface IntelligenceWorkspaceProps {
   showToolbar?: boolean;
   presentation?: "default" | "executive";
   synthesis?: CrossProjectSynthesis | null;
+  /** Executive presentation only: page title block rendered beside the toolbar. */
+  header?: ReactNode;
 }
 
 export function IntelligenceWorkspace({
@@ -71,6 +73,7 @@ export function IntelligenceWorkspace({
   showToolbar = true,
   presentation = "default",
   synthesis = null,
+  header,
 }: IntelligenceWorkspaceProps) {
   const { risks, trends, opportunities, analysis } = classifyInsightCards(cards);
   const hasCards = cards.length > 0;
@@ -98,6 +101,7 @@ export function IntelligenceWorkspace({
         actionsDisclosure={actionsDisclosure}
         showToolbar={showToolbar}
         synthesis={synthesis}
+        header={header}
       />
     );
   }
