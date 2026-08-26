@@ -7,6 +7,15 @@
 # <deployments> refs causes a fatal boot loop on every rebuild).  To keep
 # existing tenants working across image rebuilds, this entrypoint re-deploys all
 # VDBs found in the volume once the server is up.
+#
+# VDBManagementServlet's deleteVDB archives a deleted VDB's XML by moving it to
+# <vdb-folder>/archive/<vdbId>-vdb.xml rather than removing it, so it is still
+# under CUSTOMERS_DIR and still matches *-vdb.xml. Every `find` below that walks
+# CUSTOMERS_DIR for VDB files MUST exclude */archive/* -- otherwise both the
+# startup redeploy pass and the periodic reconcile loop treat every archived
+# (intentionally deleted) VDB as "missing from deployments" and silently
+# redeploy it forever, permanently resurrecting deleted VDBs and leaking
+# deployed-VDB state on the shared Teiid instance across restarts.
 set -e
 
 WF_USER="${TEIID_ADMIN_USER:-admin}"
@@ -29,7 +38,7 @@ redeploy_vdbs() {
         sleep 5
     done
 
-    find "$CUSTOMERS_DIR" -name "*-vdb.xml" 2>/dev/null | while read -r f; do
+    find "$CUSTOMERS_DIR" -name "*-vdb.xml" -not -path '*/archive/*' 2>/dev/null | while read -r f; do
         deploy_vdb_file "$f"
     done
 
@@ -79,7 +88,7 @@ reconcile_missing_vdbs() {
             echo "[entrypoint] VDB $n missing from deployments; redeploying"
             deploy_vdb_file "$f"
         fi
-    done < <(find "$CUSTOMERS_DIR" -name "*-vdb.xml" 2>/dev/null)
+    done < <(find "$CUSTOMERS_DIR" -name "*-vdb.xml" -not -path '*/archive/*' 2>/dev/null)
 
     rm -f "$deployed_file"
 }
