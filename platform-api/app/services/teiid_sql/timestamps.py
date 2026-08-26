@@ -441,6 +441,139 @@ def _normalize_existing_parse_calls(
     return sql
 
 
+# A (possibly qualified) double-quoted column reference: zero or more
+# ``table.``/``"table".`` prefixes followed by a quoted final segment, e.g.
+# ``"Date"``, ``it_backup_jobs_CSV."Date"``, or ``MyCompany.it_backup_jobs_CSV."Date"``.
+_RAW_COLUMN_REF_RE = re.compile(r'(?:(?:"(?:[^"]|"")*"|\w+)\.)*"((?:[^"]|"")+)"')
+
+_TIMESTAMPDIFF_RE = re.compile(r"TIMESTAMPDIFF\s*\(", re.IGNORECASE)
+
+# Comparison operators immediately followed by one of Teiid's date/timestamp
+# functions -- longest operators first so ``>=``/``<=``/``<>`` aren't cut
+# short by their single-character prefixes.
+_DATE_FUNC_OPENERS = (
+    r"(?:TIMESTAMPADD|TIMESTAMPDIFF)\s*\("
+    r"|CURRENT_DATE\s*\(\s*\)"
+    r"|CURRENT_TIMESTAMP\s*\(\s*\)"
+    r"|PARSETIMESTAMP\s*\("
+    r"|PARSEDATE\s*\("
+)
+_COLUMN_VS_DATE_FUNC_RE = re.compile(
+    r'((?:(?:"(?:[^"]|"")*"|\w+)\.)*"(?:[^"]|"")+")'
+    r"\s*(>=|<=|<>|!=|>|<|=)\s*"
+    rf"(?={_DATE_FUNC_OPENERS})",
+    re.IGNORECASE,
+)
+
+
+def _wrap_bare_date_column(
+    full_ref: str,
+    column_name: str,
+    *,
+    column_samples: dict[str, str],
+    lower_types: dict[str, str],
+) -> str | None:
+    """Return ``full_ref`` wrapped in ``PARSETIMESTAMP``/``CAST`` if we know
+    how to parse it as a date, else ``None`` (leave the raw reference alone
+    rather than guess -- the AI repair loop can still catch it from the Teiid
+    error, same as any other case this module can't confidently rewrite)."""
+    col = column_name.replace('""', '"')
+    sample = column_samples.get(col)
+    if sample:
+        mask = date_mask_for_value(sample)
+        if mask is not None:
+            return f"PARSETIMESTAMP({full_ref}, '{mask}')"
+    if lower_types.get(col.lower(), "") in _DATE_TYPES:
+        return f"CAST({full_ref} AS timestamp)"
+    return None
+
+
+def _wrap_timestampdiff_columns(
+    sql: str, column_samples: dict[str, str], lower_types: dict[str, str]
+) -> str:
+    """Wrap bare column arguments of ``TIMESTAMPDIFF(unit, arg1, arg2)`` that
+    are known string/date-typed columns in ``PARSETIMESTAMP``/``CAST``.
+
+    The model frequently passes a CSV's un-cast string date column straight
+    into ``TIMESTAMPDIFF`` (e.g. ``TIMESTAMPDIFF(SQL_TSI_YEAR, "Date",
+    CURRENT_DATE())``), which Teiid rejects with TEIID30070 ("arguments do
+    not match a known type signature") since the column is a varchar, not a
+    timestamp. Every existing rewrite in this module only fixes calls the
+    model already wrapped in *some* cast/parse function; this handles the
+    unwrapped case.
+    """
+    result: list[str] = []
+    i = 0
+    while True:
+        m = _TIMESTAMPDIFF_RE.search(sql, i)
+        if not m:
+            result.append(sql[i:])
+            break
+        result.append(sql[i:m.start()])
+        close = _find_matching_close_paren(sql, m.end())
+        if close is None:
+            result.append(sql[m.start():])
+            i = len(sql)
+            break
+        argstr = sql[m.end():close - 1]
+        args = _split_top_level_args(argstr)
+        if len(args) != 3:
+            result.append(sql[m.start():close])
+            i = close
+            continue
+        new_args = [args[0]]
+        for arg in args[1:]:
+            stripped = arg.strip()
+            col_m = _RAW_COLUMN_REF_RE.fullmatch(stripped)
+            wrapped = (
+                _wrap_bare_date_column(
+                    stripped,
+                    col_m.group(1),
+                    column_samples=column_samples,
+                    lower_types=lower_types,
+                )
+                if col_m
+                else None
+            )
+            new_args.append(wrapped if wrapped is not None else arg)
+        result.append(f"TIMESTAMPDIFF({', '.join(new_args)})")
+        i = close
+    return "".join(result)
+
+
+def _wrap_column_before_date_func(
+    sql: str, column_samples: dict[str, str], lower_types: dict[str, str]
+) -> str:
+    """Wrap a bare date-typed column compared directly against
+    ``TIMESTAMPADD``/``TIMESTAMPDIFF``/``CURRENT_DATE()``/etc. (e.g.
+    ``"Date" >= TIMESTAMPADD(SQL_TSI_YEAR, -1, CURRENT_DATE())``), which
+    Teiid rejects with TEIID31172 ("Could not resolve expressions being
+    compared to a common type") because a varchar column and a timestamp
+    expression have no implicit conversion.
+
+    Only the left-hand (column-then-operator) direction is handled -- the
+    only shape actually seen in production; a date function on the left
+    would need paren-aware backward scanning for comparatively little payoff.
+    """
+
+    def _repl(m: re.Match[str]) -> str:
+        full_ref = m.group(1)
+        col_m = _RAW_COLUMN_REF_RE.fullmatch(full_ref)
+        if not col_m:
+            return m.group(0)
+        wrapped = _wrap_bare_date_column(
+            full_ref,
+            col_m.group(1),
+            column_samples=column_samples,
+            lower_types=lower_types,
+        )
+        if wrapped is None:
+            return m.group(0)
+        return f"{wrapped} {m.group(2)} "
+
+    return _COLUMN_VS_DATE_FUNC_RE.sub(_repl, sql)
+
+
 def normalize_teiid_timestamps(
     sql: str,
     *,
@@ -461,6 +594,10 @@ def normalize_teiid_timestamps(
     - ``EXTRACT("MONTH" FROM expr)`` -- a quoted datetime field, which Teiid's
       grammar requires as a bare keyword -- rewritten to ``EXTRACT(MONTH FROM
       expr)``.
+    - A bare (un-cast) date column compared directly against a date function
+      (``"Date" >= TIMESTAMPADD(...)``) or passed straight into
+      ``TIMESTAMPDIFF(unit, "Date", ...)`` -- wrapped in ``PARSETIMESTAMP``/
+      ``CAST`` using the same sample/type inference as the calls above.
 
     Unknown column casts are left as-is; the query will fail in the normal
     Teiid execution path and can be repaired by the existing AI SQL fix loop.
@@ -528,6 +665,12 @@ def normalize_teiid_timestamps(
     sql = _CAST_LITERAL_RE.sub(_replace_cast_literal, sql)
     sql = _CAST_COLUMN_RE.sub(_replace_cast_column, sql)
     sql = _normalize_existing_parse_calls(sql, column_samples, lower_types)
+
+    # Bare (un-cast) date columns the model compared or diffed directly
+    # against a Teiid date function -- everything above only fixes calls the
+    # model already wrapped in some cast/parse function.
+    sql = _wrap_timestampdiff_columns(sql, column_samples, lower_types)
+    sql = _wrap_column_before_date_func(sql, column_samples, lower_types)
     return sql
 
 

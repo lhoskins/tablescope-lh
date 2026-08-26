@@ -154,6 +154,82 @@ def test_normalize_column_cast_without_sample_left_unchanged() -> None:
     assert normalize_teiid_timestamps(sql) == sql
 
 
+def test_normalize_wraps_bare_column_compared_to_timestampadd() -> None:
+    """TEIID31172 ("Could not resolve expressions being compared to a common
+    type") on a live "backup job failure rate" query: the model compared the
+    CSV's un-cast "Date" column directly to TIMESTAMPADD(...) with no
+    PARSETIMESTAMP/CAST wrapper at all -- every existing rewrite in this
+    module only fixes calls the model already wrapped in *some* cast/parse
+    function."""
+    sql = (
+        'SELECT * FROM t WHERE MyCompany.it_backup_jobs_CSV."Date" >= '
+        "TIMESTAMPADD(SQL_TSI_YEAR, -1, CURRENT_DATE())"
+    )
+    out = normalize_teiid_timestamps(sql, column_samples={"Date": "2026-01-15"})
+    assert (
+        'PARSETIMESTAMP(MyCompany.it_backup_jobs_CSV."Date", \'yyyy-MM-dd\') >= '
+        "TIMESTAMPADD(SQL_TSI_YEAR, -1, CURRENT_DATE())"
+    ) in out
+
+
+def test_normalize_wraps_bare_column_in_timestampdiff() -> None:
+    """TEIID30070 ("arguments do not match a known type signature") from the
+    same live incident: the model passed the raw string column straight into
+    TIMESTAMPDIFF instead of PARSETIMESTAMP(col, mask)."""
+    sql = (
+        "SELECT TIMESTAMPDIFF(SQL_TSI_YEAR, "
+        'MyCompany.it_backup_jobs_CSV."Date", CURRENT_DATE()) FROM t'
+    )
+    out = normalize_teiid_timestamps(sql, column_samples={"Date": "2026-01-15"})
+    assert (
+        'TIMESTAMPDIFF(SQL_TSI_YEAR, PARSETIMESTAMP(MyCompany.it_backup_jobs_CSV."Date", '
+        "'yyyy-MM-dd'), CURRENT_DATE())"
+    ) in out
+
+
+def test_normalize_bare_column_without_sample_or_type_left_unchanged() -> None:
+    """No sample and no declared date/timestamp type -- nothing to safely
+    infer a mask from, so leave the comparison alone rather than guess (the
+    AI repair loop can still catch it from the real Teiid error)."""
+    sql = 'SELECT * FROM t WHERE "Unknown" >= TIMESTAMPADD(SQL_TSI_YEAR, -1, CURRENT_DATE())'
+    assert normalize_teiid_timestamps(sql) == sql
+
+
+def test_normalize_bare_column_uses_cast_when_declared_date_type() -> None:
+    sql = 'SELECT * FROM t WHERE "Date" >= TIMESTAMPADD(SQL_TSI_YEAR, -1, CURRENT_DATE())'
+    out = normalize_teiid_timestamps(sql, column_types={"Date": "timestamp"})
+    assert 'CAST("Date" AS timestamp) >= TIMESTAMPADD' in out
+
+
+def test_normalize_does_not_double_wrap_already_parsed_column() -> None:
+    sql = (
+        "SELECT * FROM t WHERE TIMESTAMPDIFF(SQL_TSI_YEAR, "
+        "PARSETIMESTAMP(\"Date\", 'yyyy-MM-dd'), CURRENT_DATE()) > 1"
+    )
+    out = normalize_teiid_timestamps(sql, column_samples={"Date": "2026-01-15"})
+    assert out == sql
+
+
+def test_normalize_and_rebuild_group_by_together_fix_the_live_incident() -> None:
+    """End-to-end reproduction of the full live "backup job failure rate"
+    incident: a raw date-column comparison plus a missing GROUP BY column,
+    both present in the same query. normalize_teiid_timestamps and
+    rebuild_group_by_from_select run back-to-back in the real execution
+    pipeline (see ai_proxy_ask_and_run._execute_with_repair)."""
+    sql = (
+        'SELECT MyCompany.it_backup_jobs_CSV."System", '
+        "SUM(CASE WHEN MyCompany.it_backup_jobs_CSV.\"Status\" = 'Failed' "
+        'THEN 1 ELSE 0 END) AS "FailedCount", COUNT(*) AS "TotalCount" '
+        "FROM MyCompany.it_backup_jobs_CSV "
+        'WHERE MyCompany.it_backup_jobs_CSV."Date" >= '
+        "TIMESTAMPADD(SQL_TSI_YEAR, -1, CURRENT_DATE())"
+    )
+    fixed = normalize_teiid_timestamps(sql, column_samples={"Date": "2026-01-15"})
+    fixed = rebuild_group_by_from_select(fixed)
+    assert 'PARSETIMESTAMP(MyCompany.it_backup_jobs_CSV."Date", \'yyyy-MM-dd\') >=' in fixed
+    assert 'GROUP BY MyCompany.it_backup_jobs_CSV."System"' in fixed
+
+
 def test_date_mask_for_value() -> None:
     assert date_mask_for_value("2024-01-01") == "yyyy-MM-dd"
     assert date_mask_for_value("2024-01-01T13:45:00") == "yyyy-MM-dd''T''HH:mm:ss"
