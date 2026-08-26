@@ -270,8 +270,19 @@ def _data_shape_score(question: str, card: dict[str, Any]) -> float:
     haystack = " ".join([chart_signature, series, trend, summary]).lower()
     haystack_terms = _extract_terms(haystack)
 
-    # Direct token overlap in series/trend/summary.
-    overlap = len(q_terms & haystack_terms)
+    # Direct token overlap in series/trend/summary, restricted to
+    # subject-specific terms. Generic measure words like "cost" or "rate"
+    # recur across many unrelated cards' summaries and axis labels, so
+    # matching on those alone says nothing about whether a card is actually
+    # on-topic -- the same reasoning the subject bonus below already applies.
+    # Confirmed live: a "backup job failure rate" question matched an
+    # unrelated CAPA-aging card purely because its summary happened to
+    # contain filler words like "rate", clearing the confidence floor with
+    # zero genuine subject overlap. Trend-direction words (rising/falling/
+    # stable and synonyms) are not generic filler in this sense and still
+    # count toward the base overlap.
+    countable_q_terms = q_terms - _GENERIC_SUBJECT_TERMS
+    overlap = len(countable_q_terms & haystack_terms)
     score = float(overlap)
 
     # Bonus only when a series label contains a specific question subject.

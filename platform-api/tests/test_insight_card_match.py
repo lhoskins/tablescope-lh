@@ -640,3 +640,67 @@ async def test_allow_cross_project_false_never_widens(
     # The resolved project (IT) has no cards, so the selector is never even
     # called -- and critically, the widen pass to Finance never runs either.
     assert calls == []
+
+
+# --- _data_shape_score --------------------------------------------------
+#
+# Live incident: "Can you tell me the backup job failure rate?" -- answered
+# directly by a live SQL query against it_backup_jobs_CSV -- still surfaced
+# an unrelated Quality-category CAPA-aging card alongside the answer. The
+# card's summary had no genuine overlap with the question's subject, but its
+# text happened to contain filler words like "rate", and the pre-fix scorer
+# counted *any* question-term appearing anywhere in the card's chart/summary
+# text toward the match score, generic filler words included. These tests
+# exercise the scorer directly (a pure function, no DB/LLM involved) to
+# confirm generic-term-only overlap no longer scores above zero.
+
+
+def _capa_style_card() -> dict:
+    return {
+        "insightId": "capa-001",
+        "projectName": "Quality Project",
+        "title": "High-severity CAPAs aging with limited closure velocity",
+        "summary": (
+            "Certification risk is distributed across documentation "
+            "control, production execution, and audit process at a "
+            "steady closure rate for open jobs across systems."
+        ),
+        "chart": {
+            "type": "bar",
+            "data": {"series": []},
+            "roles": {"x": "Severity", "y": "DaysOpen"},
+        },
+    }
+
+
+def test_data_shape_score_ignores_generic_filler_overlap() -> None:
+    """A card with zero subject-specific overlap must score 0, even though
+    the question and the card both happen to contain generic filler words
+    ("rate" in "closure rate", "job" in "open jobs") that mean nothing about
+    whether the card is actually about backup jobs. Before the fix, this
+    exact filler-only overlap scored 2 -- enough, combined with a series
+    subject bonus, to clear the 0.65 confidence floor and surface this card
+    as if it answered a "backup job failure rate" question, which is
+    precisely what was reported live."""
+    card = _capa_style_card()
+    score = icm._data_shape_score("Can you tell me the backup job failure rate?", card)
+    assert score == 0.0
+
+
+def test_data_shape_score_still_rewards_genuine_subject_overlap() -> None:
+    """A card whose series/summary genuinely discusses the question's
+    subject must still score above zero -- the fix removes credit for
+    generic filler, not for real topical matches."""
+    card = {
+        "insightId": "backup-001",
+        "projectName": "IT Project",
+        "title": "Backup job failures climbing",
+        "summary": "Backup job failures have increased across most systems this quarter.",
+        "chart": {
+            "type": "line",
+            "data": {"series": []},
+            "roles": {"x": "Month", "y": "BackupFailures"},
+        },
+    }
+    score = icm._data_shape_score("Can you tell me the backup job failure rate?", card)
+    assert score > 0.0
