@@ -8,6 +8,7 @@ from app.services.teiid_sql import (
     date_mask_for_value,
     date_masks_from_samples,
     normalize_date_casts,
+    normalize_teiid_identifiers,
     normalize_teiid_string_filters,
     normalize_teiid_timestamps,
     rebuild_group_by_from_select,
@@ -357,3 +358,29 @@ def test_rebuild_group_by_single_extract_matches_select() -> None:
     )
     out = rebuild_group_by_from_select(sql)
     assert 'GROUP BY EXTRACT(QUARTER FROM "Month")' in out
+
+
+def test_normalize_identifiers_quotes_system_alias() -> None:
+    """Live TEIID31100 incident: a query grouping by the real "System" column
+    aliased it right back to itself unquoted (``"System" AS System``) --
+    normalize_teiid_identifiers deliberately leaves an alias unquoted when it
+    matches a real column name, *unless* the word is Teiid-reserved. SYSTEM
+    turned out to be one such reserved word: Teiid's parser hard-failed at
+    exactly that unquoted alias token
+    (``SELECT "System" AS [*]System[*], CAST...``, TEIID31100)."""
+    table_schema = [
+        {"table": "it_backup_jobs_CSV", "columns": ["System", "Status", "Date"]}
+    ]
+    sql = "SELECT System AS System, CAST(1 AS double) FROM it_backup_jobs_CSV"
+    out = normalize_teiid_identifiers(sql, table_schema)
+    assert 'SELECT "System" AS "System"' in out
+
+
+def test_normalize_identifiers_non_reserved_alias_left_unquoted() -> None:
+    """A real column name that is NOT Teiid-reserved keeps its bare alias --
+    only a specific, confirmed-reserved set forces quoting, so this doesn't
+    regress into over-quoting every alias that happens to match a column."""
+    table_schema = [{"table": "it_backup_jobs_CSV", "columns": ["Status"]}]
+    sql = "SELECT Status AS Status FROM it_backup_jobs_CSV"
+    out = normalize_teiid_identifiers(sql, table_schema)
+    assert 'SELECT "Status" AS Status' in out

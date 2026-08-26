@@ -402,13 +402,22 @@ async def execute_turn(
     # page-scoped, so its project never changes mid-conversation.
     is_project_scoped = conversation.surface == "project_insights"
     project_id = conversation.project_id
+    resolved_project_id: int | None = None
     if not is_project_scoped:
         resolved = await resolve_business_insight_project(
-            session, context, question
+            session, context, question,
+            anchor_project_id=conversation.project_id if prior_turn is not None else None,
         )
         if resolved.status == "resolved" and resolved.project_id:
+            resolved_project_id = resolved.project_id
             project_id = resolved.project_id
-            conversation.project_id = project_id
+            # conversation.project_id is only committed once this turn actually
+            # succeeds (see the two `turn.status = "success"` branches below) --
+            # not here. Committing an unproven resolution poisons the
+            # conversation's anchor even when the resolved project turns out to
+            # have no matching source and the turn fails outright, which is
+            # exactly the failure mode that let a wrong first guess persist
+            # across follow-up turns instead of self-correcting.
 
     if project_id is None:
         turn.status = "error"
@@ -490,6 +499,8 @@ async def execute_turn(
             or "I couldn't find a relevant document for that question. Try rephrasing or checking the Reference Library."
         )
         turn.status = "success"
+        if resolved_project_id is not None:
+            conversation.project_id = resolved_project_id
         turn.intent_type = ConversationalIntent.DOCUMENT_QA
         turn.result_metadata = {
             "documentQa": {
@@ -596,6 +607,8 @@ async def execute_turn(
     )
     turn.datasource_context = {"dataSourcesUsed": run.get("dataSourcesUsed", [])}
     turn.status = "success"
+    if resolved_project_id is not None:
+        conversation.project_id = resolved_project_id
 
     # If the live result is on-topic but there is a strong, precomputed Insight
     # Card that adds deeper grounded analysis, return both. The Insight Card is

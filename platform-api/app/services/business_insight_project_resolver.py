@@ -91,12 +91,27 @@ async def resolve_business_insight_project(
     session: AsyncSession,
     context: RequestContext,
     question: str,
+    *,
+    anchor_project_id: int | None = None,
 ) -> ProjectResolveResult:
     """Resolve a Business Insight question to the best authorized project.
 
     Filters by authorization first, then scores each project's authorized
     sources. Returns ``resolved`` only when the top project clears the same
     confidence floor used inside Project Insights; otherwise ``no_match``.
+
+    ``anchor_project_id`` is the project a conversation is already grounded
+    in (a prior turn already succeeded there). A vague follow-up with no
+    clear topical signal -- e.g. "What's the failure rate?" -- can otherwise
+    score an unrelated project just high enough to clear the resolve floor,
+    silently re-pinning an already-correctly-anchored conversation to the
+    wrong project (confirmed live: a "backup job failure rate" question
+    bounced between two projects across consecutive identical asks before
+    landing on the right one). When set, switching away from the anchor
+    requires beating it by ``_ANCHOR_SWITCH_MARGIN``, not just edging it out.
+    An explicit project-name mention in the question (the fast path below)
+    is exempt -- naming a different project is a deliberate switch, not an
+    ambiguous one.
     """
     projects = await _authorized_project_ids(session, context)
     if not projects:
@@ -139,6 +154,9 @@ async def resolve_business_insight_project(
 
     # The project-source resolver uses 40.0 as the outright resolve threshold.
     _RESOLVE_SCORE = 40.0
+    # How much higher a non-anchor project must score than the anchor to
+    # justify moving an already-established conversation off it.
+    _ANCHOR_SWITCH_MARGIN = 20.0
 
     if not scored or _score(scored[0][2]) < _RESOLVE_SCORE:
         return ProjectResolveResult(
@@ -157,6 +175,16 @@ async def resolve_business_insight_project(
         )
 
     top_id, top_name, top_result = scored[0]
+
+    if anchor_project_id is not None and not name_matches and top_id != anchor_project_id:
+        anchor_entry = next(
+            (s for s in scored if s[0] == anchor_project_id), None
+        )
+        if anchor_entry is not None:
+            anchor_score = _score(anchor_entry[2])
+            if _score(top_result) < anchor_score + _ANCHOR_SWITCH_MARGIN:
+                top_id, top_name, top_result = anchor_entry
+
     return ProjectResolveResult(
         status="resolved",
         project_id=top_id,

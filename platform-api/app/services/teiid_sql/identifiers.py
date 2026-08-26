@@ -8,10 +8,15 @@ from .string_filters import _fix_string_literal_columns, _split_top_level
 
 # Teiid reserved words that the model often uses as aliases.  They must be
 # quoted when emitted as column/output aliases (``AS Year``, ``AS Quarter``).
+# Most of these are EXTRACT datetime fields; SYSTEM is unrelated but confirmed
+# live -- a query aliasing a real "System" column as an unquoted ``AS System``
+# hit a hard TEIID31100 parser error at exactly that token
+# (``SELECT "System" AS [*]System[*]``), the same failure shape this set
+# exists to prevent for the date fields below.
 _TEIID_RESERVED_ALIASES = {
     "YEAR", "MONTH", "DAY", "HOUR", "MINUTE", "SECOND", "QUARTER", "WEEK",
     "YEAROFERA", "MONTHOFYEAR", "WEEKOFYEAR", "DAYOFWEEK", "DAYOFMONTH",
-    "DAYOFYEAR", "EPOCH", "MILLISECOND", "NANOSECOND",
+    "DAYOFYEAR", "EPOCH", "MILLISECOND", "NANOSECOND", "SYSTEM",
 }
 
 
