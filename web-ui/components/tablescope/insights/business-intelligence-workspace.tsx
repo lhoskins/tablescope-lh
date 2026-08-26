@@ -11,7 +11,10 @@ import {
   IconTrendingUp,
 } from "@tabler/icons-react";
 
-import { IntelligenceCard } from "@/components/tablescope/home/intelligence-card";
+import {
+  IntelligenceCard,
+  renderBold,
+} from "@/components/tablescope/home/intelligence-card";
 import { PercentChangeSummaryPanel } from "@/components/tablescope/home/percent-change-summary-panel";
 import {
   IntelligenceStrip,
@@ -21,10 +24,7 @@ import { PanelEmpty } from "@/components/tablescope/insight-panel";
 import { cn } from "@/lib/cn";
 import { classifyInsightCards } from "@/lib/insights/classify-insight-cards";
 import { insightAnchorId, useReturnTarget } from "@/lib/insights/return-target";
-import type {
-  CrossProjectSynthesis,
-  InsightCard,
-} from "@/lib/api/home-intelligence";
+import type { InsightCard } from "@/lib/api/home-intelligence";
 
 import type {
   InsightCardActionHandlers,
@@ -60,7 +60,6 @@ interface BusinessIntelligenceWorkspaceProps {
   analysisChildren?: ReactNode;
   actionsDisclosure?: "always-visible" | "collapsible";
   showToolbar?: boolean;
-  synthesis?: CrossProjectSynthesis | null;
   /** Page title block rendered on the same row as the toolbar. */
   header?: ReactNode;
 }
@@ -190,7 +189,6 @@ export function BusinessIntelligenceWorkspace({
   analysisChildren,
   actionsDisclosure,
   showToolbar = true,
-  synthesis,
   header,
 }: BusinessIntelligenceWorkspaceProps) {
   const [activeTab, setActiveTab] = useState<BusinessInsightTab>("overview");
@@ -290,6 +288,23 @@ export function BusinessIntelligenceWorkspace({
       : null,
   ].filter((item): item is NonNullable<typeof item> => item !== null);
 
+  // The cross-project synthesis object describes the mechanics and scope of
+  // the analysis run (project and insight counts). The Executive Brief is a
+  // decision surface, so use the highest-ranked AI insight instead. The
+  // classifier preserves the ranking order within each category.
+  const executiveBriefCard =
+    risks[0] ?? opportunities[0] ?? trends[0] ?? analysis[0] ?? null;
+  const executiveBriefHeadline =
+    executiveBriefCard?.title ??
+    (running
+      ? "AI is evaluating the most pressing matters"
+      : "No pressing matters require executive attention");
+  const executiveBriefBody =
+    executiveBriefCard?.summary ??
+    (running
+      ? "The executive summary will appear when the current insight analysis is complete."
+      : "No material risk, trend, or opportunity was identified in the currently selected projects.");
+
   const cardGridProps = {
     loading: running,
     actions,
@@ -333,8 +348,16 @@ export function BusinessIntelligenceWorkspace({
               )}
             >
               {tab.label}
-              {count != null && count > 0 && (
-                <span className="rounded-full bg-bg-tertiary px-2 py-0.5 text-[11px] text-ink-secondary">
+              {count != null && (
+                <span
+                  aria-label={`${count} ${tab.label.toLowerCase()}`}
+                  className={cn(
+                    "inline-flex min-w-6 items-center justify-center rounded-full border px-2 py-0.5 text-[11px] font-semibold tabular-nums",
+                    selected
+                      ? "border-brand-600 bg-brand-600 text-white"
+                      : "border-brand-200 bg-brand-50 text-brand-700",
+                  )}
+                >
                   {count}
                 </span>
               )}
@@ -358,12 +381,10 @@ export function BusinessIntelligenceWorkspace({
               Executive brief
             </div>
             <h2 className="mt-3 max-w-5xl text-[24px] font-semibold leading-tight text-ink-primary">
-              {synthesis?.headline ??
-                "Business intelligence is ready for executive review"}
+              {renderBold(executiveBriefHeadline)}
             </h2>
             <p className="mt-2 max-w-5xl text-body leading-6 text-ink-secondary">
-              {synthesis?.body ??
-                "Review the highest-materiality risks, durable trends, and evidence-backed opportunities from the selected projects."}
+              {renderBold(executiveBriefBody)}
             </p>
             <button
               type="button"

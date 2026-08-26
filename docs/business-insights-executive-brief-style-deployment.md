@@ -3,7 +3,9 @@
 This branch changes only the Business Insights presentation layer. It adds the
 executive briefing layout, section tabs, executive insight-card treatment, the
 ITSM chart presentation for supported Value charts, and the approved Change
-Summary colors.
+Summary colors. The Executive Brief now presents the highest-ranked AI insight
+as the most pressing matter; analysis-run status and scope text are not shown
+in the brief. Risk, Trend, and Opportunity totals are displayed as tab badges.
 
 It does not change an API contract, query, data model, authorization rule,
 insight classification, card action, chart option, or time-series control.
@@ -17,6 +19,14 @@ insight classification, card action, chart option, or time-series control.
 
 - Existing project selection, depth, Analyze, cache, card action, feedback,
   pinning, export, and drill-through handlers are passed through unchanged.
+- Analyze continues to populate the existing insight feed. Its deterministic
+  project/insight count status is intentionally not rendered as the Executive
+  Brief.
+- The Executive Brief uses the title and summary from the highest-ranked AI
+  insight already returned by the feed, prioritizing Risk, then Opportunity,
+  Trend, and deeper Analysis. It does not issue an additional AI request.
+- Risk, Trend, and Opportunity tab badges display their current counts,
+  including zero, and update from the existing filtered insight collections.
 - Existing Value / `% Change`, interval, and range state remains in
   `InsightTimeSeriesChart`.
 - Supported Value charts use the existing ITSM operational renderer.
@@ -86,19 +96,24 @@ already running before this task.
 ## Production smoke test
 
 1. Open Business Insights and confirm Overview, Risks, Trends, Opportunities,
-   and Change summary render.
-2. Change project selection and depth, then Analyze. Confirm the same insight
-   data and counts populate the new layout.
-3. Confirm feedback, Explain, pin, dashboard, action, export, full-analysis,
+   and Change summary render. Confirm Risk, Trend, and Opportunity counts use
+   pill badges, including a zero badge when a category is empty.
+2. Confirm the Executive Brief summarizes the highest-ranked pressing AI
+   insight and does not display the `AI analyzed N projects...` run-status
+   result.
+3. Change project selection and depth, then Analyze. Confirm the same insight
+   data populate the new layout, the Executive Brief and badges update, and no
+   additional AI request is made solely for the brief.
+4. Confirm feedback, Explain, pin, dashboard, action, export, full-analysis,
    chart options, and other existing card actions still work.
-4. Switch Value to `% Change` and back; change interval and range. Confirm the
+5. Switch Value to `% Change` and back; change interval and range. Confirm the
    controls behave as before and `% Change` retains its zero baseline, signed
    coloring, tooltip values, and Calculation details.
-5. Confirm supported Value charts have ITSM styling and unsupported types still
+6. Confirm supported Value charts have ITSM styling and unsupported types still
    render through the previous fallback.
-6. Confirm Change summary search, page size, interval, range, statistics, and
+7. Confirm Change summary search, page size, interval, range, statistics, and
    pagination work. Verify `#74C990`, `#EA7975`, and `#626365` cells.
-7. Open Project Insights and Personal Home and confirm their layout and card
+8. Open Project Insights and Personal Home and confirm their layout and card
    presentation did not change.
 
 ## Rollback

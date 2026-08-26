@@ -16,10 +16,7 @@ import {
 } from "./insight-section";
 import { classifyInsightCards } from "@/lib/insights/classify-insight-cards";
 import { useReturnTarget, useScrollToReturnTarget } from "@/lib/insights/return-target";
-import type {
-  CrossProjectSynthesis,
-  InsightCard,
-} from "@/lib/api/home-intelligence";
+import type { InsightCard } from "@/lib/api/home-intelligence";
 import { BusinessIntelligenceWorkspace } from "./business-intelligence-workspace";
 
 export type IntelligenceWorkspaceToolbar = IntelligenceStripProps;
@@ -49,7 +46,6 @@ export interface IntelligenceWorkspaceProps {
   actionsDisclosure?: "always-visible" | "collapsible";
   showToolbar?: boolean;
   presentation?: "default" | "executive";
-  synthesis?: CrossProjectSynthesis | null;
   /** Executive presentation only: page title block rendered beside the toolbar. */
   header?: ReactNode;
 }
@@ -72,7 +68,6 @@ export function IntelligenceWorkspace({
   actionsDisclosure,
   showToolbar = true,
   presentation = "default",
-  synthesis = null,
   header,
 }: IntelligenceWorkspaceProps) {
   const { risks, trends, opportunities, analysis } = classifyInsightCards(cards);
@@ -100,7 +95,6 @@ export function IntelligenceWorkspace({
         analysisChildren={analysisChildren}
         actionsDisclosure={actionsDisclosure}
         showToolbar={showToolbar}
-        synthesis={synthesis}
         header={header}
       />
     );
