@@ -134,7 +134,6 @@ export function IntelligenceFeed({
         empty={empty}
         actionsDisclosure={actionsDisclosure}
         presentation={presentation}
-        synthesis={visibleSynthesis}
       />
 
       {pending.length > 0 && (

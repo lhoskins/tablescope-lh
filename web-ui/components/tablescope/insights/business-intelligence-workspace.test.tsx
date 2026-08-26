@@ -6,6 +6,7 @@ import type { InsightCard } from "@/lib/api/home-intelligence";
 import { BusinessIntelligenceWorkspace } from "./business-intelligence-workspace";
 
 vi.mock("@/components/tablescope/home/intelligence-card", () => ({
+  renderBold: (text: string) => text,
   IntelligenceCard: ({
     card,
     presentation,
@@ -85,15 +86,15 @@ describe("BusinessIntelligenceWorkspace", () => {
           analysis: "No analysis",
         }}
         showToolbar={false}
-        synthesis={{
-          headline: "Executive headline",
-          body: "Executive body",
-          projectIds: ["1"],
-        }}
       />,
     );
 
-    expect(screen.getByText("Executive headline")).toBeTruthy();
+    expect(screen.getAllByText("risk-1 title").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("risk-1 summary").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/AI analyzed/i)).toBeNull();
+    expect(screen.getByLabelText("1 risks")).toBeTruthy();
+    expect(screen.getByLabelText("1 trends")).toBeTruthy();
+    expect(screen.getByLabelText("1 opportunities")).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: /Risks/ }));
     expect(document.getElementById("business-insight-panel-risks")).toBeTruthy();
     screen.getAllByTestId("insight-card").forEach((element) => {
