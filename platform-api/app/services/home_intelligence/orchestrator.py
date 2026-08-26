@@ -20,7 +20,12 @@ from app.services.teiid_sql import (
 )
 
 from .card_builder import _card
-from .card_ranking import _normalize_severity, _pre_execution_dedupe, rank_and_dedupe_cards
+from .card_ranking import (
+    _card_priority,
+    _normalize_severity,
+    _pre_execution_dedupe,
+    rank_and_dedupe_cards,
+)
 from .chart_builder import _build_chart
 from .query_helpers import (
     _TWO_VALUE_TYPES,
@@ -765,26 +770,45 @@ async def run_ai_intelligence(
 def synthesise_cross_project(
     summaries: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
-    """Synthesize a headline across projects from prose summaries only.
+    """Synthesize an executive headline/body from the single most material
+    insight across every analyzed project.
 
-    ``summaries`` is ``[{projectId, projectName, insightSummaries: [str, ...]}]``.
+    The headline and body are the real title/summary of whichever insight
+    ranks highest tenant-wide -- the same severity-first ranking used for
+    per-project card ranking (see ``card_ranking._card_priority``) -- instead
+    of a generic activity count ("AI analyzed N projects and surfaced M
+    insights"), which said nothing about what was actually found. A note is
+    appended when a named entity recurs across more than one project's
+    insights, since that is a genuine cross-project signal no single card
+    would otherwise surface.
+
+    ``summaries`` is ``[{projectId, projectName, insights: [card, ...]}]``
+    where each ``card`` carries at least ``title``/``summary`` and the same
+    ``severity``/``priorityScore``/etc. fields used for ranking.
     Returns ``{headline, body, projectIds}`` or ``None`` if too little to say.
     """
-    active = [s for s in summaries if s.get("insightSummaries")]
+    active = [s for s in summaries if s.get("insights")]
     if len(active) < 1:
         return None
     project_ids = [str(s["projectId"]) for s in active]
-    n_projects = len(active)
-    n_insights = sum(len(s["insightSummaries"]) for s in active)
 
-    # Look for a vendor/supplier name appearing in multiple projects' summaries.
+    ranked = [card for s in active for card in s["insights"]]
+    if not ranked:
+        return None
+    top = max(ranked, key=_card_priority)
+    headline = str(top.get("title") or "").strip()
+    body = str(top.get("summary") or "").strip()
+    if not headline or not body:
+        return None
+
+    # Look for a vendor/supplier name appearing in multiple projects' insights.
     shared_note = ""
     name_re = re.compile(r"\*\*([A-Z][A-Za-z0-9 .&'-]{2,40})\*\*")
     by_name: dict[str, set[str]] = {}
     for s in active:
         names: set[str] = set()
-        for text in s["insightSummaries"]:
-            for m in name_re.finditer(text):
+        for card in s["insights"]:
+            for m in name_re.finditer(str(card.get("summary") or "")):
                 names.add(m.group(1).strip())
         for nm in names:
             by_name.setdefault(nm.lower(), set()).add(str(s["projectId"]))
@@ -796,15 +820,4 @@ def synthesise_cross_project(
             "which may warrant a consolidated review."
         )
 
-    headline = (
-        f"AI analyzed {n_projects} active project"
-        f"{'s' if n_projects != 1 else ''} and surfaced {n_insights} "
-        f"insight{'s' if n_insights != 1 else ''} requiring attention"
-    )
-    body = (
-        "Real-time diagnostic queries ran across "
-        + ", ".join(f"{s['projectName']}" for s in active)
-        + ". Each project's data remains isolated — results are surfaced to you "
-        "as the authorized user." + shared_note
-    )
-    return {"headline": headline, "body": body, "projectIds": project_ids}
+    return {"headline": headline, "body": body + shared_note, "projectIds": project_ids}

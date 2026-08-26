@@ -300,6 +300,7 @@ export function BusinessIntelligenceWorkspace({
 
   return (
     <div className="space-y-5">
+    <div className="mx-auto w-full max-w-content space-y-5">
       {showToolbar && (
         <div className="flex flex-wrap items-start justify-between gap-4">
           {header}
@@ -376,45 +377,6 @@ export function BusinessIntelligenceWorkspace({
             </button>
           </section>
 
-          {developments.length > 0 && (
-            <section className="rounded-xl border border-line-tertiary bg-bg-primary px-5 py-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-h2 text-ink-primary">Key developments</h2>
-                  <p className="mt-1 text-body text-ink-tertiary">
-                    Ranked by materiality and freshness
-                  </p>
-                </div>
-                <span className="rounded-full bg-brand-50 px-2.5 py-1 text-[11px] font-medium text-brand-700">
-                  AI ranked
-                </span>
-              </div>
-              <div className="mt-3">
-                {developments.map((item) => (
-                  <button
-                    key={`${item.label}-${item.card.insightId || item.card.id}`}
-                    type="button"
-                    onClick={() => setActiveTab(item.tab)}
-                    className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-t border-line-tertiary px-1 py-3 text-left first:border-t-0 hover:bg-bg-secondary/60"
-                  >
-                    <span className="text-ink-tertiary">{item.icon}</span>
-                    <span className="min-w-0">
-                      <span className="block truncate text-body font-medium text-ink-primary">
-                        {item.card.title}
-                      </span>
-                      <span className="mt-0.5 block truncate text-small text-ink-tertiary">
-                        {item.card.projectName} · {item.label}
-                      </span>
-                    </span>
-                    <span className="text-small text-ink-tertiary">
-                      {item.card.severity}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
-
           {priorities.length > 0 && (
             <section>
               <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
@@ -454,6 +416,44 @@ export function BusinessIntelligenceWorkspace({
             </section>
           )}
 
+          {developments.length > 0 && (
+            <section className="rounded-xl border border-line-tertiary bg-bg-primary px-5 py-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-h2 text-ink-primary">Key developments</h2>
+                  <p className="mt-1 text-body text-ink-tertiary">
+                    Ranked by materiality and freshness
+                  </p>
+                </div>
+                <span className="rounded-full bg-brand-50 px-2.5 py-1 text-[11px] font-medium text-brand-700">
+                  AI ranked
+                </span>
+              </div>
+              <div className="mt-3">
+                {developments.map((item) => (
+                  <button
+                    key={`${item.label}-${item.card.insightId || item.card.id}`}
+                    type="button"
+                    onClick={() => setActiveTab(item.tab)}
+                    className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-t border-line-tertiary px-1 py-3 text-left first:border-t-0 hover:bg-bg-secondary/60"
+                  >
+                    <span className="text-ink-tertiary">{item.icon}</span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-body font-medium text-ink-primary">
+                        {item.card.title}
+                      </span>
+                      <span className="mt-0.5 block truncate text-small text-ink-tertiary">
+                        {item.card.projectName} · {item.label}
+                      </span>
+                    </span>
+                    <span className="text-small text-ink-tertiary">
+                      {item.card.severity}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
         </section>
       )}
 
@@ -531,30 +531,37 @@ export function BusinessIntelligenceWorkspace({
         </section>
       )}
 
-      {projectIds.length > 0 && activeTab === "change" && (
-        <section
-          id="business-insight-panel-change"
-          role="tabpanel"
-          aria-labelledby="business-insight-tab-change"
-        >
-          <PageHeading
-            title="Change summary"
-            description="Period-over-period movement across eligible insight measures."
-          />
-          <PercentChangeSummaryPanel
-            projectIds={projectIds}
-            snapshotFingerprint={fingerprint}
-            presentation="executive"
-          />
-        </section>
-      )}
-
       {projectIds.length > 0 && cards.length === 0 && !running && empty}
       {running && cards.length === 0 && (
         <div className="flex items-center gap-2 rounded-xl border border-line-tertiary bg-bg-primary p-5 text-body text-ink-tertiary">
           <IconSparkles size={18} className="animate-pulse text-brand-500" />
           Building the executive briefing…
         </div>
+      )}
+    </div>
+
+      {/* Change summary uses the full content-area width (not the
+          max-w-content the other tabs use) -- its table has many period
+          columns and benefits from the room; the other tabs are card grids
+          that read better at a constrained width. */}
+      {projectIds.length > 0 && activeTab === "change" && (
+        <section
+          id="business-insight-panel-change"
+          role="tabpanel"
+          aria-labelledby="business-insight-tab-change"
+        >
+          <div className="mx-auto w-full max-w-content">
+            <PageHeading
+              title="Change summary"
+              description="Period-over-period movement across eligible insight measures."
+            />
+          </div>
+          <PercentChangeSummaryPanel
+            projectIds={projectIds}
+            snapshotFingerprint={fingerprint}
+            presentation="executive"
+          />
+        </section>
       )}
     </div>
   );

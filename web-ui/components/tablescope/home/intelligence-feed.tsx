@@ -141,7 +141,7 @@ export function IntelligenceFeed({
       />
 
       {pending.length > 0 && (
-        <div className="space-y-3">
+        <div className="mx-auto w-full max-w-content space-y-3">
           {pending.map((p) => (
             <LoadingCard key={p.id} projectName={p.name} />
           ))}
@@ -151,7 +151,7 @@ export function IntelligenceFeed({
       {status === "complete" &&
         allInsights.length === 0 &&
         visibleProjects.length > 0 && (
-        <div className="rounded-lg border border-dashed border-line-secondary p-8 text-center text-small text-ink-tertiary">
+        <div className="mx-auto w-full max-w-content rounded-lg border border-dashed border-line-secondary p-8 text-center text-small text-ink-tertiary">
           No new insights are available right now.
         </div>
       )}

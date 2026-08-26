@@ -166,28 +166,26 @@ export default function BusinessInsightPage() {
       }
     >
       <div className="space-y-6 pb-24">
-        <div className="mx-auto w-full max-w-content">
-          <IntelligenceFeed
-            onPin={handlePinInsight}
-            pinnedByFingerprint={pinnedByFingerprint}
-            onCreateAction={handleCreateAction}
-            availableProjects={allProjects ?? []}
-            actionsDisclosure="collapsible"
-            presentation="executive"
-            header={
-              <div>
-                <div className="mb-1.5 flex items-center gap-2 text-caption font-medium uppercase tracking-wide text-ink-tertiary">
-                  <IconSparkles size={14} className="text-brand-500" />
-                  Executive perspective · AI briefing
-                </div>
-                <h1 className="text-h1 text-ink-primary">Business Insights</h1>
-                <p className="mt-1 text-body text-ink-tertiary">
-                  Material changes across the projects and data you are authorized to view.
-                </p>
+        <IntelligenceFeed
+          onPin={handlePinInsight}
+          pinnedByFingerprint={pinnedByFingerprint}
+          onCreateAction={handleCreateAction}
+          availableProjects={allProjects ?? []}
+          actionsDisclosure="collapsible"
+          presentation="executive"
+          header={
+            <div>
+              <div className="mb-1.5 flex items-center gap-2 text-caption font-medium uppercase tracking-wide text-ink-tertiary">
+                <IconSparkles size={14} className="text-brand-500" />
+                Executive perspective · AI briefing
               </div>
-            }
-          />
-        </div>
+              <h1 className="text-h1 text-ink-primary">Business Insights</h1>
+              <p className="mt-1 text-body text-ink-tertiary">
+                Material changes across the projects and data you are authorized to view.
+              </p>
+            </div>
+          }
+        />
       </div>
 
       <CreateActionFromInsightDialog

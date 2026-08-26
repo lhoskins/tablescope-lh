@@ -1087,9 +1087,7 @@ async def _finalize_run_if_complete(run_id: str) -> None:
         {
             "projectId": r["projectId"],
             "projectName": r.get("projectName", ""),
-            "insightSummaries": [
-                c.get("summary", "") for c in r.get("insights", [])
-            ],
+            "insights": r.get("insights", []),
         }
         for r in successful
     ]

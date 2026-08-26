@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date
 from types import SimpleNamespace
 
 import pytest
@@ -99,6 +99,71 @@ def test_summary_returns_shared_canonical_periods():
     assert latest.key in row.cells
     cell = row.cells[latest.key]
     assert cell.current_value == 180
+
+
+def test_summary_2y_range_shows_only_the_trailing_12_months(monkeypatch):
+    """2Y widens which insights are eligible (data anywhere in the last 2
+    years still counts), but the displayed columns stay capped at the
+    trailing 12 months -- otherwise the table doubles to 24 monthly columns,
+    which is what the general trend chart is for, not this table."""
+    # build_percent_change_summary computes its own as_of via
+    # datetime.now(timezone.utc), which _fixed_today's date.today() patch
+    # does not cover -- pin it too so the exact period window is
+    # deterministic instead of drifting with the real calendar date.
+    from datetime import datetime as real_datetime
+
+    class _FixedDatetime(real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return real_datetime(2026, 6, 30, tzinfo=UTC)
+
+    monkeypatch.setattr(pcs, "datetime", _FixedDatetime)
+
+    two_year_series = [
+        {"label": "2024-07", "value": 50},
+        {"label": "2024-08", "value": 55},
+        {"label": "2024-09", "value": 60},
+        {"label": "2024-10", "value": 58},
+        {"label": "2024-11", "value": 62},
+        {"label": "2024-12", "value": 65},
+        {"label": "2025-01", "value": 70},
+        {"label": "2025-02", "value": 68},
+        {"label": "2025-03", "value": 72},
+        {"label": "2025-04", "value": 75},
+        {"label": "2025-05", "value": 78},
+        {"label": "2025-06", "value": 80},
+        *_monthly_series(),
+    ]
+    snapshot = {
+        "results": [
+            {
+                "projectId": 1,
+                "projectName": "P1",
+                "insights": [
+                    _card("c1", "Revenue", 1, series=two_year_series),
+                ],
+            }
+        ]
+    }
+    request = pcs.PercentChangeSummaryRequest(
+        project_ids=[1],
+        interval="month",
+        range="2y",
+        page_size=25,
+    )
+    response = pcs.build_percent_change_summary(
+        [_project(1, "P1")], snapshot, request
+    )
+    assert response.range == "2y"
+    assert len(response.periods) == 12
+    assert response.periods[0].start == "2025-07-01"
+    assert response.page.total_eligible == 1
+    row = response.rows[0]
+    # 2024 months aren't displayed columns at all -- the card was eligible
+    # (it has 2y of data), but only the trailing 12 months show as cells.
+    assert "2024-07" not in row.cells
+    latest = next(p for p in response.periods if p.is_latest)
+    assert row.cells[latest.key].current_value == 180
 
 
 def test_summary_excludes_non_time_series_cards():

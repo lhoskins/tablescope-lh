@@ -45,7 +45,19 @@ def _canonical_periods(
     interval: TimeSeriesInterval,
     range_value: TimeSeriesRange,
 ) -> list[SummaryPeriod]:
-    range_start, range_end, _ = _range_window(range_value, as_of)
+    # The Change Summary table displays trailing periods, not a full trend --
+    # 2Y widens which insights are eligible (a card only needs data somewhere
+    # in the last 2 years) without doubling the column count to 24 months.
+    # This is scoped to this table only: the general time-series trend chart
+    # (transform_card_time_series, used by InsightTimeSeriesChart) keeps
+    # showing the full 2-year history for that same range value, since a
+    # trend line is exactly where 24 months of context is the point.
+    window_value = (
+        TimeSeriesRange.YEAR_1
+        if range_value == TimeSeriesRange.YEARS_2
+        else range_value
+    )
+    range_start, range_end, _ = _range_window(window_value, as_of)
     d = _period_start(range_start, interval)
     periods: list[SummaryPeriod] = []
     while d <= range_end:

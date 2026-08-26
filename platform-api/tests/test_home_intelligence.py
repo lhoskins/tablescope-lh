@@ -137,18 +137,73 @@ async def test_synthesise_detects_shared_entity() -> None:
         {
             "projectId": "1",
             "projectName": "Aerospace",
-            "insightSummaries": ["Top performer is **Boeing** by far."],
+            "insights": [
+                {
+                    "title": "Boeing dependency risk",
+                    "summary": "Top performer is **Boeing** by far.",
+                    "severity": "critical",
+                }
+            ],
         },
         {
             "projectId": "2",
             "projectName": "Defense",
-            "insightSummaries": ["**Boeing** contract expires soon."],
+            "insights": [
+                {
+                    "title": "Contract renewal window closing",
+                    "summary": "**Boeing** contract expires soon.",
+                    "severity": "info",
+                }
+            ],
         },
     ]
     result = hi.synthesise_cross_project(summaries)
     assert result is not None
     assert "Boeing" in result["body"]
     assert set(result["projectIds"]) == {"1", "2"}
+
+
+async def test_synthesise_uses_the_highest_priority_insights_own_title_and_summary() -> None:
+    """The headline/body must be a real insight's own title/summary, not a
+    generic "AI analyzed N projects and surfaced M insights" activity count
+    that says nothing about what was actually found."""
+    summaries = [
+        {
+            "projectId": "1",
+            "projectName": "Manufacturing",
+            "insights": [
+                {
+                    "title": "Utilization headroom at WC-002",
+                    "summary": "Capacity is tightly clustered near 80%.",
+                    "severity": "opportunity",
+                }
+            ],
+        },
+        {
+            "projectId": "2",
+            "projectName": "Finance",
+            "insights": [
+                {
+                    "title": "Backlog recovery stalled in Q3",
+                    "summary": "Open backlog rose sharply and has not cleared.",
+                    "severity": "critical",
+                }
+            ],
+        },
+    ]
+    result = hi.synthesise_cross_project(summaries)
+    assert result is not None
+    # "critical" outranks "opportunity" in card_ranking's severity order, so
+    # the Finance insight's own title/summary become the headline/body.
+    assert result["headline"] == "Backlog recovery stalled in Q3"
+    assert result["body"].startswith("Open backlog rose sharply and has not cleared.")
+    assert "AI analyzed" not in result["headline"]
+    assert "AI analyzed" not in result["body"]
+
+
+async def test_synthesise_returns_none_without_any_insights() -> None:
+    summaries = [{"projectId": "1", "projectName": "Aerospace", "insights": []}]
+    assert hi.synthesise_cross_project(summaries) is None
 
 
 # ──────────────────────── AI-driven analyst loop ────────────────────────────
