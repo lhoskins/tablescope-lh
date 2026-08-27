@@ -208,6 +208,64 @@ async def test_generate_sql_sends_min_tokens(_patch_async_client):
 
 
 @pytest.mark.asyncio
+async def test_generate_sql_omits_max_tokens_on_vllm_targets(_patch_async_client):
+    """Live incident: a reasoning model spent its whole 1024-token budget on
+    reasoning and never reached the SQL content (finish_reason=length). The
+    fix is NOT to raise the fixed cap -- that reintroduces the exact
+    max_tokens-overflow regression test_num_ctx_has_no_effect_on_vllm_targets
+    already covers (ai-server has no tokenizer, so a bigger fixed number can
+    just as easily overflow max_model_len on a large catalog/schema prompt).
+    generate_sql must leave max_tokens unset on a vLLM/OpenAI target so vLLM
+    sizes the completion itself."""
+    _patch_async_client["response"] = _chat_completion({"content": "SELECT 1"})
+
+    await llm_client.generate_sql(
+        prompt="revenue by quarter",
+        context="",
+        allowed_tables=["sales_revenue_monthly_CSV"],
+        model="sql-model",
+        ollama_url="http://vllm/v1",
+    )
+
+    assert "max_tokens" not in _patch_async_client["json"]
+
+
+@pytest.mark.asyncio
+async def test_repair_sql_omits_max_tokens_on_vllm_targets(_patch_async_client):
+    _patch_async_client["response"] = _chat_completion({"content": "SELECT 1"})
+
+    await llm_client.repair_sql(
+        prompt="revenue by quarter",
+        context="",
+        allowed_tables=["sales_revenue_monthly_CSV"],
+        failed_sql="SELECT 1",
+        validation_error="TEIID30492",
+        model="sql-model",
+        ollama_url="http://vllm/v1",
+    )
+
+    assert "max_tokens" not in _patch_async_client["json"]
+
+
+@pytest.mark.asyncio
+async def test_generate_sql_keeps_max_tokens_cap_on_ollama_targets(_patch_async_client):
+    """Ollama has no per-request tokenization of its own to size the
+    completion against, unlike vLLM -- it still gets the original explicit
+    cap so an Ollama-served model can't run away."""
+    _patch_async_client["response"] = {"response": "SELECT 1"}
+
+    await llm_client.generate_sql(
+        prompt="revenue by quarter",
+        context="",
+        allowed_tables=["sales_revenue_monthly_CSV"],
+        model="sql-model",
+        ollama_url="http://ollama:11434",
+    )
+
+    assert _patch_async_client["json"]["options"]["num_predict"] == 1024
+
+
+@pytest.mark.asyncio
 async def test_repair_sql_sends_min_tokens(_patch_async_client):
     _patch_async_client["response"] = _chat_completion({"content": "SELECT 1"})
 

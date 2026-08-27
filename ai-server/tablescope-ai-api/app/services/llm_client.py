@@ -456,7 +456,22 @@ async def generate_sql(
         model=model or settings.sql_model,
         ollama_url=ollama_url,
         temperature=0.0,
-        max_tokens=1024,
+        # Confirmed live: a reasoning model can spend the whole 1024-token
+        # budget on its reasoning trace before ever reaching the SQL answer
+        # (finish_reason=length) -- but raising this to a bigger fixed value
+        # would reintroduce the regression _generate_openai's own comment
+        # and test_num_ctx_has_no_effect_on_vllm_targets already fixed once
+        # (project 44: an explicit max_tokens reservation overflowed
+        # max_model_len and turned a soft failure into a hard 400, since
+        # ai-server has no tokenizer and cannot verify a fixed number is
+        # safe against every prompt's real token count -- a SQL-generation
+        # prompt's catalog/schema/relationship hints can get large). Leave
+        # it unset on vLLM/OpenAI-compatible targets so vLLM sizes the
+        # completion itself from the prompt it just tokenized; Ollama has no
+        # equivalent per-request sizing, so it keeps an explicit cap.
+        max_tokens=None if _is_openai_target(
+            (ollama_url or settings.ollama_url).rstrip("/")
+        ) else 1024,
         min_tokens=_SQL_MIN_TOKENS,
         stop=[";"],
     )
@@ -517,7 +532,11 @@ async def repair_sql(
         model=model or settings.sql_model,
         ollama_url=ollama_url,
         temperature=0.0,
-        max_tokens=1024,
+        # See generate_sql's matching comment: unset on vLLM/OpenAI-compatible
+        # targets to avoid overflowing max_model_len, capped on Ollama.
+        max_tokens=None if _is_openai_target(
+            (ollama_url or settings.ollama_url).rstrip("/")
+        ) else 1024,
         min_tokens=_SQL_MIN_TOKENS,
         stop=[";"],
     )
