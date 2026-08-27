@@ -341,9 +341,16 @@ _TEIID_RULES_COMMON = (
     "numeric sort on a numeric text-backed column, you MUST CAST it: "
     'CAST("col" AS double). Example: SUM(CAST("DefectQty" AS double)) / '
     'NULLIF(SUM(CAST("ReceivedQty" AS double)), 0).\n'
-    "- For date operations on a text-backed column, parse/cast it first: a slash "
-    "date like '1/19/2026' uses PARSETIMESTAMP(\"OrderDate\", 'M/d/yyyy'); an "
-    'ISO date like \'2026-01-19\' uses CAST("OrderDate" AS timestamp).\n'
+    "- Check the column's schema type (shown next to its name below) before "
+    "choosing a date function. If it is already `date`, use "
+    "FORMATDATE(\"col\", 'yyyy-MM') directly — do NOT wrap it in PARSETIMESTAMP "
+    "or CAST first. If it is already `timestamp`, use FORMATTIMESTAMP(\"col\", "
+    "'yyyy-MM') directly, same rule. Only a text/string-typed column holding "
+    "date-like text needs parsing first: a slash date like '1/19/2026' uses "
+    "PARSETIMESTAMP(\"OrderDate\", 'M/d/yyyy'); an ISO date like '2026-01-19' "
+    'uses CAST("OrderDate" AS timestamp). Calling FORMATTIMESTAMP on a column '
+    "that is already `date` (not `timestamp`) fails with TEIID30070 — a `date` "
+    "column goes straight to FORMATDATE, never through FORMATTIMESTAMP.\n"
     "- To count days/months between two dates, NEVER subtract them "
     "(date1 - date2 raises TEIID30070) and NEVER wrap a subtraction in "
     "EXTRACT(DAY FROM ...). Use TIMESTAMPDIFF(SQL_TSI_DAY, <earlier>, <later>), "
@@ -354,17 +361,25 @@ _TEIID_RULES_COMMON = (
     "PARSETIMESTAMP(\"DeliveryDate\", 'M/d/yyyy')) AS double)). "
     "Also never use DATEDIFF.\n"
     "- Do NOT use DATE_FORMAT/MONTH()/YEAR(). For a time trend, GROUP BY a "
-    "SORTABLE STRING period label built with FORMATTIMESTAMP, e.g. "
-    "FORMATTIMESTAMP(PARSETIMESTAMP(\"OrderDate\", 'M/d/yyyy'), 'yyyy-MM'). "
-    "Default to month ('yyyy-MM') so a single year still trends; use 'yyyy' only "
-    "across 3+ years. NEVER group a trend by a bare numeric year alone — it "
-    "collapses to one point and renders as a meaningless '2.0K' tile.\n"
+    "SORTABLE STRING period label built with the type-correct date function "
+    "from the rule above (FORMATDATE for a `date` column, FORMATTIMESTAMP for "
+    "a `timestamp` column, or FORMATTIMESTAMP(PARSETIMESTAMP(...)) / "
+    "FORMATTIMESTAMP(CAST(... AS timestamp)) for text). Default to month "
+    "('yyyy-MM') so a single year still trends; use 'yyyy' only across 3+ "
+    "years. NEVER group a trend by a bare numeric year alone — it collapses "
+    "to one point and renders as a meaningless '2.0K' tile.\n"
     "- Alias columns with a plain identifier or double quotes (e.g. AS Month or "
     'AS "Month") — NEVER single quotes (AS \'Month\' is a syntax error).\n'
     "- Do NOT use CTEs (WITH), subqueries in FROM, or derived tables. Query the "
     "allowed tables directly with WHERE/GROUP BY/aggregations only.\n"
-    "- GROUP BY must repeat the full SELECT expression (Teiid forbids alias "
-    "references in GROUP BY). Never use SELECT *.\n"
+    "- GROUP BY must repeat the full SELECT expression, character-for-"
+    "character (Teiid forbids alias references in GROUP BY). Never use "
+    "SELECT *. If you are fixing an error by changing that expression's "
+    "wrapping — adding/removing/switching a CAST, PARSETIMESTAMP, FORMATDATE, "
+    "or FORMATTIMESTAMP — you MUST apply the exact same new expression to "
+    "GROUP BY (and ORDER BY, if present) in the same rewrite. Leaving GROUP "
+    "BY referencing the expression's old form is itself the TEIID30492 "
+    "'not present in a GROUP BY clause' error.\n"
 )
 
 _TEIID_SQL_RULES = (
