@@ -166,19 +166,29 @@ async def plan_and_execute_widgets(
             to_repair.append((a, sql, err))
 
     if to_repair:
-        fixes = await asyncio.gather(
-            *(
-                ai.fix_sql(
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    project_id=project.id,
-                    sql=sql,
-                    error=err,
-                    allowed_tables=allowed_tables,
-                    table_schema=table_schema,
-                )
-                for (_a, sql, err) in to_repair
+        # One SQL self-repair agent decision per rejected query, concurrently
+        # -- a batch shape that doesn't fit the bounded per-query loop the
+        # chat/saved-query paths use. A decision other than an outright
+        # rewrite (asking to inspect a column, or giving up) is treated as
+        # "could not fix in one attempt", same as an empty response would
+        # have been.
+        async def _repair_one(sql: str, err: str) -> str | None:
+            decision = await ai.repair_sql_step(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                project_id=project.id,
+                sql=sql,
+                error=err,
+                allowed_tables=allowed_tables,
+                table_schema=table_schema,
+                known_columns=[],
             )
+            if decision and decision.get("action") == "rewrite":
+                return decision.get("sql") or None
+            return None
+
+        fixes = await asyncio.gather(
+            *(_repair_one(sql, err) for (_a, sql, err) in to_repair)
         )
         for (a, orig_sql, _err), fixed in zip(to_repair, fixes, strict=True):
             if not fixed or fixed.strip() == orig_sql.strip():

@@ -56,9 +56,7 @@ from .ai_proxy_ask import (
 )
 from .ai_proxy_ask_and_run import (
     _CODE_FENCE_RE,
-    _LEADING_SQL_COMMENT_RE,
     _LIMIT_RE,
-    _READONLY_START_RE,
     _ai_generation_error,
     _apply_row_limit,
     _ask_and_run_core,
@@ -247,11 +245,9 @@ __all__ = [
     "_ENGINE_TO_PLANNER",
     "_FAMILY_GROUPS",
     "_GENERATION_INTENT_PATTERN",
-    "_LEADING_SQL_COMMENT_RE",
     "_LIMIT_RE",
     "_NARRATIVE_TYPES",
     "_QUERY_SUMMARY_PATTERNS",
-    "_READONLY_START_RE",
     "_SOURCE_SUFFIX_RE",
     "_TIME_SERIES_TYPES",
     "AIAskAndRunRequest",

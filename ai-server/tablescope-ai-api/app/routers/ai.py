@@ -33,7 +33,6 @@ from . import (
     ai_grounding,
     ai_indexing,
     ai_insight_match,
-    ai_intelligence_fixsql,
     ai_intelligence_interpret,
     ai_intelligence_investigate_step,
     ai_intelligence_knowledge_graph,
@@ -89,7 +88,6 @@ from .ai_insight_match import (
     _select_insight_card_prompt,
     select_insight_card,
 )
-from .ai_intelligence_fixsql import intelligence_fix_sql
 from .ai_intelligence_interpret import intelligence_interpret
 from .ai_intelligence_investigate_step import (
     _INVESTIGATE_SYSTEM_PROMPT,
@@ -195,7 +193,6 @@ router.include_router(ai_relationships.router)
 router.include_router(ai_query_generate.router)
 router.include_router(ai_dashboard.router)
 router.include_router(ai_intelligence_plan.router)
-router.include_router(ai_intelligence_fixsql.router)
 router.include_router(ai_intelligence_repair_step.router)
 router.include_router(ai_intelligence_investigate_step.router)
 router.include_router(ai_conversation.router)
@@ -219,7 +216,6 @@ _FEATURE_MODULES = (
     ai_plan_prompt,
     ai_plan_sql,
     ai_intelligence_plan,
-    ai_intelligence_fixsql,
     ai_intelligence_repair_step,
     ai_intelligence_investigate_step,
     ai_conversation,
@@ -340,9 +336,10 @@ __all__ = [
     "generate_sql_endpoint",
     "index_document",
     "index_reference",
-    "intelligence_fix_sql",
     "intelligence_interpret",
+    "intelligence_investigate_step",
     "intelligence_plan",
+    "intelligence_repair_sql_step",
     "knowledge_graph_insights",
     "llm_client",
     "match_query",

@@ -19,7 +19,7 @@ async def project_table_schema(
     """Build the exact per-source column schema for SQL repair/normalization.
 
     Shape: ``[{"table": view, "columns": [{"name", "type"}]}]`` — the same
-    contract the AI server's ``fix-sql`` endpoint consumes.
+    contract the AI server's ``repair-sql-step`` endpoint consumes.
     """
     rows = (
         await session.scalars(

@@ -72,24 +72,6 @@ class IntelligencePlanResponse(BaseModel):
     model_used: str = ""
 
 
-class IntelligenceFixSQLRequest(AIBaseRequest):
-    """Repair a query that the Teiid engine rejected.
-
-    Given the failing SQL, the engine's error message, and the exact schema,
-    the model returns a corrected single-table query (or empty if unfixable).
-    """
-    sql: str = ""
-    error: str = ""
-    allowed_tables: list[str] = Field(default_factory=list)
-    table_schema: list[dict] = Field(default_factory=list)
-
-
-class IntelligenceFixSQLResponse(BaseModel):
-    sql: str = ""
-    request_id: str = ""
-    model_used: str = ""
-
-
 class RepairSQLColumnKnowledge(BaseModel):
     """One column's real sample value/type, revealed to the repair agent
     because it asked for that specific column via an ``inspect_column`` step."""
@@ -103,14 +85,14 @@ class RepairSQLColumnKnowledge(BaseModel):
 class IntelligenceRepairSQLStepRequest(AIBaseRequest):
     """One decision step in the SQL self-repair agent loop.
 
-    Unlike fix-sql's single blind rewrite, this returns ONE of three actions:
-    rewrite the query directly, ask to see a specific column's real sample
-    value/type before deciding, or give up. The caller (platform-api) executes
-    the chosen action and, for ``inspect_column``, calls this endpoint again
-    with the revealed column appended to ``known_columns`` -- so the model
-    only pays for the schema detail it actually asks for, instead of every
-    column of every allowed table being crammed into the prompt on every
-    attempt regardless of relevance.
+    Rather than a single blind full-query rewrite, this returns ONE of three
+    actions: rewrite the query directly, ask to see a specific column's real
+    sample value/type before deciding, or give up. The caller (platform-api)
+    executes the chosen action and, for ``inspect_column``, calls this
+    endpoint again with the revealed column appended to ``known_columns`` --
+    so the model only pays for the schema detail it actually asks for,
+    instead of every column of every allowed table being crammed into the
+    prompt on every attempt regardless of relevance.
     """
 
     sql: str = ""

@@ -344,11 +344,17 @@ async def run_ai_intelligence(
         if not to_repair:
             return
 
-        # Self-repair: feed each rejected query + its exact engine error back to
-        # the LLM (concurrently), then re-run the corrected SQL.
+        # Self-repair: feed each rejected query + its exact engine error to the
+        # SQL self-repair agent (concurrently, one decision each -- this
+        # planning pass repairs many analyses at once, a batch shape that
+        # doesn't fit the bounded per-query loop the chat/saved-query paths
+        # use), then re-run the corrected SQL. A decision other than an
+        # outright rewrite (asking to inspect a column, or giving up) is
+        # treated as "could not fix in one attempt", same as an empty
+        # response would have been.
         async def fix_one(sql: str, error: str) -> str | None:
             async with ai_call_sem:
-                return await ai.fix_sql(
+                decision = await ai.repair_sql_step(
                     tenant_id=tenant_id,
                     user_id=user_id,
                     project_id=project.id,
@@ -356,7 +362,11 @@ async def run_ai_intelligence(
                     error=error,
                     allowed_tables=allowed_tables,
                     table_schema=table_schema,
+                    known_columns=[],
                 )
+                if decision and decision.get("action") == "rewrite":
+                    return decision.get("sql") or None
+                return None
 
         fixes = await asyncio.gather(
             *(fix_one(sql, err) for (_a, sql, err) in to_repair),

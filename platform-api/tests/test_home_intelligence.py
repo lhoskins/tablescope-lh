@@ -415,6 +415,84 @@ async def test_run_ai_intelligence_skips_empty_results(monkeypatch) -> None:
     assert interpret_called["v"] is False  # nothing to interpret
 
 
+async def test_run_ai_intelligence_repairs_a_rejected_query(monkeypatch) -> None:
+    """A planned analysis whose SQL the engine rejects is repaired via the
+    SQL self-repair agent (repair_sql_step), not the retired fix_sql --
+    same repair mechanism the chat/saved-query paths use, one decision call
+    per rejected analysis since this planning pass repairs many at once."""
+    from app.services import ai_intelligence_client as ai
+
+    monkeypatch.setattr(ai, "is_enabled", lambda: True)
+
+    bad_sql = 'SELECT "supplier", DATEADD(SQL_TSI_DAY, -1, "amount") FROM "spend"'
+    good_sql = 'SELECT "supplier", SUM(CAST("amount" AS double)) AS spend FROM "spend" GROUP BY "supplier"'
+
+    async def fake_plan(**kwargs):
+        return [
+            {
+                "id": "a1",
+                "category": "trend",
+                "title": "Spend by supplier",
+                "rationale": "Concentration risk.",
+                "sql": bad_sql,
+                "chart_type": "bar",
+                "label_column": "supplier",
+                "value_column": "spend",
+                "severity_hint": "watch",
+            }
+        ]
+
+    async def fake_interpret(**kwargs):
+        return {
+            "a1": {
+                "id": "a1",
+                "title": "Spend concentrated in top vendor",
+                "summary": "Acme accounts for the majority of spend.",
+                "severity": "urgent",
+                "callout_type": "risk",
+                "callout_text": "Diversify suppliers.",
+                "recommendation": "Add a second source.",
+            }
+        }
+
+    repair_calls: list[str] = []
+
+    async def fake_repair_step(**kwargs):
+        repair_calls.append(kwargs["sql"])
+        return {"action": "rewrite", "sql": good_sql, "table": "", "column": ""}
+
+    monkeypatch.setattr(ai, "plan", fake_plan)
+    monkeypatch.setattr(ai, "interpret", fake_interpret)
+    monkeypatch.setattr(ai, "repair_sql_step", fake_repair_step)
+
+    ctx = hi.ProjectContext(
+        tables=[_table("spend", ["supplier", "amount"])], documents=[]
+    )
+
+    async def runner(sql: str) -> dict:
+        if sql == bad_sql:
+            raise RuntimeError("TEIID30068 The function 'DATEADD' is an unknown form.")
+        return {
+            "columns": ["supplier", "spend"],
+            "rows": [
+                {"supplier": "Acme", "spend": 1200.0},
+                {"supplier": "Globex", "spend": 200.0},
+            ],
+        }
+
+    cards = await hi.run_ai_intelligence(
+        _project(), ctx, runner, tenant_id=1, user_id=1
+    )
+    # repair_sql_step (not the retired fix_sql) was used to repair the
+    # rejected query -- the pipeline may plan/execute in more than one
+    # pass, so this checks it was called with the rejected SQL at least
+    # once rather than pinning an exact call count.
+    assert bad_sql in repair_calls
+    assert cards is not None and len(cards) == 1
+    assert cards[0]["insightType"] == "trend_a1"
+    assert cards[0]["severity"] == "urgent"
+
+
 # ───────────── insight-first methodology: helpers & metadata ─────────────────
 
 def test_home_best_practices_reference_loads() -> None:

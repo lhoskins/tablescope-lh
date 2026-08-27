@@ -12,8 +12,6 @@ from .actions import (
 )
 from .analysis import (
     FirstPassResult,
-    IntelligenceFixSQLRequest,
-    IntelligenceFixSQLResponse,
     IntelligenceInterpretRequest,
     IntelligenceInterpretResponse,
     IntelligenceInvestigateStepRequest,
@@ -158,8 +156,6 @@ __all__ = [
     "HealthResponse",
     "IndexDocumentRequest",
     "IndexReferenceRequest",
-    "IntelligenceFixSQLRequest",
-    "IntelligenceFixSQLResponse",
     "IntelligenceInterpretRequest",
     "IntelligenceInterpretResponse",
     "IntelligenceInvestigateStepRequest",

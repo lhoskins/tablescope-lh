@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from .endpoints import ask as ask
 from .endpoints import classify_conversation_turn as classify_conversation_turn
-from .endpoints import fix_sql as fix_sql
 from .endpoints import generate_action_draft as generate_action_draft
 from .endpoints import generate_sql as generate_sql
 from .endpoints import interpret as interpret
