@@ -41,6 +41,7 @@ from .intent_classification import _MAX_PREVIEW_ROWS, ConversationalIntent, clas
 from .intent_classification import _fallback_classify as _fallback_classify
 from .intent_classification import _grounded_data_question as _grounded_data_question
 from .intent_classification import _is_document_question as _is_document_question
+from .intent_classification import _is_investigative_question as _is_investigative_question
 from .intent_classification import _normalize_question as _normalize_question
 from .intent_classification import _prior_turn_state as _prior_turn_state
 from .result_profiling import _answer_text, _bound_result, _profile_result, _sql_fingerprint
@@ -204,6 +205,103 @@ async def _run_analytical_turn(
         turn_id=turn_id,
     )
     return run
+
+
+# Sub-questions run per investigation. Each is a full ask-and-run cycle (SQL
+# generation, execution, self-repair), so this bounds latency/cost the same
+# way _MAX_EXECUTE_ATTEMPTS/_MAX_REPAIR_STEPS bound the SQL repair agent.
+_MAX_INVESTIGATION_STEPS = 3
+
+
+def _investigation_step_summary(sub_question: str, run: dict[str, Any]) -> dict[str, Any]:
+    """Bounded summary of one sub-query for the next planning decision and,
+    later, for final-answer synthesis -- sample rows only, never the full
+    result set, so the investigation prompt stays scoped as steps accumulate."""
+    if run.get("status") != "success":
+        return {
+            "sub_question": sub_question,
+            "sql": run.get("sql") or "",
+            "columns": [],
+            "row_count": 0,
+            "sample_rows": [],
+            "error": run.get("error") or "This sub-question could not be answered.",
+        }
+    rows = run.get("rows") or []
+    return {
+        "sub_question": sub_question,
+        "sql": run.get("sql") or "",
+        "columns": run.get("columns") or [],
+        "row_count": len(rows),
+        "sample_rows": rows[:5],
+        "error": "",
+    }
+
+
+async def _run_investigation(
+    session: AsyncSession,
+    context: RequestContext,
+    project_id: int,
+    question: str,
+    datasource_id: int | None,
+    *,
+    project_context: dict[str, Any] | None,
+    conversation_id: int | None,
+    turn_id: int | None,
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    """Multi-step "why" investigation: run up to ``_MAX_INVESTIGATION_STEPS``
+    targeted sub-questions -- each through the existing ask-and-run core, so
+    all SQL generation/execution/self-repair/governance is unchanged -- then
+    return the last successful run plus the full step trace for synthesis.
+
+    Every sub-question is planned by ``ai.investigate_step`` (see
+    ``ai_intelligence_investigate_step.py``), which never writes or sees SQL
+    itself, only the bounded summary of what each prior step found. Each
+    sub-question runs as a fresh, standalone analytical question (not chained
+    as a conversational follow-up) since these are exploratory branches off
+    the ONE original question, not a continued conversation.
+
+    Returns ``(last_successful_run_or_none, steps)``. The caller falls back
+    to a normal single-query run when no step succeeds, so an
+    investigative-sounding question is never worse off than the standard
+    path -- this only adds capability, never removes the existing one.
+    """
+    steps: list[dict[str, Any]] = []
+    last_successful_run: dict[str, Any] | None = None
+
+    for step_num in range(_MAX_INVESTIGATION_STEPS):
+        steps_remaining = _MAX_INVESTIGATION_STEPS - step_num
+        try:
+            decision = await ai_intelligence_client.investigate_step(
+                tenant_id=context.tenant_id,
+                user_id=context.user_id,
+                project_id=project_id,
+                question=question,
+                steps=steps,
+                steps_remaining=steps_remaining,
+            )
+        except AIUnavailableError:
+            decision = None
+
+        if decision is None or decision["action"] != "query" or not decision.get("sub_question"):
+            break
+
+        sub_question = decision["sub_question"]
+        run = await _run_analytical_turn(
+            session,
+            context,
+            project_id,
+            sub_question,
+            None,  # each sub-question is a fresh, standalone question
+            datasource_id,
+            project_context=project_context,
+            conversation_id=conversation_id,
+            turn_id=turn_id,
+        )
+        steps.append(_investigation_step_summary(sub_question, run))
+        if run.get("status") == "success":
+            last_successful_run = run
+
+    return last_successful_run, steps
 
 
 def _data_result_for_synthesis(
@@ -510,17 +608,37 @@ async def execute_turn(
         }
         return
 
-    run = await _run_analytical_turn(
-        session,
-        context,
-        project_id,
-        sql_question,
-        prior_turn,
-        datasource_id,
-        project_context=project_context,
-        conversation_id=conversation.id,
-        turn_id=turn.id,
-    )
+    # A root-cause ("why") question can benefit from running several
+    # targeted sub-questions instead of one -- run the investigation agent
+    # first and only fall back to the normal single-query path if it never
+    # produces a successful result, so this can only add capability, never
+    # regress the standard path.
+    investigation_steps: list[dict[str, Any]] = []
+    run: dict[str, Any] | None = None
+    if _is_investigative_question(sql_question):
+        run, investigation_steps = await _run_investigation(
+            session,
+            context,
+            project_id,
+            sql_question,
+            datasource_id,
+            project_context=project_context,
+            conversation_id=conversation.id,
+            turn_id=turn.id,
+        )
+    if run is None:
+        run = await _run_analytical_turn(
+            session,
+            context,
+            project_id,
+            sql_question,
+            prior_turn,
+            datasource_id,
+            project_context=project_context,
+            conversation_id=conversation.id,
+            turn_id=turn.id,
+        )
+        investigation_steps = []
 
     turn.sql = run.get("sql") or None
     turn.project_context_version = project_context.get("version") if project_context else None
@@ -600,7 +718,11 @@ async def execute_turn(
         return
 
     turn.result_cache = result_cache
-    turn.result_metadata = profile
+    turn.result_metadata = (
+        {**profile, "investigation": {"steps": investigation_steps}}
+        if investigation_steps
+        else profile
+    )
     turn.chart_config = chart_config
     turn.explanation = _build_explanation(
         turn.sql, result_cache, chart_config, governance=post_decision.to_explanation_dict()
@@ -668,6 +790,12 @@ async def execute_turn(
     data_result = _data_result_for_synthesis(
         result_cache, chart_config, turn.sql, run.get("dataSourcesUsed") or []
     )
+    if investigation_steps:
+        # Give the synthesizer the full investigation trail (see
+        # ai_ask.py's _format_data_result), not just the last sub-query in
+        # isolation, so the answer can explain WHY by citing which specific
+        # sub-question surfaced which finding.
+        data_result["steps"] = investigation_steps
     synthesized = await _synthesize_answer(
         context,
         project_id,

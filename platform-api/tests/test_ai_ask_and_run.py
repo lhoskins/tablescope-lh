@@ -451,14 +451,14 @@ async def test_ask_and_run_execution_error_reveals_sql(
     async def fake_execute(session, context, project_id, sql):
         raise HTTPException(status_code=502, detail="Query failed: bad column")
 
-    async def fake_fix(**kwargs):
-        return None  # repair declines -> honest execution error
+    async def fake_repair_step(**kwargs):
+        return {"action": "give_up", "sql": "", "table": "", "column": ""}
 
     import app.services.ai_intelligence_client as aic
 
     monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)
     monkeypatch.setattr(ai_proxy, "_execute_project_sql", fake_execute)
-    monkeypatch.setattr(aic, "fix_sql", fake_fix)
+    monkeypatch.setattr(aic, "repair_sql_step", fake_repair_step)
 
     r = await client.post(
         "/api/ai/actions/ask-and-run",
@@ -503,15 +503,15 @@ async def test_ask_and_run_repairs_execution_error_then_succeeds(
             )
         return {"columns": ["x"], "rows": [{"x": 5}]}
 
-    async def fake_fix(**kwargs):
+    async def fake_repair_step(**kwargs):
         assert "DATEDIFF" in kwargs["error"]
-        return good
+        return {"action": "rewrite", "sql": good, "table": "", "column": ""}
 
     import app.services.ai_intelligence_client as aic
 
     monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)
     monkeypatch.setattr(ai_proxy, "_execute_project_sql", fake_execute)
-    monkeypatch.setattr(aic, "fix_sql", fake_fix)
+    monkeypatch.setattr(aic, "repair_sql_step", fake_repair_step)
 
     r = await client.post(
         "/api/ai/actions/ask-and-run",
@@ -525,6 +525,190 @@ async def test_ask_and_run_repairs_execution_error_then_succeeds(
     assert "DATEDIFF" not in body["sql"]
     assert body["rows"] == [{"x": 5}]
     assert calls["n"] == 2  # failed once, succeeded after repair
+
+
+async def test_ask_and_run_repair_agent_inspects_column_before_rewriting(
+    client, service_headers, monkeypatch
+):
+    """The repair agent can ask to see a specific column's real sample/type
+    before deciding how to fix it -- an inspect_column step ahead of a
+    rewrite, not just a single blind rewrite like the old fix_sql path."""
+    _, _, project, headers = await _setup(client, service_headers, "askagentinspect")
+
+    bad = "SELECT AVG(DATEDIFF(DeliveryDate, ShipDate)) AS x FROM LOG_Shipments_CSV"
+    good = (
+        "SELECT AVG(TIMESTAMPDIFF(SQL_TSI_DAY, CAST(ShipDate AS timestamp), "
+        "CAST(DeliveryDate AS timestamp))) AS x FROM LOG_Shipments_CSV"
+    )
+
+    async def fake_generate(session, context, project_id, question, **kwargs):
+        return {"sql": bad, "explanation": ""}
+
+    async def fake_execute(session, context, project_id, sql):
+        if "DATEDIFF" in sql:
+            raise HTTPException(
+                status_code=502,
+                detail="TEIID30068 The function 'DATEDIFF' is an unknown form.",
+            )
+        return {"columns": ["x"], "rows": [{"x": 5}]}
+
+    steps: list[dict] = []
+
+    async def fake_repair_step(**kwargs):
+        steps.append(kwargs)
+        if not kwargs["known_columns"]:
+            return {
+                "action": "inspect_column",
+                "table": "LOG_Shipments_CSV",
+                "column": "ShipDate",
+            }
+        return {"action": "rewrite", "sql": good, "table": "", "column": ""}
+
+    monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)
+    monkeypatch.setattr(ai_proxy, "_execute_project_sql", fake_execute)
+    monkeypatch.setattr(aic, "repair_sql_step", fake_repair_step)
+
+    r = await client.post(
+        "/api/ai/actions/ask-and-run",
+        json={"project_id": project["id"], "question": "avg days late?"},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "success"
+    assert body["rows"] == [{"x": 5}]
+    # First call asked with nothing known yet; the second carries what the
+    # first inspect_column step revealed.
+    assert len(steps) == 2
+    assert steps[0]["known_columns"] == []
+    assert steps[1]["known_columns"][0]["column"] == "ShipDate"
+
+
+async def test_ask_and_run_repair_agent_gives_up_after_max_steps(
+    client, service_headers, monkeypatch
+):
+    """If the agent keeps asking to inspect a NEW column and never commits to
+    a rewrite, the loop must still terminate -- bounded by the total repair
+    step budget, not spin forever."""
+    from app.routes.ai_proxy_ask_and_run import _MAX_REPAIR_STEPS
+
+    _, _, project, headers = await _setup(client, service_headers, "askagentmax")
+
+    bad = "SELECT AVG(DATEDIFF(DeliveryDate, ShipDate)) AS x FROM LOG_Shipments_CSV"
+
+    async def fake_generate(session, context, project_id, question, **kwargs):
+        return {"sql": bad, "explanation": ""}
+
+    async def fake_execute(session, context, project_id, sql):
+        raise HTTPException(
+            status_code=502,
+            detail="TEIID30068 The function 'DATEDIFF' is an unknown form.",
+        )
+
+    calls = {"n": 0}
+
+    async def fake_repair_step(**kwargs):
+        calls["n"] += 1
+        return {
+            "action": "inspect_column",
+            "table": "LOG_Shipments_CSV",
+            "column": f"col{calls['n']}",
+        }
+
+    monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)
+    monkeypatch.setattr(ai_proxy, "_execute_project_sql", fake_execute)
+    monkeypatch.setattr(aic, "repair_sql_step", fake_repair_step)
+
+    r = await client.post(
+        "/api/ai/actions/ask-and-run",
+        json={"project_id": project["id"], "question": "avg days late?"},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "execution_error"
+    assert calls["n"] == _MAX_REPAIR_STEPS
+
+
+async def test_ask_and_run_repair_agent_repeated_inspect_stops_the_loop(
+    client, service_headers, monkeypatch
+):
+    """Asking about a column it was already told about is a sign the agent
+    isn't incorporating the answer -- stop instead of burning through the
+    remaining step budget on repeats."""
+    _, _, project, headers = await _setup(client, service_headers, "askagentrepeat")
+
+    bad = "SELECT AVG(DATEDIFF(DeliveryDate, ShipDate)) AS x FROM LOG_Shipments_CSV"
+
+    async def fake_generate(session, context, project_id, question, **kwargs):
+        return {"sql": bad, "explanation": ""}
+
+    async def fake_execute(session, context, project_id, sql):
+        raise HTTPException(
+            status_code=502,
+            detail="TEIID30068 The function 'DATEDIFF' is an unknown form.",
+        )
+
+    calls = {"n": 0}
+
+    async def fake_repair_step(**kwargs):
+        calls["n"] += 1
+        return {
+            "action": "inspect_column",
+            "table": "LOG_Shipments_CSV",
+            "column": "ShipDate",
+        }
+
+    monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)
+    monkeypatch.setattr(ai_proxy, "_execute_project_sql", fake_execute)
+    monkeypatch.setattr(aic, "repair_sql_step", fake_repair_step)
+
+    r = await client.post(
+        "/api/ai/actions/ask-and-run",
+        json={"project_id": project["id"], "question": "avg days late?"},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "execution_error"
+    # First call reveals ShipDate; the repeat on the second call stops the loop.
+    assert calls["n"] == 2
+
+
+async def test_ask_and_run_repair_agent_unavailable_degrades_honestly(
+    client, service_headers, monkeypatch
+):
+    """An AI outage mid-repair must degrade to the honest execution error,
+    the same contract fix_sql's AIUnavailableError handling had."""
+    _, _, project, headers = await _setup(client, service_headers, "askagentdown")
+
+    bad = "SELECT AVG(DATEDIFF(DeliveryDate, ShipDate)) AS x FROM LOG_Shipments_CSV"
+
+    async def fake_generate(session, context, project_id, question, **kwargs):
+        return {"sql": bad, "explanation": ""}
+
+    async def fake_execute(session, context, project_id, sql):
+        raise HTTPException(
+            status_code=502,
+            detail="TEIID30068 The function 'DATEDIFF' is an unknown form.",
+        )
+
+    async def fake_repair_step(**kwargs):
+        raise aic.AIUnavailableError("AI server dropped mid-repair")
+
+    monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)
+    monkeypatch.setattr(ai_proxy, "_execute_project_sql", fake_execute)
+    monkeypatch.setattr(aic, "repair_sql_step", fake_repair_step)
+
+    r = await client.post(
+        "/api/ai/actions/ask-and-run",
+        json={"project_id": project["id"], "question": "avg days late?"},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "execution_error"
+    assert "DATEDIFF" in body["errorDetails"]["executionError"]
 
 
 async def test_ask_and_run_blocks_prose_before_execution(

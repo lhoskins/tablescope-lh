@@ -124,6 +124,182 @@ async def test_create_conversation_with_initial_message(client, service_headers,
     assert body["turns"][0]["chart_config"]["type"] == "bar"
 
 
+async def test_investigative_question_runs_multi_step_investigation(
+    client, service_headers, monkeypatch
+):
+    """A root-cause ('why') question runs the investigation agent: targeted
+    sub-questions through the existing ask-and-run core, then a synthesized
+    answer given the full trail -- not just the last sub-query in isolation."""
+    _, _, project, headers = await _setup(client, service_headers, "conv-investigate")
+
+    async def _fake_ask_and_run(session, context, *, project_id, question, **kwargs):
+        if "by supplier" in question:
+            return {
+                "sql": 'SELECT "Supplier", AVG(CAST("DefectRate" AS double)) AS r '
+                'FROM "t" GROUP BY "Supplier"',
+                "columns": ["Supplier", "r"],
+                "rows": [
+                    {"Supplier": "Acme", "r": 0.31},
+                    {"Supplier": "Globex", "r": 0.05},
+                ],
+                "suggestedVisualization": {"type": "bar"},
+                "explanation": "",
+                "dataSourcesUsed": ["t"],
+                "status": "success",
+                "error": None,
+            }
+        return _fake_ask_and_run_core_result(question)
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core",
+        _fake_ask_and_run,
+    )
+
+    from app.services import conversational_analytics as ca
+
+    decisions = iter(
+        [
+            {"action": "query", "sub_question": "Defect rate by supplier?"},
+            {"action": "finish", "sub_question": ""},
+        ]
+    )
+    investigate_calls: list[dict] = []
+
+    async def _fake_investigate_step(**kwargs):
+        # Snapshot -- kwargs["steps"] is the live list _run_investigation
+        # keeps mutating, so capture a copy or later calls would retroactively
+        # change what an earlier call appears to have seen.
+        investigate_calls.append({**kwargs, "steps": list(kwargs["steps"])})
+        return next(decisions)
+
+    monkeypatch.setattr(
+        ca.ai_intelligence_client, "investigate_step", _fake_investigate_step
+    )
+
+    synthesize_calls: list[dict] = []
+
+    async def _fake_ask(*, question, **kwargs):
+        synthesize_calls.append(kwargs)
+        return {
+            "answer": "Defect rate is rising because Acme's rate (31%) is far "
+            "above Globex's (5%)."
+        }
+
+    monkeypatch.setattr(ca.ai_intelligence_client, "ask", _fake_ask)
+
+    r = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={
+            "project_id": project["id"],
+            "initial_message": "Why is the defect rate rising?",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    turn = r.json()["turns"][0]
+    assert turn["status"] == "success"
+    assert "Acme" in turn["assistant_message"]
+    assert turn["result"]["columns"] == ["Supplier", "r"]
+
+    # Two planning calls: the first with no evidence yet, the second knowing
+    # what the first sub-query found.
+    assert len(investigate_calls) == 2
+    assert investigate_calls[0]["steps"] == []
+    assert investigate_calls[0]["steps_remaining"] == 3
+    assert investigate_calls[1]["steps_remaining"] == 2
+    assert investigate_calls[1]["steps"][0]["sub_question"] == "Defect rate by supplier?"
+
+    # The synthesizer saw the full investigation trail, not just the final result.
+    assert (
+        synthesize_calls[0]["data_result"]["steps"][0]["sub_question"]
+        == "Defect rate by supplier?"
+    )
+
+    # The trace is persisted for audit, not just used transiently.
+    steps = turn["result_metadata"]["investigation"]["steps"]
+    assert len(steps) == 1
+    assert steps[0]["sub_question"] == "Defect rate by supplier?"
+    assert steps[0]["row_count"] == 2
+
+
+async def test_investigative_question_falls_back_to_single_query_when_agent_declines(
+    client, service_headers, monkeypatch
+):
+    """If the investigation agent has nothing useful to add and declines on
+    its very first decision, the turn must still succeed via the normal
+    single-query path -- an investigative-sounding question is never worse
+    off than the standard path."""
+    _, _, project, headers = await _setup(client, service_headers, "conv-investigate-decline")
+
+    async def _fake_ask_and_run(session, context, *, project_id, question, **kwargs):
+        return _fake_ask_and_run_core_result(question)
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core",
+        _fake_ask_and_run,
+    )
+
+    from app.services import conversational_analytics as ca
+
+    async def _fake_investigate_step(**kwargs):
+        return {"action": "finish", "sub_question": ""}
+
+    monkeypatch.setattr(
+        ca.ai_intelligence_client, "investigate_step", _fake_investigate_step
+    )
+
+    r = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={
+            "project_id": project["id"],
+            "initial_message": "Why is the defect rate rising?",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    turn = r.json()["turns"][0]
+    assert turn["status"] == "success"
+    assert turn["result"]["columns"] == ["month", "amount"]
+    # No investigation actually ran, so no trace is attached.
+    assert (turn["result_metadata"] or {}).get("investigation") is None
+
+
+async def test_plain_question_never_triggers_the_investigation_agent(
+    client, service_headers, monkeypatch
+):
+    """A plain factual question must never pay for the investigation
+    decision call -- only a genuine root-cause question does."""
+    _, _, project, headers = await _setup(client, service_headers, "conv-no-investigate")
+
+    async def _fake_ask_and_run(session, context, *, project_id, question, **kwargs):
+        return _fake_ask_and_run_core_result(question)
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core",
+        _fake_ask_and_run,
+    )
+
+    from app.services import conversational_analytics as ca
+
+    async def _fail_if_called(**kwargs):
+        raise AssertionError("investigate_step must not run for a plain factual question")
+
+    monkeypatch.setattr(
+        ca.ai_intelligence_client, "investigate_step", _fail_if_called
+    )
+
+    r = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={
+            "project_id": project["id"],
+            "initial_message": "What is total revenue this quarter?",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["turns"][0]["status"] == "success"
+
+
 async def test_generation_error_reports_the_real_reason_not_a_matched_card(
     client, db_session, service_headers, monkeypatch
 ):

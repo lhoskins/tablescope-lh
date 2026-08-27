@@ -18,6 +18,8 @@ _CAPABILITY_BY_PATH: dict[str, str | None] = {
     "/ai/intelligence/conversation-turn": "general_reasoning",
     "/ai/intelligence/select-insight-card": "insight_interpretation",
     "/ai/intelligence/fix-sql": "sql_generation",
+    "/ai/intelligence/repair-sql-step": "sql_generation",
+    "/ai/intelligence/investigate-step": "general_reasoning",
     "/ai/intelligence/interpret": "insight_interpretation",
     "/ai/query/generate": "sql_generation",
     "/ai/actions/draft": "general_reasoning",
@@ -288,6 +290,100 @@ async def fix_sql(
         return None
     fixed = result.get("sql")
     return fixed if isinstance(fixed, str) and fixed.strip() else None
+
+
+_REPAIR_STEP_ACTIONS = {"rewrite", "inspect_column", "give_up"}
+
+
+async def repair_sql_step(
+    *,
+    tenant_id: int,
+    user_id: int,
+    project_id: int,
+    sql: str,
+    error: str,
+    allowed_tables: list[str],
+    table_schema: list[dict[str, Any]] | None = None,
+    known_columns: list[dict[str, str]] | None = None,
+) -> dict[str, str] | None:
+    """Ask the SQL self-repair agent for the single next step.
+
+    Unlike ``fix_sql`` (one blind full-query rewrite), this lets the model
+    choose between rewriting the query, asking to see a specific column's
+    real sample value/type first (``known_columns`` carries what has already
+    been revealed across prior calls in the same repair loop), or giving up.
+    Returns ``{"action": "rewrite"|"inspect_column"|"give_up", "sql", "table",
+    "column"}``, or None if the AI is disabled. The caller owns the loop and
+    its own step/attempt limits -- this makes a single decision per call.
+    """
+    result = await _post_with_model(
+        "/ai/intelligence/repair-sql-step",
+        {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "project_id": project_id,
+            "sql": sql,
+            "error": error,
+            "allowed_tables": allowed_tables,
+            "table_schema": table_schema or [],
+            "known_columns": known_columns or [],
+        },
+    )
+    if result is None:
+        return None
+    action = result.get("action")
+    if action not in _REPAIR_STEP_ACTIONS:
+        action = "give_up"
+    return {
+        "action": action,
+        "sql": str(result.get("sql") or ""),
+        "table": str(result.get("table") or ""),
+        "column": str(result.get("column") or ""),
+    }
+
+
+_INVESTIGATE_STEP_ACTIONS = {"query", "finish"}
+
+
+async def investigate_step(
+    *,
+    tenant_id: int,
+    user_id: int,
+    project_id: int,
+    question: str,
+    steps: list[dict[str, Any]],
+    steps_remaining: int,
+) -> dict[str, str] | None:
+    """Ask the "why" investigation agent for the single next planning step.
+
+    Given the original question and every sub-query run so far (``steps``,
+    each a bounded summary -- sub_question/sql/columns/row_count/
+    sample_rows/error, never the full result set), decide whether to run one
+    more targeted sub-question or stop. Returns ``{"action": "query"|
+    "finish", "sub_question": ...}``, or None if the AI is disabled. The
+    caller owns the loop and its own step budget -- this makes a single
+    decision per call and never generates or executes SQL itself.
+    """
+    result = await _post_with_model(
+        "/ai/intelligence/investigate-step",
+        {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "project_id": project_id,
+            "question": question,
+            "steps": steps,
+            "steps_remaining": steps_remaining,
+        },
+    )
+    if result is None:
+        return None
+    action = result.get("action")
+    if action not in _INVESTIGATE_STEP_ACTIONS:
+        action = "finish"
+    return {
+        "action": action,
+        "sub_question": str(result.get("sub_question") or ""),
+    }
 
 
 async def interpret(

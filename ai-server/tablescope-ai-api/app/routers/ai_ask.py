@@ -38,8 +38,54 @@ def _fit_context(text: str, max_model_len: int = 8192, max_tokens: int = 512) ->
     return text[:char_budget].rstrip() + "\n\n[context truncated for length]"
 
 
+def _format_investigation_steps(question: str, steps: list[dict[str, Any]]) -> str:
+    """Render a multi-query "why" investigation's full trail for synthesis.
+
+    Each step already ran through the normal ask-and-run pipeline (SQL
+    generation, execution, self-repair) -- this renders the bounded summary
+    the investigation loop kept, not full row sets, so the answer can cite
+    which specific sub-question surfaced which finding instead of only
+    seeing the final query in isolation.
+    """
+    lines: list[str] = [
+        "MULTI-STEP INVESTIGATION",
+        f"Original question: {question}",
+        "",
+        "The following sub-questions were run, in order, to gather evidence "
+        "toward answering the original question. Synthesize an answer that "
+        "explains the WHY, citing the specific findings below rather than "
+        "restating only the last step.",
+        "",
+    ]
+    for i, step in enumerate(steps, start=1):
+        sub_q = step.get("sub_question") or ""
+        lines.append(f'Step {i}: "{sub_q}"')
+        error = step.get("error")
+        if error:
+            lines.append(f"  -> failed: {error}")
+            continue
+        sql = step.get("sql")
+        if sql:
+            lines.append(f"  SQL: {sql}")
+        columns = step.get("columns") or []
+        if columns:
+            lines.append(f"  Columns: {', '.join(str(c) for c in columns)}")
+        row_count = step.get("row_count") or 0
+        lines.append(f"  Row count: {row_count}")
+        for row in (step.get("sample_rows") or [])[:5]:
+            if isinstance(row, dict):
+                lines.append("  - " + ", ".join(f"{k}={v}" for k, v in row.items()))
+            else:
+                lines.append(f"  - {row}")
+    return "\n".join(lines)
+
+
 def _format_data_result(question: str, data: dict[str, Any]) -> str:
     """Render an executed query result as a grounded block for the LLM."""
+    steps = data.get("steps")
+    if isinstance(steps, list) and steps:
+        return _format_investigation_steps(question, steps)
+
     lines: list[str] = ["LIVE QUERY RESULT", f"User question: {question}", ""]
 
     sql = data.get("sql") or data.get("query")

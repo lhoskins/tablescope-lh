@@ -17,7 +17,7 @@ from app.core.config import settings
 from app.core.security import verify_signature
 from app.services.speech_service import transcribe_base64
 
-router = APIRouter(prefix="/speech", tags=["speech"])
+router = APIRouter(prefix="/speech")
 
 
 class TranscribeRequest(BaseModel):

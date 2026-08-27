@@ -100,6 +100,31 @@ def _normalize_question(question: str) -> str:
     return re.sub(r"\s+", " ", question.strip().lower())
 
 
+_INVESTIGATIVE_PATTERNS = [
+    re.compile(r"^\s*why\b"),
+    re.compile(r"\bwhy\s+(?:is|are|did|does|has|have|was|were)\b"),
+    re.compile(r"\bwhat'?s?\s+(?:driving|causing)\b"),
+    re.compile(r"\bwhat\s+is\s+(?:driving|causing)\b"),
+    re.compile(r"\broot\s+cause\b"),
+    re.compile(r"\bwhat\s+explains\b"),
+    re.compile(r"\breason\s+(?:for|behind)\b"),
+    re.compile(r"\b(?:driving|contributing)\s+factors?\b"),
+]
+
+
+def _is_investigative_question(question: str) -> bool:
+    """True for a root-cause ("why") question that benefits from running
+    several targeted follow-up queries instead of a single one.
+
+    Deliberately a cheap keyword/pattern check, not an LLM call -- consistent
+    with every other question-shape classifier in this module (chart intent,
+    document intent) and keeps the common case (a plain factual question)
+    from paying for a decision it does not need.
+    """
+    text = _normalize_question(question)
+    return any(p.search(text) for p in _INVESTIGATIVE_PATTERNS)
+
+
 def _is_document_question(question: str) -> bool:
     """True when the user is asking about Reference Library documents/policies.
 

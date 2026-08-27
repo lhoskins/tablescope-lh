@@ -90,6 +90,81 @@ class IntelligenceFixSQLResponse(BaseModel):
     model_used: str = ""
 
 
+class RepairSQLColumnKnowledge(BaseModel):
+    """One column's real sample value/type, revealed to the repair agent
+    because it asked for that specific column via an ``inspect_column`` step."""
+
+    table: str = ""
+    column: str = ""
+    sample: str = ""
+    type: str = ""
+
+
+class IntelligenceRepairSQLStepRequest(AIBaseRequest):
+    """One decision step in the SQL self-repair agent loop.
+
+    Unlike fix-sql's single blind rewrite, this returns ONE of three actions:
+    rewrite the query directly, ask to see a specific column's real sample
+    value/type before deciding, or give up. The caller (platform-api) executes
+    the chosen action and, for ``inspect_column``, calls this endpoint again
+    with the revealed column appended to ``known_columns`` -- so the model
+    only pays for the schema detail it actually asks for, instead of every
+    column of every allowed table being crammed into the prompt on every
+    attempt regardless of relevance.
+    """
+
+    sql: str = ""
+    error: str = ""
+    allowed_tables: list[str] = Field(default_factory=list)
+    table_schema: list[dict] = Field(default_factory=list)
+    known_columns: list[RepairSQLColumnKnowledge] = Field(default_factory=list)
+
+
+class IntelligenceRepairSQLStepResponse(BaseModel):
+    action: str = "give_up"  # "rewrite" | "inspect_column" | "give_up"
+    sql: str = ""
+    table: str = ""
+    column: str = ""
+    request_id: str = ""
+    model_used: str = ""
+
+
+class InvestigationStepResult(BaseModel):
+    """One completed sub-query in a multi-step investigation, summarized for
+    the next decision -- a bounded preview, not the full row set, so the
+    prompt stays scoped as the investigation grows."""
+
+    sub_question: str = ""
+    sql: str = ""
+    columns: list[str] = Field(default_factory=list)
+    row_count: int = 0
+    sample_rows: list[dict] = Field(default_factory=list)
+    error: str = ""
+
+
+class IntelligenceInvestigateStepRequest(AIBaseRequest):
+    """One decision step in the multi-query "why" investigation agent.
+
+    Given the original question and every sub-query run so far, decide
+    whether to run one more targeted sub-question or stop because enough
+    evidence has been gathered. Each sub-query itself is generated and
+    executed by the existing ask-and-run pipeline -- this endpoint only
+    plans which question to ask next, it never writes or sees SQL directly
+    beyond the bounded summary in ``steps``.
+    """
+
+    question: str = ""
+    steps: list[InvestigationStepResult] = Field(default_factory=list)
+    steps_remaining: int = 0
+
+
+class IntelligenceInvestigateStepResponse(BaseModel):
+    action: str = "finish"  # "query" | "finish"
+    sub_question: str = ""
+    request_id: str = ""
+    model_used: str = ""
+
+
 class InterpretAnalysisInput(BaseModel):
     id: str
     category: str = "trend"

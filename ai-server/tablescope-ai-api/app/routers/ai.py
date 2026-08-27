@@ -35,8 +35,10 @@ from . import (
     ai_insight_match,
     ai_intelligence_fixsql,
     ai_intelligence_interpret,
+    ai_intelligence_investigate_step,
     ai_intelligence_knowledge_graph,
     ai_intelligence_plan,
+    ai_intelligence_repair_step,
     ai_plan_prompt,
     ai_plan_sql,
     ai_project_insight,
@@ -89,6 +91,12 @@ from .ai_insight_match import (
 )
 from .ai_intelligence_fixsql import intelligence_fix_sql
 from .ai_intelligence_interpret import intelligence_interpret
+from .ai_intelligence_investigate_step import (
+    _INVESTIGATE_SYSTEM_PROMPT,
+    _investigate_step_prompt,
+    _step_block,
+    intelligence_investigate_step,
+)
 from .ai_intelligence_knowledge_graph import (
     _KG_CATEGORIES,
     _KG_SEVERITIES,
@@ -99,6 +107,11 @@ from .ai_intelligence_knowledge_graph import (
 from .ai_intelligence_plan import (
     _allowed_plan_chart_types,
     intelligence_plan,
+)
+from .ai_intelligence_repair_step import (
+    _known_columns_block,
+    _repair_step_prompt,
+    intelligence_repair_sql_step,
 )
 from .ai_plan_prompt import (
     _build_kg_hypothesis_lines,
@@ -183,6 +196,8 @@ router.include_router(ai_query_generate.router)
 router.include_router(ai_dashboard.router)
 router.include_router(ai_intelligence_plan.router)
 router.include_router(ai_intelligence_fixsql.router)
+router.include_router(ai_intelligence_repair_step.router)
+router.include_router(ai_intelligence_investigate_step.router)
 router.include_router(ai_conversation.router)
 router.include_router(ai_insight_match.router)
 router.include_router(ai_intelligence_interpret.router)
@@ -205,6 +220,8 @@ _FEATURE_MODULES = (
     ai_plan_sql,
     ai_intelligence_plan,
     ai_intelligence_fixsql,
+    ai_intelligence_repair_step,
+    ai_intelligence_investigate_step,
     ai_conversation,
     ai_insight_match,
     ai_intelligence_interpret,

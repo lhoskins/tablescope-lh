@@ -293,6 +293,16 @@ async def _column_samples_for_tables(
     return column_samples, column_types
 
 
+# Real Teiid round-trips a failing query gets, matching the prior fixed
+# retry loop's cost profile.
+_MAX_EXECUTE_ATTEMPTS = 3
+# Total agent decision calls across the whole repair (shared across every
+# execute attempt, not per-attempt) -- bounds cost/latency even though most
+# of the budget is cheap "inspect_column" info round-trips, not full
+# rewrite+re-execute cycles.
+_MAX_REPAIR_STEPS = 5
+
+
 async def _execute_with_repair(
     session: AsyncSession,
     context: RequestContext,
@@ -303,23 +313,36 @@ async def _execute_with_repair(
     max_rows: int,
     table_schema: list[dict[str, Any]],
 ) -> tuple[dict[str, Any] | None, str, str]:
-    """Execute SQL; on an engine error, repair via the AI using the exact
-    Teiid error + real schema, then re-run.
+    """Execute SQL; on an engine error, run the SQL self-repair agent to fix
+    it using the exact Teiid error + real schema, then re-run.
 
     Closes the same self-repair loop the dashboard path uses so Teiid quirks
     (unsupported functions like DATEDIFF, un-CAST string arithmetic, alias/
     GROUP BY mistakes) heal automatically instead of surfacing as a dead-end
     error. Returns ``(result_or_none, final_sql, last_error)``.
+
+    Unlike a single blind full-query rewrite, each repair step lets the
+    model choose: rewrite the query now, ask to see one specific column's
+    real sample value/type first (``ai.repair_sql_step``'s ``known_columns``
+    -- already computed for free via ``_column_samples_for_tables``, so this
+    costs no extra Teiid round-trip), or give up. This keeps every prompt
+    scoped to only the schema detail actually requested instead of every
+    column of every allowed table being crammed in regardless of relevance.
     """
     from app.services import ai_intelligence_client as ai
 
     column_samples, column_types = await _column_samples_for_tables(
         session, context, project_id, allowed_tables, table_schema
     )
+    # Column facts already revealed to the agent this repair, keyed by
+    # column name -- re-sent on every decision call so it never re-asks for
+    # something it already knows.
+    known_columns: dict[str, dict[str, str]] = {}
+    total_steps = 0
 
     current = sql
     last_error = ""
-    for attempt in range(3):
+    for attempt in range(_MAX_EXECUTE_ATTEMPTS):
         current = normalize_teiid_identifiers(current, table_schema)
         current = normalize_teiid_string_filters(current, table_schema)
         current = normalize_teiid_timestamps(
@@ -337,10 +360,14 @@ async def _execute_with_repair(
             return result, current, ""
         except HTTPException as exc:
             last_error = str(exc.detail)
-            if attempt >= 2:
-                break
+        if attempt >= _MAX_EXECUTE_ATTEMPTS - 1:
+            break
+
+        rewritten: str | None = None
+        while total_steps < _MAX_REPAIR_STEPS:
+            total_steps += 1
             try:
-                fixed = await ai.fix_sql(
+                decision = await ai.repair_sql_step(
                     tenant_id=context.tenant_id,
                     user_id=context.user_id,
                     project_id=project_id,
@@ -348,20 +375,48 @@ async def _execute_with_repair(
                     error=last_error,
                     allowed_tables=allowed_tables,
                     table_schema=table_schema,
+                    known_columns=[
+                        {"column": col, **info}
+                        for col, info in known_columns.items()
+                    ],
                 )
             except ai.AIUnavailableError:
                 # The AI service dropped mid-repair -- stop retrying rather
                 # than let this propagate uncaught (this loop's contract is
                 # to never raise) and report the last real Teiid error.
+                decision = None
+
+            action = (decision or {}).get("action")
+            if decision is None or action == "give_up":
                 break
-            normalized = (fixed or "").strip().rstrip(";")
-            if (
-                not normalized
-                or normalized == current.strip().rstrip(";")
-                or not _is_read_only_select(normalized)
-            ):
+            if action == "inspect_column":
+                column = decision.get("column") or ""
+                table = decision.get("table") or ""
+                if not column or column in known_columns:
+                    # No column named, or the agent re-asked for something
+                    # it was already told -- stop instead of spinning
+                    # through the remaining step budget on repeats.
+                    break
+                known_columns[column] = {
+                    "table": table,
+                    "sample": column_samples.get(column, ""),
+                    "type": column_types.get(column, ""),
+                }
+                continue  # ask again with the newly revealed column, same failing SQL
+            if action == "rewrite":
+                rewritten = decision.get("sql") or ""
                 break
-            current = normalized
+
+        if not rewritten:
+            break
+        normalized = rewritten.strip().rstrip(";")
+        if (
+            not normalized
+            or normalized == current.strip().rstrip(";")
+            or not _is_read_only_select(normalized)
+        ):
+            break
+        current = normalized
     return None, current, last_error
 
 
