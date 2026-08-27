@@ -1,25 +1,16 @@
 "use client";
 
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  IconAlertCircle,
-  IconChevronRight,
-  IconHelpCircle,
-  IconLoader2,
-  IconSparkles,
-} from "@tabler/icons-react";
+import { IconHelpCircle, IconSparkles } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
+import { StatusDot } from "@/components/tablescope/status-dot";
 import { Button } from "@/components/ui/button";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
 import { formatLastUpdated } from "@/lib/format-datetime";
-import { HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
 import { IntelligenceWorkspace } from "@/components/tablescope/insights/intelligence-workspace";
-import { IntelligenceStrip } from "@/components/tablescope/home/intelligence-strip";
-import { ExecutiveProjectSummary } from "@/components/tablescope/project-insight/executive-project-summary";
-import { TurnBubble } from "@/components/tablescope/conversation/conversation-turn";
 import { SaveInsightToDashboardModal } from "@/components/tablescope/home/save-insight-to-dashboard-modal";
 import { useInsightFeedback } from "@/lib/hooks/use-insight-feedback";
 import { createHomePin, getHomePins } from "@/lib/api/home-pins";
@@ -27,20 +18,14 @@ import { suggestInsights, type InsightCard } from "@/lib/api/home-intelligence";
 
 import { projectInsightApi, type ProjectInsight } from "@/lib/api/project-insight";
 import {
-  getConversation,
-  submitCanonicalTurn,
-  type ConversationTurn,
-} from "@/lib/api/conversational-analytics";
-import { buildAiAssistantHref } from "@/lib/navigation/ai-assistant";
-import {
   CreateActionFromInsightDialog,
   type ActionableInsight,
-} from "@/components/tablescope/project-actions/create-action-from-insight-dialog";import { INSIGHT_KEY } from "./project-insight-screen/insight-key";
+} from "@/components/tablescope/project-actions/create-action-from-insight-dialog";
+import { INSIGHT_KEY } from "./project-insight-screen/insight-key";
 import { EMPTY_PROJECT_INSIGHT } from "./project-insight-screen/empty-project-insight";
 import { cardToActionableInsight } from "./project-insight-screen/card-to-actionable-insight";
 import { LoadingState } from "./project-insight-screen/loading-state";
 import { EmptyState } from "./project-insight-screen/empty-state";
-import { pollConversation } from "./project-insight-screen/poll-conversation";
 
 
 
@@ -184,8 +169,11 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   };
 
   const allInsightCards = useMemo(
-    () => insightsQuery.data?.projects?.flatMap((p) => p.insights) ?? [],
-    [insightsQuery.data],
+    () =>
+      insightsQuery.data?.projects
+        ?.filter((project) => Number(project.projectId) === projectIdNum)
+        .flatMap((project) => project.insights) ?? [],
+    [insightsQuery.data, projectIdNum],
   );
 
   const insightIds = useMemo(
@@ -245,125 +233,6 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     [respondToReview],
   );
 
-  // Project-scoped Ask Anything conversation, persisted under "Project Insights".
-  const [chatConversationId, setChatConversationId] = useState<number | null>(null);
-  const [chatTurns, setChatTurns] = useState<ConversationTurn[]>([]);
-  const [chatBusy, setChatBusy] = useState(false);
-  const [chatError, setChatError] = useState<string | null>(null);
-  const [chatPending, setChatPending] = useState<string | null>(null);
-
-  const handleProjectAsk = useCallback(
-    async (message: string) => {
-      setChatBusy(true);
-      setChatError(null);
-      setChatPending(message);
-      const requestId = crypto.randomUUID();
-      try {
-        const res = await submitCanonicalTurn({
-          surface: "project_insights",
-          project_id: projectIdNum,
-          message,
-          client_request_id: requestId,
-        });
-        setChatConversationId(res.conversation_id);
-        setChatTurns((prev) => {
-          const exists = prev.some((t) => t.id === res.turn.id);
-          return exists ? prev : [...prev, res.turn];
-        });
-        if (res.turn.status === "pending") {
-          const polled = await pollConversation(res.conversation_id);
-          const updated = polled.turns.find((t) => t.id === res.turn.id) ??
-            polled.turns[polled.turns.length - 1];
-          setChatTurns((prev) =>
-            prev.map((t) => (t.id === updated.id ? updated : t))
-          );
-        }
-      } catch (err) {
-        setChatError(err instanceof Error ? err.message : "Ask failed");
-      } finally {
-        setChatBusy(false);
-        setChatPending(null);
-      }
-    },
-    [projectIdNum],
-  );
-
-  const openInAssistant = () => {
-    if (chatConversationId == null) return;
-    router.push(
-      buildAiAssistantHref({
-        conversationId: chatConversationId,
-        projectId: projectIdNum,
-      })
-    );
-  };
-
-  const analysisChildren = useMemo(() => {
-    const questions = (insight.questionsToAsk ?? []).filter((q) =>
-      q.question?.trim(),
-    );
-    const needing = (insight.questionsNeedingData ?? []).filter((q) =>
-      (q.question || q.businessQuestion || q.title)?.trim(),
-    );
-    if (questions.length === 0 && needing.length === 0) return null;
-
-    return (
-      <div className="space-y-4 rounded-lg border border-line-tertiary bg-bg-primary p-4">
-        {questions.length > 0 && (
-          <div>
-            <h3 className="mb-2 flex items-center gap-2 text-h3 text-ink-primary">
-              <IconHelpCircle size={16} className="text-brand-500" />
-              AI-Generated Questions to Ask
-            </h3>
-            <ul className="divide-y divide-line-tertiary">
-              {questions.map((q) => (
-                <li key={q.id}>
-                  <button
-                    type="button"
-                    onClick={() => handleProjectAsk(q.question)}
-                    className="flex w-full items-center justify-between gap-3 py-2.5 text-left text-[13px] text-ink-secondary hover:text-brand-700"
-                  >
-                    <span>{q.question}</span>
-                    <IconChevronRight
-                      size={15}
-                      className="shrink-0 text-ink-tertiary"
-                    />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {needing.length > 0 && (
-          <div className={questions.length > 0 ? "border-t border-line-tertiary pt-3" : ""}>
-            <div className="mb-2 flex items-center gap-1.5 text-[12px] font-medium text-ink-tertiary">
-              <IconAlertCircle size={14} className="text-warning" />
-              Needs additional data
-            </div>
-            <ul className="space-y-2">
-              {needing.map((q, i) => {
-                const text = q.question || q.businessQuestion || q.title || "";
-                return (
-                  <li
-                    key={q.id ?? `${text}-${i}`}
-                    className="rounded-md bg-bg-secondary px-2.5 py-2 text-[13px]"
-                  >
-                    <div className="text-ink-secondary">{text}</div>
-                    {q.missingDataHint && (
-                      <div className="mt-1 text-[12px] text-ink-tertiary">
-                        {q.missingDataHint}
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        )}
-      </div>
-    );
-  }, [insight.questionsToAsk, insight.questionsNeedingData, handleProjectAsk]);
-
   const running = refresh.isPending || isFetching || insightsQuery.isFetching;
 
   const lastUpdated = useMemo(
@@ -381,34 +250,6 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
       setSaveToDashboardCard(null);
     },
     [push],
-  );
-
-  const cardActions = useMemo(
-    () => ({
-      onPin: handlePinInsight,
-      onSaveToDashboard: handleSaveToDashboard,
-      onCreateAction: handleCreateAction,
-      onFeedbackSave: handleFeedbackSave,
-      onFeedbackRemove: handleFeedbackRemove,
-      onFeedbackRespond: handleFeedbackRespond,
-      feedbackById,
-      savingFeedback,
-      governanceById,
-      pinnedByFingerprint,
-      actionsDisclosure: "collapsible" as const,
-    }),
-    [
-      handlePinInsight,
-      handleSaveToDashboard,
-      handleCreateAction,
-      handleFeedbackSave,
-      handleFeedbackRemove,
-      handleFeedbackRespond,
-      feedbackById,
-      savingFeedback,
-      governanceById,
-      pinnedByFingerprint,
-    ],
   );
 
   const intelligenceToolbar = {
@@ -433,96 +274,76 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
       projectId={projectId}
       activeNav="project-insights"
       breadcrumbLabel="Project Insight"
+      showResourceTabs={false}
+      assistantSurface="project_insights"
+      assistantContextLabel="Project Insights"
+      actions={
+        <>
+          <StatusDot tone="online" className="mr-1" />
+          <Button
+            variant="secondary"
+            size="md"
+            onClick={() => router.push("/help")}
+          >
+            <IconHelpCircle size={15} />
+            Help
+          </Button>
+        </>
+      }
     >
-      <div className="mx-auto w-full max-w-content space-y-6 py-4">
+      <div className="space-y-6 pb-24">
         {isLoading ? (
-          <LoadingState />
+          <div className="mx-auto w-full max-w-content py-4">
+            <LoadingState />
+          </div>
         ) : isError ? (
-          <EmptyState
-            title="Couldn't load Project Insight"
-            body="Something went wrong building this project's insight. Try refreshing."
-          />
+          <div className="mx-auto w-full max-w-content py-4">
+            <EmptyState
+              title="Couldn't load Project Insight"
+              body="Something went wrong building this project's insight. Try refreshing."
+            />
+          </div>
         ) : (
-          <>
-            <HomeAiSuggestions
-              projectId={projectIdNum}
-              showAskBox
-              onAsk={handleProjectAsk}
-              cardActions={cardActions}
-            />
-
-            {((chatTurns.length > 0) || chatBusy || chatError || chatPending) && (
-              <div className="space-y-4 rounded-xl border border-line-tertiary bg-bg-primary p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-h3 text-ink-primary">Ask Anything</h3>
-                  {chatConversationId && (
-                    <Button variant="ghost" size="sm" onClick={openInAssistant}>
-                      Open in AI Assistant
-                    </Button>
-                  )}
+          <IntelligenceWorkspace
+            scope="project"
+            presentation="executive"
+            projectIds={[projectIdNum]}
+            cards={allInsightCards}
+            running={running}
+            lastUpdated={lastUpdated}
+            snapshotFingerprint={insight.lastUpdatedAt ?? null}
+            toolbar={intelligenceToolbar}
+            actions={{
+              onSaveToDashboard: handleSaveToDashboard,
+              onPin: handlePinInsight,
+              onCreateAction: handleCreateAction,
+              onFeedbackSave: handleFeedbackSave,
+              onFeedbackRemove: handleFeedbackRemove,
+              onFeedbackRespond: handleFeedbackRespond,
+            }}
+            feedback={{ feedbackById, savingFeedback, governanceById }}
+            pinnedByFingerprint={pinnedByFingerprint}
+            emptyMessages={{
+              risks: "No risks detected from this project's data yet.",
+              trends: "No trends detected from this project's data yet.",
+              opportunities:
+                "No opportunities detected from this project's data yet.",
+              analysis: "No deeper analysis available for this project yet.",
+            }}
+            actionsDisclosure="collapsible"
+            header={
+              <div>
+                <div className="mb-1.5 flex items-center gap-2 text-caption font-medium uppercase tracking-wide text-ink-tertiary">
+                  <IconSparkles size={14} className="text-brand-500" />
+                  Executive perspective · AI briefing
                 </div>
-                <div className="max-h-[30rem] space-y-4 overflow-y-auto">
-                  {chatTurns.map((t, i) => (
-                    <TurnBubble
-                      key={t.id}
-                      turn={t}
-                      isLast={i === chatTurns.length - 1}
-                      onFollowUp={handleProjectAsk}
-                    />
-                  ))}
-                  {chatPending && (
-                    <div className="flex justify-end">
-                      <div className="max-w-[80%] rounded-lg bg-brand px-3.5 py-2.5 text-[13px] leading-relaxed text-brand-fg">
-                        {chatPending}
-                      </div>
-                    </div>
-                  )}
-                  {chatBusy && (
-                    <div className="flex items-center gap-2 text-small text-ink-tertiary">
-                      <IconLoader2 size={16} className="animate-spin" />
-                      TableScope is thinking…
-                    </div>
-                  )}
-                  {chatError && (
-                    <p className="text-small text-danger">{chatError}</p>
-                  )}
-                </div>
+                <h1 className="text-h1 text-ink-primary">Project Insights</h1>
+                <p className="mt-1 text-body text-ink-tertiary">
+                  Material changes across {insight.project.name || "this project"}&apos;s data and documents.
+                </p>
               </div>
-            )}
-
-            <IntelligenceStrip {...intelligenceToolbar} scope="project" />
-            <ExecutiveProjectSummary summary={insight.executiveSummary} />
-
-            <IntelligenceWorkspace
-              scope="project"
-              projectIds={[projectIdNum]}
-              cards={allInsightCards}
-              running={running}
-              lastUpdated={lastUpdated}
-              snapshotFingerprint={insight.lastUpdatedAt ?? null}
-              toolbar={intelligenceToolbar}
-              showToolbar={false}
-              actions={{
-                onSaveToDashboard: handleSaveToDashboard,
-                onPin: handlePinInsight,
-                onCreateAction: handleCreateAction,
-                onFeedbackSave: handleFeedbackSave,
-                onFeedbackRemove: handleFeedbackRemove,
-                onFeedbackRespond: handleFeedbackRespond,
-              }}
-              feedback={{ feedbackById, savingFeedback, governanceById }}
-              pinnedByFingerprint={pinnedByFingerprint}
-              emptyMessages={{
-                risks: "No risks detected from this project's data yet.",
-                trends: "No trends detected from this project's data yet.",
-                opportunities:
-                  "No opportunities detected from this project's data yet.",
-                analysis: "No deeper analysis available for this project yet.",
-              }}
-              actionsDisclosure="collapsible"
-              analysisChildren={analysisChildren}
-            />
-          </>
+            }
+          />
         )}
       </div>
 
