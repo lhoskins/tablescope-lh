@@ -91,10 +91,23 @@ vi.mock("@/lib/hooks/use-insight-time-series", () => ({
   useInsightTimeSeries: () => ({ data: response, isLoading: false }),
 }));
 
+const capturedOptions: { current: Record<string, unknown> | undefined } = {
+  current: undefined,
+};
+
 vi.mock("@/components/tablescope/home/intelligence-card", () => ({
-  InsightChartView: ({ chart }: { chart: { seriesLabels?: { value?: string } } }) => (
-    <div data-testid="generic-chart">{chart.seriesLabels?.value}</div>
-  ),
+  InsightChartView: (
+    {
+      chart,
+      options,
+    }: {
+      chart: { seriesLabels?: { value?: string } };
+      options?: Record<string, unknown>;
+    },
+  ) => {
+    capturedOptions.current = options;
+    return <div data-testid="generic-chart">{chart.seriesLabels?.value}</div>;
+  },
   OperationalInsightChartView: ({ chart }: { chart: { seriesLabels?: { value?: string } } }) => (
     <div data-testid="operational-chart">{chart.seriesLabels?.value}</div>
   ),
@@ -134,5 +147,13 @@ describe("InsightTimeSeriesChart operational presentation", () => {
         range: "1y",
       });
     });
+
+    // Regression: a period's percent-change is null whenever the
+    // comparison is undefined (zero/missing prior period, partial period)
+    // rather than when there's no observation -- common on sparse/anomaly
+    // count cards, where most periods sit near zero. Leaving nulls
+    // disconnected renders the trend as a scatter of isolated dots; the
+    // line must interpolate through them to stay readable.
+    expect(capturedOptions.current?.connectNulls).toBe(true);
   });
 });
