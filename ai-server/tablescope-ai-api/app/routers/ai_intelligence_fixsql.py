@@ -85,6 +85,15 @@ async def intelligence_fix_sql(
         model=req.model or settings.reasoning_model,
         temperature=0.1,
         num_ctx=8192,
+        # Confirmed live: a reasoning model (e.g. muse-glimmer) can stop
+        # right after a short reasoning burst and never reach the SQL
+        # content -- the same failure llm_client.generate_sql/repair_sql
+        # already guard against for the initial generation call. Without
+        # this, a repair completion can be truncated mid-statement (e.g. an
+        # aggregate expression present but the FROM clause never emitted),
+        # producing SQL that fails for a different, more confusing reason
+        # than the original error.
+        min_tokens=llm_client._SQL_MIN_TOKENS,
         ollama_url=req.ollama_url,
     )
 

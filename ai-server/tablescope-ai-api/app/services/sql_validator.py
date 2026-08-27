@@ -269,6 +269,16 @@ def validate_sql(
             for m in table_pattern.finditer(sql)
             if not _is_inside_function_call(sql, m.start())
         ]
+        if not referenced:
+            # Every real query against these sources needs a FROM/JOIN --
+            # there is no legitimate reason to generate one without it.
+            # Confirmed live: an aggregate query (SUM/COUNT with a CASE
+            # WHEN) can come back with the aggregate expression present but
+            # the FROM clause missing entirely, which Teiid rejects with a
+            # confusing "aggregate functions only allowed in ..." error
+            # instead of a clear missing-table one. Catch it here so it
+            # reads as what it is and never reaches the engine.
+            violations.append("Query is missing a FROM clause")
         for table in referenced:
             if table.upper() not in allowed_upper:
                 violations.append(f"Unauthorized table reference: {table}")
