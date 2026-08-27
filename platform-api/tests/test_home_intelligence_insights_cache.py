@@ -192,3 +192,60 @@ async def test_home_insights_stale_fallback_on_error(client, db_engine, service_
     assert r.status_code == 200
     assert r.json()["projects"][0]["insights"][0]["title"] == "Stale insight"
     assert calls == 2
+
+
+async def test_time_series_resolves_a_project_insight_card(
+    client, db_engine, service_headers, project, monkeypatch
+):
+    """A card served by /ai/home/insights (suggestInsights, the Project
+    Insight screen's data source) is saved into the "insights" snapshot
+    suite. The time-series endpoint's card lookup must find it there --
+    it previously only checked an unrelated "project_insight" suite, so
+    every Project Insight card's chart View/Interval/Range controls
+    silently 404'd and fell back to the card's static baked-in chart."""
+    project_id, headers = project
+
+    import app.routes.home_intelligence_suggestions as hir
+    monkeypatch.setattr(
+        hir, "SessionLocal", async_sessionmaker(db_engine, expire_on_commit=False)
+    )
+
+    series = [
+        {"label": "2026-01", "value": 10},
+        {"label": "2026-02", "value": 20},
+        {"label": "2026-03", "value": 15},
+        {"label": "2026-04", "value": 25},
+    ]
+
+    async def spy_run_for_project(
+        session, context, project, prompt_types, *, write_audit, granularity, **kwargs
+    ):
+        return [
+            {
+                "insightId": "ins-ts-1",
+                "id": "ins-ts-1",
+                "title": "Resolution hours trending up",
+                "insightType": "trend_resolution",
+                "severity": "trend",
+                "chart": {"type": "line", "data": {"series": series}},
+            }
+        ]
+
+    monkeypatch.setattr(hir, "_run_for_project", spy_run_for_project)
+
+    r = await client.post(
+        "/api/ai/home/insights",
+        json={"project_id": project_id},
+        headers=headers,
+    )
+    assert r.status_code == 200
+
+    r = await client.get(
+        "/api/ai/insights/ins-ts-1/time-series",
+        params={"project_id": project_id, "interval": "month", "range": "1y"},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["insight_id"] == "ins-ts-1"
+    assert len(body["points"]) > 0
