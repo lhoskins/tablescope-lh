@@ -89,7 +89,16 @@ function percentChangeOptions(
     showGrid: true,
     lineStyle: "solid",
     curveType: "linear",
-    connectNulls: false,
+    // A period's percent-change is null whenever the comparison is
+    // mathematically undefined (a zero-count prior period, a missing prior
+    // period, or an in-progress partial period) -- not when the underlying
+    // metric has no observation. That's common for sparse/anomaly-count
+    // metrics, where most periods sit at zero: with nulls left disconnected
+    // the line renders as a scatter of isolated, unconnected dots instead
+    // of a readable trend. Interpolate through those points instead so the
+    // trend stays visually continuous; the tooltip still shows the real
+    // current/previous values for every point, undefined or not.
+    connectNulls: true,
   };
 }
 
