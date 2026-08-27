@@ -91,6 +91,86 @@ def _is_inside_function_call(sql: str, pos: int) -> bool:
 
 _UNION_SPLIT_RE = re.compile(r"\bUNION\s+(?:ALL|DISTINCT)\b|\bUNION\b", re.IGNORECASE)
 _ORDER_BY_RE = re.compile(r"\bORDER\s+BY\b", re.IGNORECASE)
+_SELECT_KEYWORD_RE = re.compile(r"\bSELECT\b", re.IGNORECASE)
+_FROM_KEYWORD_RE = re.compile(r"\bFROM\b", re.IGNORECASE)
+
+
+def _paren_depths(text: str) -> list[int]:
+    """Nesting depth *before* each character (index len(text) = depth at end)."""
+    depths = [0] * (len(text) + 1)
+    depth = 0
+    for i, ch in enumerate(text):
+        depths[i] = depth
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+    depths[len(text)] = depth
+    return depths
+
+
+def _select_missing_own_from(sql: str) -> bool:
+    """True if any top-level ``SELECT`` (a query's own, or one UNION branch)
+    has no ``FROM`` of its own before the next top-level ``SELECT``/end.
+
+    A CTE's ``SELECT ... FROM x`` sits inside the ``WITH name AS (...)``
+    parentheses, so it is never top-level (depth > 0) and never mistaken for
+    the outer query's own FROM -- only the paren depth-0 SELECT that Teiid
+    actually executes the aggregate against is checked. Confirmed live: a
+    rewrite can come back as ``WITH sub AS (SELECT ... FROM t) SELECT
+    SUM(...), COUNT(*)`` -- syntactically "has a FROM" by a whole-string
+    regex, but the outer SELECT holding the aggregates has none, which is
+    exactly what Teiid's "aggregate functions ... require a FROM clause"
+    error means. Each UNION branch is its own top-level SELECT and is
+    checked independently for the same reason.
+    """
+    masked = _BLOCK_COMMENT_RE.sub(" ", sql)
+    masked = _LINE_COMMENT_RE.sub(" ", masked)
+    masked = _STRING_LITERAL_RE.sub("''", masked)
+    depths = _paren_depths(masked)
+
+    top_selects = [
+        m.start() for m in _SELECT_KEYWORD_RE.finditer(masked) if depths[m.start()] == 0
+    ]
+    if not top_selects:
+        return False
+    top_froms = [
+        m.start() for m in _FROM_KEYWORD_RE.finditer(masked) if depths[m.start()] == 0
+    ]
+
+    for i, sel_pos in enumerate(top_selects):
+        branch_end = top_selects[i + 1] if i + 1 < len(top_selects) else len(masked)
+        if not any(sel_pos < f < branch_end for f in top_froms):
+            return True
+    return False
+
+
+_CTE_NAME_RE = re.compile(r'"?(\w+)"?\s+AS\s*\(', re.IGNORECASE)
+
+
+def _cte_names(sql: str) -> set[str]:
+    """Names defined by a leading ``WITH`` clause.
+
+    These are query-scoped virtual tables, not real data sources -- a
+    ``FROM``/``JOIN`` referencing one is legitimate and must not be flagged
+    as an unauthorized table reference. Only scanned in the prefix before
+    the query's first top-level SELECT (i.e. the CTE preamble itself), so a
+    coincidental ``name AS (`` deeper in the query is never mistaken for a
+    CTE definition.
+    """
+    masked = _BLOCK_COMMENT_RE.sub(" ", sql)
+    masked = _LINE_COMMENT_RE.sub(" ", masked)
+    masked = _STRING_LITERAL_RE.sub("''", masked)
+    depths = _paren_depths(masked)
+    top_selects = [
+        m.start() for m in _SELECT_KEYWORD_RE.finditer(masked) if depths[m.start()] == 0
+    ]
+    if not top_selects:
+        return set()
+    prefix = masked[: top_selects[0]]
+    if not re.match(r"^\s*WITH\b", prefix, re.IGNORECASE):
+        return set()
+    return {m.group(1).upper() for m in _CTE_NAME_RE.finditer(prefix)}
 
 
 def _validate_union_order_by(sql: str, violations: list[str]) -> None:
@@ -256,8 +336,10 @@ def validate_sql(
 
     # Check table references
     if allowed_tables:
-        # Normalize table names for comparison
-        allowed_upper = {t.upper() for t in allowed_tables}
+        # Normalize table names for comparison. CTE names are query-scoped
+        # virtual tables, not real data sources -- a FROM referencing one is
+        # legitimate even though it is never in allowed_tables.
+        allowed_upper = {t.upper() for t in allowed_tables} | _cte_names(sql)
         # Extract table references from FROM and JOIN clauses.  Ignore matches
         # that sit inside a function call's argument list (e.g. the ``FROM`` in
         # ``EXTRACT(YEAR FROM "Month")`` or ``SUBSTRING(col FROM 1 FOR 5)``).
@@ -279,6 +361,15 @@ def validate_sql(
             # instead of a clear missing-table one. Catch it here so it
             # reads as what it is and never reaches the engine.
             violations.append("Query is missing a FROM clause")
+        elif _select_missing_own_from(sql):
+            # A FROM/JOIN exists somewhere (e.g. inside a CTE's definition)
+            # but the outer/final SELECT -- or a UNION branch -- that holds
+            # the actual aggregate expressions has none of its own. The
+            # whole-string check above misses this; Teiid does not.
+            violations.append(
+                "Query has a SELECT (the final query, or a UNION branch) "
+                "with no FROM clause of its own"
+            )
         for table in referenced:
             if table.upper() not in allowed_upper:
                 violations.append(f"Unauthorized table reference: {table}")
