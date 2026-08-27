@@ -613,14 +613,22 @@ async def execute_turn(
     # first and only fall back to the normal single-query path if it never
     # produces a successful result, so this can only add capability, never
     # regress the standard path.
+    #
+    # Check (and pass through) the user's original `question`, not
+    # `sql_question`: the conversation-turn classifier rewrites `why`
+    # framing into a focused, presentation-free data question for SQL
+    # generation (e.g. "why is the failure rate rising" -> "backup job
+    # failure rate trend over time"), which is exactly the wording that
+    # strips the investigative signal this check and the investigation
+    # agent's own root-cause planning both depend on.
     investigation_steps: list[dict[str, Any]] = []
     run: dict[str, Any] | None = None
-    if _is_investigative_question(sql_question):
+    if _is_investigative_question(question):
         run, investigation_steps = await _run_investigation(
             session,
             context,
             project_id,
-            sql_question,
+            question,
             datasource_id,
             project_context=project_context,
             conversation_id=conversation.id,

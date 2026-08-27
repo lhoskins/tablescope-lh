@@ -222,6 +222,72 @@ async def test_investigative_question_runs_multi_step_investigation(
     assert steps[0]["row_count"] == 2
 
 
+async def test_investigative_question_survives_classifier_rewrite(
+    client, service_headers, monkeypatch
+):
+    """The conversation-turn classifier rewrites a 'why' question into a
+    focused, presentation-free data_question for SQL generation (e.g. 'why
+    is the backup failure rate rising' -> 'backup job failure rate trend
+    over time') -- wording that strips the investigative signal. The
+    investigation-trigger check, and the question handed to the
+    investigation agent's own root-cause planning, must use the user's
+    original message, not that rewrite, or a genuine root-cause question
+    silently falls back to a single query the classifier itself decided
+    needs a rewrite it can't produce."""
+    _, _, project, headers = await _setup(client, service_headers, "conv-investigate-rewrite")
+
+    async def _fake_ask_and_run(session, context, *, project_id, question, **kwargs):
+        return _fake_ask_and_run_core_result(question)
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core",
+        _fake_ask_and_run,
+    )
+
+    from app.services import conversational_analytics as ca
+
+    monkeypatch.setattr(ca.ai_intelligence_client, "is_enabled", lambda: True)
+
+    async def _fake_classify(**kwargs):
+        return {
+            "intent": "query_change",
+            "confidence": 0.78,
+            "reason": "requires a time-based trend rather than the current single aggregate",
+            "data_question": "backup job failure rate trend over time",
+        }
+
+    monkeypatch.setattr(
+        ca.ai_intelligence_client, "classify_conversation_turn", _fake_classify
+    )
+
+    investigate_calls: list[dict] = []
+
+    async def _fake_investigate_step(**kwargs):
+        investigate_calls.append(kwargs)
+        return {"action": "finish", "sub_question": ""}
+
+    monkeypatch.setattr(
+        ca.ai_intelligence_client, "investigate_step", _fake_investigate_step
+    )
+
+    r = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={
+            "project_id": project["id"],
+            "initial_message": "Why is the backup job failure rate rising?",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["turns"][0]["status"] == "success"
+
+    # The investigation agent ran at all (the rewrite alone must not skip it)...
+    assert len(investigate_calls) == 1
+    # ...and it planned against the user's actual "why" question, not the
+    # classifier's trend-phrased data_question.
+    assert investigate_calls[0]["question"] == "Why is the backup job failure rate rising?"
+
+
 async def test_investigative_question_falls_back_to_single_query_when_agent_declines(
     client, service_headers, monkeypatch
 ):
