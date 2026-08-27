@@ -288,6 +288,75 @@ async def test_investigative_question_survives_classifier_rewrite(
     assert investigate_calls[0]["question"] == "Why is the backup job failure rate rising?"
 
 
+async def test_investigative_question_survives_explain_misclassification(
+    client, service_headers, monkeypatch
+):
+    """As a follow-up turn (a prior successful result already exists), the
+    conversation-turn classifier can read a 'why' question as a request to
+    explain that prior result rather than a root-cause question -- the
+    presence of a prior result nudges it toward EXPLAIN. The EXPLAIN branch
+    returns immediately with the prior turn's SQL/result, before the
+    investigation-trigger check further down ever runs, so left uncorrected
+    this silently skips the investigation agent on every such follow-up."""
+    _, _, project, headers = await _setup(client, service_headers, "conv-investigate-explain")
+
+    async def _fake_ask_and_run(session, context, *, project_id, question, **kwargs):
+        return _fake_ask_and_run_core_result(question)
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core",
+        _fake_ask_and_run,
+    )
+
+    from app.services import conversational_analytics as ca
+
+    monkeypatch.setattr(ca.ai_intelligence_client, "is_enabled", lambda: True)
+
+    r = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={"project_id": project["id"], "initial_message": "backup failure rate"},
+        headers=headers,
+    )
+    conversation = r.json()
+
+    async def _fake_classify(**kwargs):
+        return {
+            "intent": "explain",
+            "confidence": 0.85,
+            "reason": "User asks why the failure rate is rising, requesting "
+            "explanation of the current result.",
+        }
+
+    monkeypatch.setattr(
+        ca.ai_intelligence_client, "classify_conversation_turn", _fake_classify
+    )
+
+    investigate_calls: list[dict] = []
+
+    async def _fake_investigate_step(**kwargs):
+        investigate_calls.append(kwargs)
+        return {"action": "finish", "sub_question": ""}
+
+    monkeypatch.setattr(
+        ca.ai_intelligence_client, "investigate_step", _fake_investigate_step
+    )
+
+    r = await client.post(
+        f"/api/conversational-analytics/conversations/{conversation['id']}/turns",
+        json={"message": "Why is the backup job failure rate rising?"},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    turn = r.json()["turn"]
+    assert turn["status"] == "success"
+
+    # The investigation agent ran instead of the turn short-circuiting into
+    # a canned "this result came from SQL X" explanation of the prior turn.
+    assert len(investigate_calls) == 1
+    assert investigate_calls[0]["question"] == "Why is the backup job failure rate rising?"
+    assert turn["intent_type"] == "new_analysis"
+
+
 async def test_investigative_question_falls_back_to_single_query_when_agent_declines(
     client, service_headers, monkeypatch
 ):
