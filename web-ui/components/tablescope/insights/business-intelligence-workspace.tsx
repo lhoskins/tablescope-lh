@@ -40,6 +40,7 @@ type BusinessInsightTab =
   | "analysis";
 
 interface BusinessIntelligenceWorkspaceProps {
+  scope?: "business" | "project";
   projectIds: number[];
   cards: InsightCard[];
   running: boolean;
@@ -174,6 +175,7 @@ function PageHeading({ title, description }: { title: string; description: strin
 }
 
 export function BusinessIntelligenceWorkspace({
+  scope = "business",
   projectIds,
   cards,
   running,
@@ -199,6 +201,8 @@ export function BusinessIntelligenceWorkspace({
   );
   const fingerprint =
     snapshotFingerprint ?? (lastUpdated ? lastUpdated.toISOString() : null);
+  const tabIdPrefix = scope === "project" ? "project-insight" : "business-insight";
+  const sectionLabel = scope === "project" ? "Project Insight" : "Business Insight";
   const hasDeeperAnalysis = analysis.length > 0 || Boolean(analysisChildren);
   const visibleTabs = useMemo(
     () => TABS.filter((tab) => tab.id !== "analysis" || hasDeeperAnalysis),
@@ -303,7 +307,9 @@ export function BusinessIntelligenceWorkspace({
     executiveBriefCard?.summary ??
     (running
       ? "The executive summary will appear when the current insight analysis is complete."
-      : "No material risk, trend, or opportunity was identified in the currently selected projects.");
+      : scope === "project"
+        ? "No material risk, trend, or opportunity was identified in the selected project."
+        : "No material risk, trend, or opportunity was identified in the currently selected projects.");
 
   const cardGridProps = {
     loading: running,
@@ -319,14 +325,14 @@ export function BusinessIntelligenceWorkspace({
       {showToolbar && (
         <div className="flex flex-wrap items-start justify-between gap-4">
           {header}
-          <IntelligenceStrip {...toolbar} scope="business" />
+          <IntelligenceStrip {...toolbar} scope={scope} />
         </div>
       )}
 
       <div
         className="flex flex-wrap items-center gap-x-7 gap-y-2 border-b border-line-tertiary"
         role="tablist"
-        aria-label="Business Insight sections"
+        aria-label={`${sectionLabel} sections`}
       >
         {visibleTabs.map((tab) => {
           const selected = activeTab === tab.id;
@@ -336,8 +342,8 @@ export function BusinessIntelligenceWorkspace({
               key={tab.id}
               type="button"
               role="tab"
-              id={`business-insight-tab-${tab.id}`}
-              aria-controls={`business-insight-panel-${tab.id}`}
+              id={`${tabIdPrefix}-tab-${tab.id}`}
+              aria-controls={`${tabIdPrefix}-panel-${tab.id}`}
               aria-selected={selected}
               onClick={() => setActiveTab(tab.id)}
               className={cn(
@@ -370,9 +376,9 @@ export function BusinessIntelligenceWorkspace({
 
       {projectIds.length > 0 && activeTab === "overview" && (
         <section
-          id="business-insight-panel-overview"
+          id={`${tabIdPrefix}-panel-overview`}
           role="tabpanel"
-          aria-labelledby="business-insight-tab-overview"
+          aria-labelledby={`${tabIdPrefix}-tab-overview`}
           className="space-y-5"
         >
           <section className="rounded-2xl border border-line-secondary bg-[#E5E5E5] px-5 py-6 shadow-sm">
@@ -480,9 +486,9 @@ export function BusinessIntelligenceWorkspace({
 
       {projectIds.length > 0 && activeTab === "risks" && (
         <section
-          id="business-insight-panel-risks"
+          id={`${tabIdPrefix}-panel-risks`}
           role="tabpanel"
-          aria-labelledby="business-insight-tab-risks"
+          aria-labelledby={`${tabIdPrefix}-tab-risks`}
         >
           <PageHeading
             title="Risks"
@@ -498,9 +504,9 @@ export function BusinessIntelligenceWorkspace({
 
       {projectIds.length > 0 && activeTab === "trends" && (
         <section
-          id="business-insight-panel-trends"
+          id={`${tabIdPrefix}-panel-trends`}
           role="tabpanel"
-          aria-labelledby="business-insight-tab-trends"
+          aria-labelledby={`${tabIdPrefix}-tab-trends`}
         >
           <PageHeading
             title="Trends"
@@ -516,9 +522,9 @@ export function BusinessIntelligenceWorkspace({
 
       {projectIds.length > 0 && activeTab === "opportunities" && (
         <section
-          id="business-insight-panel-opportunities"
+          id={`${tabIdPrefix}-panel-opportunities`}
           role="tabpanel"
-          aria-labelledby="business-insight-tab-opportunities"
+          aria-labelledby={`${tabIdPrefix}-tab-opportunities`}
         >
           <PageHeading
             title="Opportunities"
@@ -534,9 +540,9 @@ export function BusinessIntelligenceWorkspace({
 
       {projectIds.length > 0 && activeTab === "analysis" && (
         <section
-          id="business-insight-panel-analysis"
+          id={`${tabIdPrefix}-panel-analysis`}
           role="tabpanel"
-          aria-labelledby="business-insight-tab-analysis"
+          aria-labelledby={`${tabIdPrefix}-tab-analysis`}
         >
           <PageHeading
             title="Deeper analysis"
@@ -556,7 +562,7 @@ export function BusinessIntelligenceWorkspace({
       {running && cards.length === 0 && (
         <div className="flex items-center gap-2 rounded-xl border border-line-tertiary bg-bg-primary p-5 text-body text-ink-tertiary">
           <IconSparkles size={18} className="animate-pulse text-brand-500" />
-          Building the executive briefing…
+          Building the {scope === "project" ? "project" : "executive"} briefing…
         </div>
       )}
     </div>
@@ -567,9 +573,9 @@ export function BusinessIntelligenceWorkspace({
           that read better at a constrained width. */}
       {projectIds.length > 0 && activeTab === "change" && (
         <section
-          id="business-insight-panel-change"
+          id={`${tabIdPrefix}-panel-change`}
           role="tabpanel"
-          aria-labelledby="business-insight-tab-change"
+          aria-labelledby={`${tabIdPrefix}-tab-change`}
         >
           <div className="mx-auto w-full max-w-content">
             <PageHeading

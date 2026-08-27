@@ -24,6 +24,8 @@ export function ProjectShell({
   showProjectHeader = false,
   headerActions,
   workspaceItem = null,
+  assistantSurface = "project_workspace",
+  assistantContextLabel,
   children,
 }: {
   projectId: string;
@@ -47,6 +49,10 @@ export function ProjectShell({
    *  has open, if any. Feeds the project workspace tab strip and grounds the
    *  docked AI Assistant. */
   workspaceItem?: WorkspaceTab | null;
+  /** Canonical AI Assistant conversation surface for this project page. */
+  assistantSurface?: "project_insights" | "project_workspace";
+  /** Stable label shown when the assistant is grounded on the page itself. */
+  assistantContextLabel?: string;
   children: ReactNode;
 }) {
   const router = useRouter();
@@ -83,7 +89,12 @@ export function ProjectShell({
       contextPanel={
         <>
           {contextPanel}
-          <WorkspaceAssistantPanel projectId={projectId} activeItem={workspaceItem} />
+          <WorkspaceAssistantPanel
+            projectId={projectId}
+            activeItem={workspaceItem}
+            surface={assistantSurface}
+            contextLabel={assistantContextLabel}
+          />
         </>
       }
       scrollable={scrollable}

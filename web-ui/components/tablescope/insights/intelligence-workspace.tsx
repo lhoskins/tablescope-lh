@@ -77,9 +77,10 @@ export function IntelligenceWorkspace({
 
   useScrollToReturnTarget(returnTarget, hasCards);
 
-  if (scope === "business" && presentation === "executive") {
+  if (presentation === "executive") {
     return (
       <BusinessIntelligenceWorkspace
+        scope={scope}
         projectIds={projectIds}
         cards={cards}
         running={running}

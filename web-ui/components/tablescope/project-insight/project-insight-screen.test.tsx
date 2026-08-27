@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fireEvent,
   render,
@@ -12,31 +12,15 @@ import type { ReactNode } from "react";
 const {
   push,
   getInsight,
-  acknowledge,
-  reviewed,
-  reopen,
   suggestInsights,
-  submitCanonicalTurn,
-  listConversations,
-  getConversation,
   createHomePin,
+  projectShellProps,
 } = vi.hoisted(() => ({
   push: vi.fn(),
   getInsight: vi.fn(),
-  acknowledge: vi.fn().mockResolvedValue({
-    insightId: "i1",
-    status: "reviewed",
-    acknowledgedByUserId: 1,
-    acknowledgedByName: "Leonard",
-    acknowledgedAt: "2026-06-25T00:00:00Z",
-  }),
-  reviewed: vi.fn().mockResolvedValue({ items: [] }),
-  reopen: vi.fn().mockResolvedValue({ insightId: "i1", status: "reopened" }),
   suggestInsights: vi.fn(),
-  submitCanonicalTurn: vi.fn(),
-  listConversations: vi.fn().mockResolvedValue([]),
-  getConversation: vi.fn().mockResolvedValue({ id: 1, turns: [] }),
   createHomePin: vi.fn().mockResolvedValue({ id: 1 }),
+  projectShellProps: { current: {} as Record<string, unknown> },
 }));
 
 const INSIGHT = {
@@ -50,26 +34,74 @@ const INSIGHT = {
     opportunities: ["Consolidate spend"],
     recommendations: ["Renegotiate contract"],
   },
-  questionsToAsk: [
-    { id: "q1", question: "Why did Supplier A slip?", reason: "risk" },
-  ],
+  questionsToAsk: [],
   questionsNeedingData: [],
   aiAvailable: true,
 };
+
+const RISK_CARD = {
+  id: "risk-1",
+  projectId: "42",
+  projectName: "Boeing",
+  projectColor: "#123456",
+  insightType: "risk_sla",
+  severity: "critical",
+  title: "Delivery lead time exceeds SLA threshold",
+  summary: "Average lead time is high.",
+  chart: null,
+  callout: { type: "risk", text: "Escalate with the supplier." },
+  sources: { tables: ["SUP_Quality_CSV"], documents: [] },
+  executedAt: "2026-06-25T00:00:00Z",
+};
+
+const TREND_CARD = {
+  id: "trend-1",
+  projectId: "42",
+  projectName: "Boeing",
+  projectColor: "#123456",
+  insightType: "trend_spend",
+  severity: "trend",
+  title: "Spend is increasing",
+  summary: "Monthly spend increased 12%.",
+  chart: null,
+  callout: null,
+  sources: { tables: [], documents: [] },
+  executedAt: "2026-06-25T00:00:00Z",
+};
+
+const OPPORTUNITY_CARD = {
+  id: "opp-1",
+  projectId: "42",
+  projectName: "Boeing",
+  projectColor: "#123456",
+  insightType: "opportunity_supplier",
+  severity: "recommendation",
+  title: "Top-performing suppliers identified",
+  summary: "Consolidate with the strongest suppliers.",
+  chart: null,
+  callout: null,
+  sources: { tables: [], documents: [] },
+  executedAt: "2026-06-25T00:00:00Z",
+};
+
+function suggestionResponse(cards = [RISK_CARD, TREND_CARD, OPPORTUNITY_CARD]) {
+  return {
+    projects: [
+      {
+        projectId: "42",
+        projectName: "Boeing",
+        projectColor: "#123456",
+        insights: cards,
+      },
+    ],
+  };
+}
 
 vi.mock("@/lib/api/project-insight", () => ({
   projectInsightApi: {
     get: (projectId: string) => getInsight(projectId),
     refresh: (projectId: string) => getInsight(projectId),
-    acknowledge: (projectId: string, insightId: string) =>
-      acknowledge(projectId, insightId),
-    reviewed: (projectId: string) => reviewed(projectId),
-    reopen: (projectId: string, insightId: string) =>
-      reopen(projectId, insightId),
-    clearCache: () =>
-      Promise.resolve({
-        deleted: { project_intelligence_snapshots: 1, business_insight_results: 0 },
-      }),
+    clearCache: () => Promise.resolve(INSIGHT),
   },
 }));
 
@@ -84,31 +116,20 @@ vi.mock("@/lib/api/home-pins", () => ({
   createHomePin: (payload: unknown) => createHomePin(payload),
 }));
 
-vi.mock("@/lib/api/conversational-analytics", () => ({
-  submitCanonicalTurn: (payload: unknown) => submitCanonicalTurn(payload),
-  listConversations: (projectId?: number) => listConversations(projectId),
-  getConversation: (conversationId: number) => getConversation(conversationId),
-}));
-
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push }),
 }));
 
 vi.mock("@/components/tablescope/project-shell", () => ({
-  ProjectShell: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-}));
-
-vi.mock("@/lib/ui/use-shell-data", () => ({
-  useCurrentUser: () => ({
-    data: { user: { rawRole: "admin" }, tenant: {} },
-  }),
-  useProjectSummaries: () => ({ data: [] }),
+  ProjectShell: (props: { children: ReactNode } & Record<string, unknown>) => {
+    projectShellProps.current = props;
+    return <div>{props.children}</div>;
+  },
 }));
 
 vi.mock("@/lib/hooks/use-insight-feedback", () => ({
   useInsightFeedback: () => ({
     feedbackById: {},
-    isLoading: false,
     saveFeedback: vi.fn(),
     removeFeedback: vi.fn(),
     respondToReview: vi.fn(),
@@ -166,215 +187,90 @@ function renderScreen() {
   );
 }
 
-function expandSection(name: string) {
-  fireEvent.click(
-    screen.getByRole("button", { name: new RegExp(`^${name}(?: \\d+)?$`) }),
-  );
+function selectTab(name: string) {
+  fireEvent.click(screen.getByRole("tab", { name: new RegExp(name, "i") }));
 }
 
-describe("ProjectInsightScreen", () => {
+describe("ProjectInsightScreen executive layout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    reviewed.mockReset();
-    reviewed.mockResolvedValue({ items: [] });
-    getInsight.mockReset();
+    projectShellProps.current = {};
     getInsight.mockResolvedValue(INSIGHT);
-    suggestInsights.mockReset();
-    suggestInsights.mockResolvedValue({ projects: [] });
+    suggestInsights.mockResolvedValue(suggestionResponse());
   });
 
-  it("renders the Business-Insight-style layout sections", async () => {
+  it("matches the Business Insights executive information architecture", async () => {
     renderScreen();
+
     expect(
-      await screen.findByRole("heading", { name: "Executive Project Summary" }),
+      await screen.findByRole("heading", { name: "Project Insights" }),
     ).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Risks" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Trends" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Opportunities" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Deeper analysis" })).toBeTruthy();
-  });
+    expect(screen.getByText("Executive perspective · AI briefing")).toBeTruthy();
+    expect(screen.getByText("Executive brief")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: RISK_CARD.title })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Priority insights" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Key developments" })).toBeTruthy();
 
-  it("does not render legacy panels", async () => {
-    renderScreen();
-    await screen.findByRole("heading", { name: "Executive Project Summary" });
-    expect(screen.queryByText("Trend Detection")).toBeNull();
-    expect(screen.queryByText("What Changed Since Last Visit")).toBeNull();
-    expect(screen.queryByText("Insight Validation Workflow")).toBeNull();
-    expect(screen.queryByRole("button", { name: /^Insights & Opportunities \d*$/ })).toBeNull();
-  });
-
-  it("renders executive summary as tinted, colored cards", async () => {
-    const { container } = renderScreen();
-    await screen.findByRole("heading", { name: "Executive Project Summary" });
-    expect(screen.getByText("Critical")).toBeTruthy();
-    expect(screen.getByText("Warnings")).toBeTruthy();
-    expect(screen.getByText("Supplier A SLA breach")).toBeTruthy();
-    expect(container.querySelector('[class*="bg-danger/5"]')).toBeTruthy();
-  });
-
-  it("keeps all sections collapsed by default", async () => {
-    renderScreen();
-    await screen.findByRole("heading", { name: "Executive Project Summary" });
-    for (const name of ["Risks", "Trends", "Opportunities", "Deeper analysis"]) {
-      expect(
-        screen.getByRole("button", { name }).getAttribute("aria-expanded"),
-      ).toBe("false");
+    for (const tab of [
+      "Overview",
+      "Risks",
+      "Trends",
+      "Opportunities",
+      "Change summary",
+    ]) {
+      expect(screen.getByRole("tab", { name: new RegExp(tab, "i") })).toBeTruthy();
     }
+    expect(screen.getByLabelText("1 risks")).toBeTruthy();
+    expect(screen.getByLabelText("1 trends")).toBeTruthy();
+    expect(screen.getByLabelText("1 opportunities")).toBeTruthy();
   });
 
-  it("shows AI-generated questions inside Deeper analysis after expanding", async () => {
+  it("uses the selected-project Assistant surface and removes resource tabs", async () => {
     renderScreen();
-    await screen.findByRole("heading", { name: "Executive Project Summary" });
-    expect(screen.queryByText("Why did Supplier A slip?")).toBeNull();
-    expandSection("Deeper analysis");
-    expect(
-      await screen.findByText("Why did Supplier A slip?"),
-    ).toBeTruthy();
+    await screen.findByRole("heading", { name: "Project Insights" });
+
+    expect(projectShellProps.current.projectId).toBe("42");
+    expect(projectShellProps.current.activeNav).toBe("project-insights");
+    expect(projectShellProps.current.showResourceTabs).toBe(false);
+    expect(projectShellProps.current.assistantSurface).toBe("project_insights");
+    expect(projectShellProps.current.assistantContextLabel).toBe("Project Insights");
   });
 
-  it("derives cards from project-scoped AI suggestions", async () => {
+  it("keeps the brief and developments scoped to the current project", async () => {
     suggestInsights.mockResolvedValue({
       projects: [
+        ...suggestionResponse([RISK_CARD]).projects,
         {
-          projectId: "42",
-          projectName: "Boeing",
-          projectColor: "#123456",
+          projectId: "99",
+          projectName: "Another Project",
+          projectColor: "#999999",
           insights: [
             {
-              id: "trend-1",
-              projectId: "42",
-              projectName: "Boeing",
-              projectColor: "#123456",
-              insightType: "trend_spend",
-              severity: "trend",
-              title: "Spend up",
-              summary: "MoM +12%",
-              chart: null,
-              callout: null,
-              sources: { tables: [], documents: [] },
-              executedAt: "2026-06-25T00:00:00Z",
+              ...RISK_CARD,
+              id: "other-risk",
+              projectId: "99",
+              projectName: "Another Project",
+              title: "Other project risk must not appear",
             },
           ],
         },
       ],
     });
-    renderScreen();
-    await screen.findByRole("heading", { name: "Executive Project Summary" });
-    expandSection("Trends");
-    expect(await screen.findByText("Spend up")).toBeTruthy();
-    expect(screen.getByText("Trend")).toBeTruthy();
-    await waitFor(() => expect(suggestInsights).toHaveBeenCalledWith(3, 42));
-  });
 
-  it("shows unanswerable questions inside Deeper analysis", async () => {
-    getInsight.mockResolvedValue({
-      ...INSIGHT,
-      questionsNeedingData: [
-        {
-          id: "nd1",
-          question: "What is employee headcount by department?",
-          missingDataHint: "Add a source with the relevant data to enable it.",
-        },
-      ],
-    });
     renderScreen();
-    await screen.findByRole("heading", { name: "Executive Project Summary" });
-    expandSection("Deeper analysis");
-    expect(await screen.findByText("Needs additional data")).toBeTruthy();
     expect(
-      screen.getByText("What is employee headcount by department?"),
+      await screen.findByRole("heading", { name: RISK_CARD.title }),
     ).toBeTruthy();
-    expect(
-      screen.getByText("Add a source with the relevant data to enable it."),
-    ).toBeTruthy();
+    expect(screen.queryByText("Other project risk must not appear")).toBeNull();
+    expect(suggestInsights).toHaveBeenCalledWith(3, 42);
   });
 
-  it("does not render the legacy inline Ask box", async () => {
+  it("renders executive cards without changing their actions", async () => {
     renderScreen();
-    await screen.findByRole("heading", { name: "Executive Project Summary" });
-    expect(
-      screen.queryByLabelText("Ask a question about this project"),
-    ).toBeNull();
-  });
+    await screen.findByRole("heading", { name: "Project Insights" });
+    selectTab("Risks");
 
-  it("submits a project-scoped canonical Insight turn", async () => {
-    submitCanonicalTurn.mockResolvedValue({
-      conversation_id: 7,
-      conversation_created: true,
-      surface: "project_insights",
-      project_id: 42,
-      turn: {
-        id: 1,
-        sequence: 1,
-        user_message: "Why did Supplier A slip?",
-        assistant_message: "Because of a lead-time issue.",
-        status: "success",
-      },
-    });
-    renderScreen();
-    await screen.findByRole("heading", { name: "Executive Project Summary" });
-    const input = screen.getByLabelText(
-      "Ask anything across your connected data, documents, and dashboards",
-    );
-    fireEvent.change(input, { target: { value: "Why did Supplier A slip?" } });
-    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
-    await waitFor(() =>
-      expect(submitCanonicalTurn).toHaveBeenCalledWith(
-        expect.objectContaining({
-          surface: "project_insights",
-          project_id: 42,
-          message: "Why did Supplier A slip?",
-        }),
-      ),
-    );
-  });
-
-  it("renders AI-derived risk/opportunity cards with severity badges and actions", async () => {
-    suggestInsights.mockResolvedValue({
-      projects: [
-        {
-          projectId: "42",
-          projectName: "Boeing",
-          projectColor: "#123456",
-          insights: [
-            {
-              id: "risk-1",
-              projectId: "42",
-              projectName: "Boeing",
-              projectColor: "#123456",
-              insightType: "risk_sla",
-              severity: "critical",
-              title: "Delivery lead time exceeds SLA threshold",
-              summary: "Average lead time is high.",
-              chart: null,
-              callout: { type: "risk", text: "Escalate with the supplier." },
-              sources: { tables: ["SUP_Quality_CSV"], documents: [] },
-              executedAt: "2026-06-25T00:00:00Z",
-            },
-            {
-              id: "opp-1",
-              projectId: "42",
-              projectName: "Boeing",
-              projectColor: "#123456",
-              insightType: "opportunity_supplier",
-              severity: "recommendation",
-              title: "Top-performing suppliers identified",
-              summary: "Consolidate with the strongest suppliers.",
-              chart: null,
-              callout: null,
-              sources: { tables: [], documents: [] },
-              executedAt: "2026-06-25T00:00:00Z",
-            },
-          ],
-        },
-      ],
-    });
-    renderScreen();
-    await screen.findByRole("heading", { name: "Executive Project Summary" });
-    expandSection("Risks");
-    const heading = await screen.findByText(
-      "Delivery lead time exceeds SLA threshold",
-    );
+    const heading = await screen.findByText(RISK_CARD.title);
     const card = heading.closest("article") as HTMLElement;
     expect(within(card).getByText("Critical")).toBeTruthy();
     fireEvent.click(within(card).getByRole("button", { name: "More Actions" }));
@@ -382,81 +278,46 @@ describe("ProjectInsightScreen", () => {
     expect(
       within(card).getByRole("button", { name: "Add to dashboard" }),
     ).toBeTruthy();
-    expandSection("Opportunities");
-    const oppHeading = await screen.findByText(
-      "Top-performing suppliers identified",
-    );
-    const oppCard = oppHeading.closest("article") as HTMLElement;
-    expect(within(oppCard).getByText("Recommendation")).toBeTruthy();
   });
 
-  it("pins a card to Home", async () => {
-    suggestInsights.mockResolvedValue({
-      projects: [
-        {
-          projectId: "42",
-          projectName: "Boeing",
-          projectColor: "#123456",
-          insights: [
-            {
-              id: "risk-1",
-              projectId: "42",
-              projectName: "Boeing",
-              projectColor: "#123456",
-              insightType: "risk_sla",
-              severity: "critical",
-              title: "Delivery lead time exceeds SLA threshold",
-              summary: "Average lead time is high.",
-              chart: null,
-              callout: null,
-              sources: { tables: [], documents: [] },
-              executedAt: "2026-06-25T00:00:00Z",
-            },
-          ],
-        },
-      ],
-    });
+  it("keeps pinning scoped to the selected project", async () => {
     renderScreen();
-    await screen.findByRole("heading", { name: "Executive Project Summary" });
-    expandSection("Risks");
-    const heading = await screen.findByText(
-      "Delivery lead time exceeds SLA threshold",
-    );
+    await screen.findByRole("heading", { name: "Project Insights" });
+    selectTab("Risks");
+
+    const heading = await screen.findByText(RISK_CARD.title);
     const card = heading.closest("article") as HTMLElement;
     fireEvent.click(within(card).getByRole("button", { name: "Pin to Home" }));
     await waitFor(() => expect(createHomePin).toHaveBeenCalled());
-    const payload = createHomePin.mock.calls[0][0] as { project_id: number };
-    expect(payload.project_id).toBe(42);
+    expect(createHomePin.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ project_id: 42 }),
+    );
   });
 
-  it("passes a single project id to Percent Change Summary", async () => {
+  it("passes exactly one project to Change Summary", async () => {
     renderScreen();
-    await screen.findByRole("heading", { name: "Executive Project Summary" });
+    await screen.findByRole("heading", { name: "Project Insights" });
+    selectTab("Change summary");
+
     const panel = await screen.findByTestId("percent-change");
     expect(panel.getAttribute("data-project-ids")).toBe("42");
   });
 
-  it("shows a last-updated timestamp and analyzing status on refresh", async () => {
+  it("keeps the Analyze control and last-updated status", async () => {
     renderScreen();
-    await screen.findByRole("heading", { name: "Executive Project Summary" });
+    await screen.findByRole("heading", { name: "Project Insights" });
     expect(screen.getByText(/Last updated:/)).toBeTruthy();
+
     let release: (() => void) | undefined;
     getInsight.mockReturnValue(
       new Promise((resolve) => {
         release = () => resolve(INSIGHT);
       }),
     );
-    const refresh = screen.getByRole("button", {
-      name: /Analyze project insights/i,
-    });
-    fireEvent.click(refresh);
+    fireEvent.click(
+      screen.getByRole("button", { name: /Analyze project insights/i }),
+    );
     expect(await screen.findByText(/Analyzing this project/)).toBeTruthy();
     release?.();
-  });
-
-  it("has no residual card shadows in the page body", async () => {
-    const { container } = renderScreen();
-    await screen.findByRole("heading", { name: "Executive Project Summary" });
-    expect(container.querySelector('article [class*="shadow"]')).toBeNull();
   });
 });

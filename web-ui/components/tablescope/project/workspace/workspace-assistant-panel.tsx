@@ -42,7 +42,7 @@ export function WorkspaceAssistantPanel({
 }: {
   projectId?: string;
   activeItem?: WorkspaceTab | null;
-  surface?: "business_insights" | "project_workspace";
+  surface?: "business_insights" | "project_insights" | "project_workspace";
   contextLabel?: string;
 }) {
   const projectIdNum = Number(projectId);

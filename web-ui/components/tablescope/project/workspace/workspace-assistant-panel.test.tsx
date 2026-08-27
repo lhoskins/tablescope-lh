@@ -105,6 +105,44 @@ describe("WorkspaceAssistantPanel", () => {
     await waitFor(() => expect(screen.getByTestId("turn-1")).toHaveTextContent("What changed?"));
   });
 
+  it("uses the canonical project_insights conversation for Project Insights", async () => {
+    window.localStorage.setItem("tablescope:workspace-assistant-collapsed", "false");
+    submitCanonicalTurn.mockResolvedValue({
+      conversation_id: 44,
+      conversation_created: true,
+      surface: "project_insights",
+      project_id: 7,
+      turn: { id: 3, user_message: "What is the top risk?", sequence: 1 },
+    });
+
+    render(
+      <WorkspaceAssistantPanel
+        projectId="7"
+        activeItem={null}
+        surface="project_insights"
+        contextLabel="Project Insights"
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Ask the AI Assistant"), {
+      target: { value: "What is the top risk?" },
+    });
+    fireEvent.keyDown(screen.getByLabelText("Ask the AI Assistant"), {
+      key: "Enter",
+    });
+
+    await waitFor(() =>
+      expect(submitCanonicalTurn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          surface: "project_insights",
+          project_id: 7,
+          message: "What is the top risk?",
+        }),
+        expect.any(AbortSignal),
+      ),
+    );
+  });
+
   it("supports the global Home assistant without a project id", async () => {
     window.localStorage.setItem("tablescope:workspace-assistant-collapsed", "false");
     submitCanonicalTurn.mockResolvedValue({
