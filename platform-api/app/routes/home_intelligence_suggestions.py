@@ -756,18 +756,26 @@ async def _resolve_insight_card(
         if card and str(card.get("projectId") or card.get("project_id") or "") == str(project.id):
             return card
 
-    pis = await session.scalar(
-        select(ProjectIntelligenceSnapshot).where(
-            ProjectIntelligenceSnapshot.tenant_id == context.tenant_id,
-            ProjectIntelligenceSnapshot.user_id == context.user_id,
-            ProjectIntelligenceSnapshot.project_id == project.id,
-            ProjectIntelligenceSnapshot.suite == "project_insight",
+    # Two independent snapshot suites can hold insight cards: "insights"
+    # (the Project Insight cards written by home_insights/suggestInsights
+    # above) and "project_insight" (the older executive-summary feature in
+    # project_insight.py). Check both so a card's time-series lookup works
+    # regardless of which feature generated it.
+    pis_snaps = (
+        await session.scalars(
+            select(ProjectIntelligenceSnapshot).where(
+                ProjectIntelligenceSnapshot.tenant_id == context.tenant_id,
+                ProjectIntelligenceSnapshot.user_id == context.user_id,
+                ProjectIntelligenceSnapshot.project_id == project.id,
+                ProjectIntelligenceSnapshot.suite.in_(["insights", "project_insight"]),
+            )
         )
-    )
-    if pis and pis.payload:
-        card = _find_card_in_payload(pis.payload, insight_id)
-        if card:
-            return card
+    ).all()
+    for pis in pis_snaps:
+        if pis.payload:
+            card = _find_card_in_payload(pis.payload, insight_id)
+            if card:
+                return card
 
     bis = await session.scalar(
         select(BusinessInsightResult).where(
