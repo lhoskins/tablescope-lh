@@ -452,6 +452,18 @@ async def execute_turn(
         intent = ConversationalIntent.NEW_ANALYSIS
         turn.intent_type = intent
 
+    # A root-cause ("why") question can read to the classifier as a request
+    # to explain the prior result -- especially as a repeated/follow-up turn,
+    # where has_prior_result nudges it toward EXPLAIN -- but the user is
+    # asking why a number is what it is, not for the SQL/methodology behind
+    # it. EXPLAIN returns before the investigation check further down ever
+    # runs, so left uncorrected this silently skips the investigation agent
+    # every time. Route it like a new analysis instead so that check gets a
+    # chance to run.
+    if intent == ConversationalIntent.EXPLAIN and _is_investigative_question(question):
+        intent = ConversationalIntent.NEW_ANALYSIS
+        turn.intent_type = intent
+
     if intent == ConversationalIntent.CHART_CHANGE:
         if prior_turn is None or prior_turn.result_cache is None:
             turn.status = "error"
