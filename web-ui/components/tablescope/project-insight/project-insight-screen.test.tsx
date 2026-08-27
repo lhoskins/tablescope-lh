@@ -107,8 +107,8 @@ vi.mock("@/lib/api/project-insight", () => ({
 
 vi.mock("@/lib/api/home-intelligence", async (importActual) => ({
   ...(await importActual<typeof import("@/lib/api/home-intelligence")>()),
-  suggestInsights: (granularity?: number, projectId?: number) =>
-    suggestInsights(granularity, projectId),
+  suggestInsights: (granularity?: number, projectId?: number, refresh?: boolean) =>
+    suggestInsights(granularity, projectId, refresh),
 }));
 
 vi.mock("@/lib/api/home-pins", () => ({
@@ -262,7 +262,7 @@ describe("ProjectInsightScreen executive layout", () => {
       await screen.findByRole("heading", { name: RISK_CARD.title }),
     ).toBeTruthy();
     expect(screen.queryByText("Other project risk must not appear")).toBeNull();
-    expect(suggestInsights).toHaveBeenCalledWith(3, 42);
+    expect(suggestInsights).toHaveBeenCalledWith(3, 42, undefined);
   });
 
   it("renders executive cards without changing their actions", async () => {
@@ -319,5 +319,27 @@ describe("ProjectInsightScreen executive layout", () => {
     );
     expect(await screen.findByText(/Analyzing this project/)).toBeTruthy();
     release?.();
+  });
+
+  it("forces regeneration of insight cards on Analyze, Depth change, and Clear cache", async () => {
+    renderScreen();
+    await screen.findByRole("heading", { name: "Project Insights" });
+    suggestInsights.mockClear();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Analyze project insights/i }),
+    );
+    await waitFor(() =>
+      expect(suggestInsights).toHaveBeenCalledWith(3, 42, true),
+    );
+
+    suggestInsights.mockClear();
+    window.confirm = vi.fn().mockReturnValue(true);
+    fireEvent.click(
+      screen.getByRole("button", { name: /Clear Project Insight cache/i }),
+    );
+    await waitFor(() =>
+      expect(suggestInsights).toHaveBeenCalledWith(3, 42, true),
+    );
   });
 });

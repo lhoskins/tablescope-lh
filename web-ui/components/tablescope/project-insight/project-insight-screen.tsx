@@ -128,6 +128,31 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     onError: (err: Error) => push(err.message, "error"),
   });
 
+  const insightsQuery = useQuery({
+    queryKey: [...INSIGHT_KEY(projectId), "suggested-insights", granularity],
+    queryFn: () => suggestInsights(granularity, projectIdNum),
+    staleTime: 5 * 60_000,
+    enabled: !Number.isNaN(projectIdNum),
+  });
+
+  // suggestInsights (GET-or-generate) returns the cached ProjectIntelligenceSnapshot
+  // ("insights" suite) whenever one already exists -- it never re-runs analysis on
+  // its own. insightsQuery.refetch() just re-issues that same cache-first call, so
+  // without the explicit refresh flag the Analyze button and the Depth control both
+  // silently returned the SAME (possibly stale or empty) snapshot every time,
+  // regardless of how many times they were clicked. This mutation is the only path
+  // that actually asks the backend to regenerate.
+  const analyzeInsights = useMutation({
+    mutationFn: (g: number) => suggestInsights(g, projectIdNum, true),
+    onSuccess: (data, g) => {
+      queryClient.setQueryData(
+        [...INSIGHT_KEY(projectId), "suggested-insights", g],
+        data,
+      );
+    },
+    onError: (err: Error) => push(err.message, "error"),
+  });
+
   const clearCache = useMutation({
     mutationFn: () => projectInsightApi.clearCache(projectId),
     onSuccess: (fresh) => {
@@ -136,7 +161,10 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
       // of going blank while the rebuild runs.
       queryClient.setQueryData(INSIGHT_KEY(projectId), fresh);
       queryClient.removeQueries({ queryKey: ["percent-change-summary"] });
-      insightsQuery.refetch();
+      // clear-cache only clears the executive-summary ("project_insight")
+      // snapshot server-side, not the insight cards ("insights") snapshot --
+      // force those to regenerate too, the same as the Analyze button.
+      analyzeInsights.mutate(granularity);
       push("Project Insight cache cleared", "success");
     },
     onError: (err: Error) => push(err.message, "error"),
@@ -151,21 +179,14 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     clearCache.mutate();
   };
 
-  const insightsQuery = useQuery({
-    queryKey: [...INSIGHT_KEY(projectId), "suggested-insights", granularity],
-    queryFn: () => suggestInsights(granularity, projectIdNum),
-    staleTime: 5 * 60_000,
-    enabled: !Number.isNaN(projectIdNum),
-  });
-
   const handleRefresh = () => {
     refresh.mutate();
-    insightsQuery.refetch();
+    analyzeInsights.mutate(granularity);
   };
 
   const handleGranularity = (value: number) => {
     setGranularity(value);
-    insightsQuery.refetch();
+    analyzeInsights.mutate(value);
   };
 
   const allInsightCards = useMemo(
@@ -233,7 +254,11 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     [respondToReview],
   );
 
-  const running = refresh.isPending || isFetching || insightsQuery.isFetching;
+  const running =
+    refresh.isPending ||
+    isFetching ||
+    insightsQuery.isFetching ||
+    analyzeInsights.isPending;
 
   const lastUpdated = useMemo(
     () => (insight.lastUpdatedAt ? new Date(insight.lastUpdatedAt) : null),
