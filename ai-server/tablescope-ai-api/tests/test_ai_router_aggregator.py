@@ -23,7 +23,6 @@ EXPECTED_PATHS = {
     "/ai/index/document",
     "/ai/index/reference",
     "/ai/intelligence/conversation-turn",
-    "/ai/intelligence/fix-sql",
     "/ai/intelligence/interpret",
     "/ai/intelligence/investigate-step",
     "/ai/intelligence/knowledge-graph",

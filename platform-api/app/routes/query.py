@@ -183,8 +183,8 @@ async def query_datasource(
     queries the current user's personal VDB.
 
     Generated SQL is normalized against the project schema and, if it still
-    fails, repaired through the AI ``fix-sql`` endpoint so preview modals render
-    rather than surfacing raw Teiid errors.
+    fails, repaired through the SQL self-repair agent (``repair-sql-step``)
+    so preview modals render rather than surfacing raw Teiid errors.
 
     The SQLAlchemy session is closed before the (long-running) Teiid query so
     the Postgres pool is not tied up while Teiid fetches remote files.

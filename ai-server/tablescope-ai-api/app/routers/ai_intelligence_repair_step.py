@@ -127,6 +127,15 @@ async def intelligence_repair_sql_step(
         temperature=0.1,
         num_ctx=8192,
         response_format="json",
+        # Confirmed live: a reasoning model (e.g. muse-glimmer) can stop
+        # right after a short reasoning burst and never finish the JSON
+        # decision -- most visibly, the "sql" string value for a rewrite
+        # gets cut off mid-statement (an aggregate expression present but
+        # the FROM clause never emitted), producing SQL that then fails
+        # for a different, more confusing reason than the original error.
+        # Same guard llm_client.generate_sql/repair_sql already apply to
+        # the initial generation call.
+        min_tokens=llm_client._SQL_MIN_TOKENS,
         ollama_url=req.ollama_url,
     )
 

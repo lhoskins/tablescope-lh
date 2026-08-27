@@ -19,8 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.context import RequestContext
 from app.config import get_settings
 from app.models.user_vdb import UserVDB
-from app.services import ai_intelligence_client
 from app.services.connection_pool import pool_manager
+from app.services.sql_repair_agent import run_repair_loop
 from app.services.teiid_sql import (
     normalize_teiid_identifiers,
     normalize_teiid_timestamps,
@@ -335,6 +335,44 @@ def _apply_pagination(sql: str, limit: int | None, offset: int) -> str:
     return f"{trimmed} LIMIT {limit} OFFSET {offset}"
 
 
+def _is_source_or_schema_error(err: str) -> bool:
+    """True for an error no SQL rewrite could ever fix.
+
+    These indicate an unavailable source, bad gateway, missing table/column,
+    or runtime source failure. Asking the repair agent to rewrite the SQL
+    cannot resolve them and only consumes time / queue slots -- a production
+    trace showed these recurring unchanged across repair attempts against the
+    same data sources, each attempt paying a full Teiid round trip plus a
+    repair-agent call before giving up, multiplying a single slow, unfixable
+    query into a much slower one.
+    """
+    patterns = [
+        r"TEIID30504",
+        r"TEIID30498",
+        r"TEIID30492",
+        r"TEIID30496",
+        # Function-dialect mismatches (e.g. the model reaching for
+        # DATEADD/DATE_FORMAT, which Teiid does not implement) and hard
+        # parse errors.
+        r"TEIID30068",
+        r"TEIID30328",
+        r"TEIID30384",
+        r"TEIID31100",
+        r"Group does not exist",
+        r"is not defined by any relevant group",
+        r"Table .* does not exist",
+        r"HTTP \d+",
+        r"Bad Gateway",
+        r"Connection refused",
+        r"Connection timed out",
+        r"No route to host",
+        r"Capabilities for .* were not available",
+        r"Could not execute generated SQL",
+    ]
+    lowered = err.lower()
+    return any(re.search(p, lowered, re.IGNORECASE) for p in patterns)
+
+
 async def _execute_sql_with_repair(
     *,
     raw_sql: str,
@@ -351,7 +389,9 @@ async def _execute_sql_with_repair(
     limit: int | None = None,
     offset: int = 0,
 ) -> tuple[dict[str, Any] | None, str, str]:
-    """Run ``raw_sql`` after normalization, calling ``fix-sql`` on failure.
+    """Run ``raw_sql`` after normalization, repairing via the SQL self-repair
+    agent (``sql_repair_agent.run_repair_loop``, shared with the chat
+    ask-and-run path) on failure.
 
     Returns ``(result, final_sql, bounded_sql)``. ``result`` is ``None`` only
     when every repair attempt fails, in which case ``final_sql`` is the last
@@ -359,78 +399,36 @@ async def _execute_sql_with_repair(
     includes any requested LIMIT/OFFSET.
     """
 
-    def _is_source_or_schema_error(err: str) -> bool:
-        # These errors indicate an unavailable source, bad gateway, missing
-        # table/column, or runtime source failure. Asking an LLM to rewrite
-        # the SQL cannot resolve them and only consumes time / queue slots.
-        patterns = [
-            r"TEIID30504",
-            r"TEIID30498",
-            r"TEIID30492",
-            r"TEIID30496",
-            # Function-dialect mismatches (e.g. the model reaching for
-            # DATEADD/DATE_FORMAT, which Teiid does not implement) and hard
-            # parse errors: a production trace showed these recurring
-            # unchanged across repair attempts against the same data
-            # sources, each attempt paying a full Teiid round trip plus a
-            # fix-sql LLM call before giving up -- multiplying a single
-            # slow, unfixable query into a much slower one.
-            r"TEIID30068",
-            r"TEIID30328",
-            r"TEIID30384",
-            r"TEIID31100",
-            r"Group does not exist",
-            r"is not defined by any relevant group",
-            r"Table .* does not exist",
-            r"HTTP \d+",
-            r"Bad Gateway",
-            r"Connection refused",
-            r"Connection timed out",
-            r"No route to host",
-            r"Capabilities for .* were not available",
-            r"Could not execute generated SQL",
-        ]
-        lowered = err.lower()
-        return any(re.search(p, lowered, re.IGNORECASE) for p in patterns)
+    async def _normalize(candidate: str) -> str:
+        return await _prepare_sql(
+            candidate,
+            table_schema=table_schema,
+            column_types=column_types,
+            column_samples=column_samples,
+        )
 
-    final_sql = await _prepare_sql(
-        raw_sql,
+    async def _execute(candidate: str) -> dict[str, Any]:
+        bounded = _apply_pagination(candidate, limit, offset)
+        return await _run_sql(
+            database=database,
+            sql=bounded,
+            teiid_host=endpoint.pg_host,
+            teiid_port=endpoint.pg_port,
+        )
+
+    result, final_sql, _last_error = await run_repair_loop(
+        initial_sql=raw_sql,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        project_id=project_id,
+        allowed_tables=allowed_tables,
         table_schema=table_schema,
-        column_types=column_types,
         column_samples=column_samples,
+        column_types=column_types,
+        normalize=_normalize,
+        execute=_execute,
+        is_unfixable_error=_is_source_or_schema_error,
+        max_execute_attempts=max_attempts,
     )
     bounded_sql = _apply_pagination(final_sql, limit, offset)
-    last_error = ""
-    for attempt in range(max_attempts):
-        try:
-            result = await _run_sql(
-                database=database,
-                sql=bounded_sql,
-                teiid_host=endpoint.pg_host,
-                teiid_port=endpoint.pg_port,
-            )
-            return result, final_sql, bounded_sql
-        except HTTPException as exc:
-            last_error = str(exc.detail)
-            if _is_source_or_schema_error(last_error) or attempt >= max_attempts - 1:
-                break
-            fixed = await ai_intelligence_client.fix_sql(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                project_id=project_id,
-                sql=final_sql,
-                error=last_error,
-                allowed_tables=allowed_tables,
-                table_schema=table_schema,
-            )
-            if not fixed:
-                break
-            final_sql = await _prepare_sql(
-                fixed,
-                table_schema=table_schema,
-                column_types=column_types,
-                column_samples=column_samples,
-            )
-            bounded_sql = _apply_pagination(final_sql, limit, offset)
-
-    return None, final_sql, bounded_sql
+    return result, final_sql, bounded_sql

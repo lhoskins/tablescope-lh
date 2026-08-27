@@ -1,6 +1,6 @@
 """The plan prompt must be internally consistent about cross-table joins.
 
-Three failure modes this file guards against:
+Two failure modes this file guards against:
 
 1. With relationship evidence present, the Teiid rules block still said
    "Do NOT write JOINs" — an unconditional rule sitting *later* in the prompt
@@ -10,9 +10,11 @@ Three failure modes this file guards against:
 2. When the model overproduces, a blind head-slice cut mandated joins off the
    tail. Single-table and cross-table analyses must each compete only for
    their own budget (``target_count`` vs ``per_pair * len(hints)``).
-3. The SQL repair endpoint's rules also said "Do NOT write JOINs", so a failing
-   cross-table query was "repaired" into a single-table one. A failing query
-   that already joins must be repaired with the keep-the-join rules.
+
+A related failure mode -- the SQL repair endpoint's rules also saying "Do NOT
+write JOINs", so a failing cross-table query got "repaired" into a
+single-table one -- is now covered in test_repair_sql_step.py, against the
+repair-sql-step endpoint that replaced fix-sql.
 
 Run from ``tablescope-ai-api``: ``pytest -q tests/test_multitable_plan_prompt.py``.
 """
@@ -25,7 +27,7 @@ import json
 import pytest
 
 import app.routers.ai as ai
-from app.models.schemas import IntelligenceFixSQLRequest, IntelligencePlanRequest
+from app.models.schemas import IntelligencePlanRequest
 
 _JOIN_SQL = (
     'SELECT s."k" AS K, SUM(CAST(d."v" AS double)) AS V '
@@ -181,35 +183,3 @@ def test_overflow_without_hints_matches_old_slice(monkeypatch):
 
     resp = asyncio.run(ai.intelligence_plan(_req([])))
     assert len(resp.analyses) == 8
-
-
-# ── 3. SQL repair keeps a verified join joined ──────────────────────────────
-
-def _fix_req(sql: str) -> IntelligenceFixSQLRequest:
-    return IntelligenceFixSQLRequest(
-        tenant_id=1,
-        user_id=1,
-        project_id=1,
-        sql=sql,
-        error="TEIID31100 parsing error",
-        allowed_tables=["a0", "b0"],
-        table_schema=[],
-    )
-
-
-def test_fix_sql_join_repair_uses_keep_join_rules(monkeypatch):
-    captured = _capture_generate(monkeypatch, "")
-    asyncio.run(ai.intelligence_fix_sql(_fix_req(_JOIN_SQL)))
-    prompt = captured["prompt"]
-    assert "KEEP the same two tables" in prompt
-    assert "Do NOT write JOINs" not in prompt
-
-
-def test_fix_sql_single_table_repair_unchanged(monkeypatch):
-    captured = _capture_generate(monkeypatch, "")
-    asyncio.run(
-        ai.intelligence_fix_sql(_fix_req('SELECT "k" FROM "a0" GROUP BY "k"'))
-    )
-    prompt = captured["prompt"]
-    assert "Do NOT write JOINs" in prompt
-    assert "KEEP the same two tables" not in prompt

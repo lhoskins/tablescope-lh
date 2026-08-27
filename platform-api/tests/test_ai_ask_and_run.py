@@ -590,7 +590,7 @@ async def test_ask_and_run_repair_agent_gives_up_after_max_steps(
     """If the agent keeps asking to inspect a NEW column and never commits to
     a rewrite, the loop must still terminate -- bounded by the total repair
     step budget, not spin forever."""
-    from app.routes.ai_proxy_ask_and_run import _MAX_REPAIR_STEPS
+    from app.services.sql_repair_agent import _MAX_REPAIR_STEPS
 
     _, _, project, headers = await _setup(client, service_headers, "askagentmax")
 
