@@ -224,7 +224,7 @@ export function DatabaseConnectorsWorkspace({
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1.5">
-                        {projectId && onUseInBuilder && c.connectorKey !== "google_drive" ? (
+                        {projectId && onUseInBuilder ? (
                           <Button
                             variant="brandSoft"
                             size="sm"
@@ -232,7 +232,7 @@ export function DatabaseConnectorsWorkspace({
                           >
                             Use in Data Source Builder
                           </Button>
-                        ) : projectId && c.connectorKey !== "google_drive" ? (
+                        ) : projectId ? (
                           <Button
                             variant="brandSoft"
                             size="sm"

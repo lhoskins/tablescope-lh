@@ -26,7 +26,7 @@ export interface FlatItem {
   /** Immutable creation timestamp (ISO 8601); used for the "New" badge. */
   createdAt?: string | null;
   /** For files: how the bytes were acquired. Drives the origin badge. */
-  origin?: "local_upload" | "url" | "network_path";
+  origin?: "local_upload" | "url" | "network_path" | "google_drive";
   /** Host the file came from, when it was not a local upload. */
   originHost?: string;
 }
@@ -59,7 +59,12 @@ export function flattenCreated(
         sourceType: source.sourceType,
         name: source.displayName,
         sourceLabel: source.viewName ?? source.displayName,
-        typeLabel: source.sourceType === "excel" ? "excel" : "csv",
+        typeLabel:
+          source.sourceType === "excel"
+            ? "excel"
+            : source.sourceType === "google_drive"
+              ? "Google Drive"
+              : "csv",
         visibility: "File",
         columns: source.fileMetadata?.columns.length ?? table?.cols ?? 0,
         sizeOrStatus: formatBytes(source.fileMetadata?.sizeBytes),

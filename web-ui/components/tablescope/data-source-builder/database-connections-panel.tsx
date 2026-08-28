@@ -4,16 +4,19 @@ import { DatabaseConnectorsWorkspace } from "@/components/tablescope/database-co
 import type { CreatedConnection } from "@/lib/api/connectors";
 import { TableSelectModal } from "./table-select-modal";
 import { SaaSSourceModal } from "./saas-source-modal";
+import { GoogleSheetsSourceModal } from "./google-sheets-source-modal";
 import { useConnectedSourceActions } from "./use-connected-source-actions";
 
 export function DatabaseConnectionsPanel({ projectId }: { projectId?: string }) {
   const {
     activeDbSourceId,
     activeSaasCredential,
+    activeGoogleSheetsCredential,
     openDbFromCreatedConnection,
     openSaasFromCreatedConnection,
     closeDbModal,
     closeSaasModal,
+    closeGoogleSheetsModal,
     invalidateConnectedSources,
   } = useConnectedSourceActions();
 
@@ -37,6 +40,12 @@ export function DatabaseConnectionsPanel({ projectId }: { projectId?: string }) 
       )}
       {activeSaasCredential && (
         <SaaSSourceModal credential={activeSaasCredential} onClose={closeSaasModal} />
+      )}
+      {activeGoogleSheetsCredential && (
+        <GoogleSheetsSourceModal
+          credential={activeGoogleSheetsCredential}
+          onClose={closeGoogleSheetsModal}
+        />
       )}
     </div>
   );

@@ -45,6 +45,7 @@ export function useConnectedSourceActions() {
 
   const [activeDbSourceId, setActiveDbSourceId] = useState<string | null>(null);
   const [activeSaasCredential, setActiveSaasCredential] = useState<SaasCredential | null>(null);
+  const [activeGoogleSheetsCredential, setActiveGoogleSheetsCredential] = useState<SaasCredential | null>(null);
   const [activeNetworkConnection, setActiveNetworkConnection] = useState<NetworkFileConnection | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -149,7 +150,11 @@ export function useConnectedSourceActions() {
       updated_at: null,
       last_tested_at: null,
     };
-    setActiveSaasCredential(credential);
+    if (src.connectorType === "google_drive") {
+      setActiveGoogleSheetsCredential(credential);
+    } else {
+      setActiveSaasCredential(credential);
+    }
   }, []);
 
   const openSaasFromCreatedConnection = useCallback((conn: CreatedConnection) => {
@@ -162,7 +167,11 @@ export function useConnectedSourceActions() {
       updated_at: null,
       last_tested_at: null,
     };
-    setActiveSaasCredential(credential);
+    if (conn.connectorKey === "google_drive") {
+      setActiveGoogleSheetsCredential(credential);
+    } else {
+      setActiveSaasCredential(credential);
+    }
   }, []);
 
   const openNetworkFromConnectedSource = useCallback((src: ConnectedSource) => {
@@ -177,6 +186,10 @@ export function useConnectedSourceActions() {
 
   const closeDbModal = useCallback(() => setActiveDbSourceId(null), []);
   const closeSaasModal = useCallback(() => setActiveSaasCredential(null), []);
+  const closeGoogleSheetsModal = useCallback(
+    () => setActiveGoogleSheetsCredential(null),
+    [],
+  );
   const closeNetworkModal = useCallback(() => setActiveNetworkConnection(null), []);
 
   return {
@@ -184,6 +197,7 @@ export function useConnectedSourceActions() {
     error,
     activeDbSourceId,
     activeSaasCredential,
+    activeGoogleSheetsCredential,
     activeNetworkConnection,
     openDbFromConnectedSource,
     openDbFromCreatedConnection,
@@ -192,6 +206,7 @@ export function useConnectedSourceActions() {
     openNetworkFromConnectedSource,
     closeDbModal,
     closeSaasModal,
+    closeGoogleSheetsModal,
     closeNetworkModal,
     invalidateConnectedSources,
   };

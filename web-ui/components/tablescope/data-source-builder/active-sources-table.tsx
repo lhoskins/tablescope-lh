@@ -11,6 +11,7 @@ const ORIGIN_LABELS: Record<string, string> = {
   local_upload: "Upload",
   url: "URL",
   network_path: "Network",
+  google_drive: "Google Drive",
 };
 
 function OriginBadge({ item }: { item: FlatItem }) {

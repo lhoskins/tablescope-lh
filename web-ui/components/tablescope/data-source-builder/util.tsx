@@ -24,6 +24,7 @@ export const CONNECTOR_LABELS: Record<SourceType, string> = {
   salesforce: "Salesforce",
   hubspot: "HubSpot",
   quickbooks: "QuickBooks",
+  google_drive: "Google Drive",
 };
 
 export function connectorIcon(sourceType: SourceType): Icon {
@@ -42,6 +43,8 @@ export function connectorIcon(sourceType: SourceType): Icon {
     case "quickbooks":
     case "rest_api":
       return IconApi;
+    case "google_drive":
+      return IconFileSpreadsheet;
     default:
       return IconDatabase;
   }
@@ -62,6 +65,8 @@ export function categoryFor(sourceType: SourceType): SourceCategory {
     case "hubspot":
     case "quickbooks":
       return "api";
+    case "google_drive":
+      return "file";
     default:
       return "database";
   }

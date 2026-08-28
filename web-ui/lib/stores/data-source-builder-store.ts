@@ -12,6 +12,7 @@ export type SourceType =
   | "rest_api"
   | "csv"
   | "excel"
+  | "google_drive"
   | "snowflake"
   | "bigquery"
   | "servicenow"
@@ -45,7 +46,7 @@ export interface FileMetadata {
   importJobId?: string;
   sizeBytes?: number;
   /** How the bytes were acquired; drives the origin badge. */
-  acquisitionMethod?: "local_upload" | "url" | "network_path";
+  acquisitionMethod?: "local_upload" | "url" | "network_path" | "google_drive";
   /**
    * Host the file came from, for display only. Full URLs and network paths
    * are deliberately not kept here: this store is persisted to localStorage,

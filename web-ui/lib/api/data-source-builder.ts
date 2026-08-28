@@ -145,6 +145,127 @@ export interface NetworkTestResult {
   file_size_bytes?: number;
 }
 
+// ── Google Drive / Sheets discovery ──────────────────────────────────
+
+export interface GoogleDriveFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  sourceType?: string;
+  modifiedTime?: string;
+}
+
+export interface GoogleSheetTab {
+  sheetId: number;
+  title: string;
+  rowCount: number;
+  columnCount: number;
+}
+
+export interface SpreadsheetColumnMapping {
+  id: number;
+  sourceLabel: string;
+  physicalColumnRef: string;
+  relationalName: string;
+  teiidType: string;
+  semanticType?: string | null;
+  nullable: boolean;
+  formatHint?: string | null;
+  classification?: string | null;
+}
+
+export interface SpreadsheetTableMapping {
+  id: number;
+  fileSourceMetaId?: number;
+  sheetStableId?: number | null;
+  sheetNameAtCreation: string;
+  tableName: string;
+  rangeA1: string;
+  rangePolicy: string;
+  headerRowIndex: number;
+  dataStartRowIndex: number;
+  detectionMethod: string;
+  columns?: SpreadsheetColumnMapping[];
+}
+
+export interface DetectedTable {
+  mapping: SpreadsheetTableMapping;
+  columns: SpreadsheetColumnMapping[];
+}
+
+export interface DetectTablesResponse {
+  fileSourceMetaId: number;
+  tables: DetectedTable[];
+  mapping: SpreadsheetTableMapping;
+  columns: SpreadsheetColumnMapping[];
+}
+
+export interface FileSourceMetaResponse {
+  id: number;
+  view_name: string;
+  file_name: string;
+  source_format: string;
+  column_types: { name: string; type?: string }[];
+  project_id: number | null;
+  owner_id: number;
+  acquisition_method: string | null;
+  source_host: string | null;
+}
+
+export function listGoogleDriveFiles(
+  connectionId: number,
+  pageToken?: string,
+): Promise<{ files: GoogleDriveFile[]; nextPageToken?: string }> {
+  const params = new URLSearchParams();
+  if (pageToken) params.set("page_token", pageToken);
+  return apiClient.get<{ files: GoogleDriveFile[]; nextPageToken?: string }>(
+    `/api/spreadsheet-connections/${connectionId}/files?${params.toString()}`,
+  );
+}
+
+export function listGoogleSheetTabs(
+  connectionId: number,
+  fileId: string,
+): Promise<{ tabs: GoogleSheetTab[] }> {
+  return apiClient.get<{ tabs: GoogleSheetTab[] }>(
+    `/api/spreadsheet-connections/${connectionId}/files/${fileId}/tabs`,
+  );
+}
+
+export function previewGoogleSheetRange(
+  connectionId: number,
+  fileId: string,
+  rangeA1: string,
+): Promise<{ rangeA1: string; values: unknown[][] }> {
+  return apiClient.post<{ rangeA1: string; values: unknown[][] }>(
+    `/api/spreadsheet-connections/${connectionId}/files/${fileId}/preview-range`,
+    { range_a1: rangeA1 },
+  );
+}
+
+export function detectGoogleSheetTables(
+  connectionId: number,
+  fileId: string,
+  body: { sheet_name?: string; max_rows?: number; project_id?: number | null },
+): Promise<DetectTablesResponse> {
+  return apiClient.post<DetectTablesResponse>(
+    `/api/spreadsheet-connections/${connectionId}/files/${fileId}/detect-tables`,
+    body,
+  );
+}
+
+export function confirmGoogleSheetTable(
+  connectionId: number,
+  fileId: string,
+  mappingId: number,
+  body: { display_name: string; project_id?: number | null },
+): Promise<FileSourceMetaResponse> {
+  return apiClient.post<FileSourceMetaResponse>(
+    `/api/spreadsheet-connections/${connectionId}/files/${fileId}/tables/${mappingId}/confirm`,
+    body,
+  );
+}
+
 // ── Project / existing-source types ──────────────────────────────────
 
 export interface ProjectDataSourceRow {
