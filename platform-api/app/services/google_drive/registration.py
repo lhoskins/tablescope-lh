@@ -96,13 +96,13 @@ async def _register_google_sheet(
     safe_table = sanitize_identifier(sheet_name)
     names = generate_teiid_names(
         data_source_id=child.id,
-        db_type="google-spreadsheet",
+        db_type="google-sheets",
         table_name=safe_table,
     )
     teiid_columns = [
         {
             "name": col.relational_name,
-            "name_in_source": col.source_label,
+            "name_in_source": col.physical_column_ref,
             "teiid_type": col.teiid_type,
         }
         for col in columns
@@ -118,7 +118,7 @@ async def _register_google_sheet(
             refresh_token=refresh_token,
             client_id=client_id,
             client_secret=client_secret,
-            sheet_name=sheet_name,
+            sheet_name=mapping.range_a1,
             teiid_table_name=names["teiid_table_name"],
             model_name=names["model_name"],
             ds_name=names["ds_name"],

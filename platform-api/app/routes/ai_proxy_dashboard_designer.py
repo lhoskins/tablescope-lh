@@ -15,7 +15,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
@@ -1126,12 +1126,14 @@ async def _apply_primary_dimension_selection(
         )
     )
     if make_active:
-        for assignment in existing_assignments:
-            assignment.is_active = False
+        for existing_assignment in existing_assignments:
+            existing_assignment.is_active = False
 
-    assignment = next(
-        (a for a in existing_assignments if a.dimension_id == dimension.id), None,
-    )
+    assignment: DashboardPrimaryDimensionAssignment | None = None
+    for a in existing_assignments:
+        if a.dimension_id == dimension.id:
+            assignment = a
+            break
     if assignment is None:
         assignment = DashboardPrimaryDimensionAssignment(
             tenant_id=context.tenant_id,
@@ -1155,7 +1157,7 @@ async def _apply_primary_dimension_selection(
         if config.get("id")
     }
     await session.execute(
-        DashboardPrimaryDimensionBinding.__table__.delete().where(
+        delete(DashboardPrimaryDimensionBinding).where(
             DashboardPrimaryDimensionBinding.assignment_id == assignment.id,
         )
     )
@@ -1384,7 +1386,7 @@ async def apply_dashboard_design(
         session.add(dashboard)
         if req.primary_dimensions:
             await session.flush()  # assigns dashboard.id
-            dimension_parameters = None
+            primary_parameters: dict[str, Any] | None = None
             for index, selection in enumerate(req.primary_dimensions):
                 result = await _apply_primary_dimension_selection(
                     session,
@@ -1398,10 +1400,10 @@ async def apply_dashboard_design(
                     make_active=(index == 0),
                 )
                 if index == 0:
-                    dimension_parameters = result
+                    primary_parameters = result
             next_config = dict(dashboard.config)
             metadata = dict(next_config.get("dashboardTemplate") or {})
-            metadata["parameters"] = dimension_parameters
+            metadata["parameters"] = primary_parameters
             next_config["dashboardTemplate"] = metadata
             dashboard.config = operational_insight_config(
                 next_config, group=group, dashboard_name=dashboard_name,

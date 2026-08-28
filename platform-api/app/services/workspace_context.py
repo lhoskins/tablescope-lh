@@ -51,61 +51,61 @@ async def resolve_active_resource_context(
         return None
 
     if resource_type == "table":
-        row = await session.get(SavedQuery, resource_id)
-        if row is None or row.project_id != project_id:
+        saved_query = await session.get(SavedQuery, resource_id)
+        if saved_query is None or saved_query.project_id != project_id:
             return None
-        parts = [f"a saved table/query named '{row.name}'"]
-        if row.description:
-            parts.append(f"described as: {row.description}")
-        if row.sql_text:
-            parts.append(f"backed by this SQL: {row.sql_text[:500]}")
+        parts = [f"a saved table/query named '{saved_query.name}'"]
+        if saved_query.description:
+            parts.append(f"described as: {saved_query.description}")
+        if saved_query.sql_text:
+            parts.append(f"backed by this SQL: {saved_query.sql_text[:500]}")
         return ActiveResourceContext(
             resource_type=resource_type,
             resource_id=resource_id,
-            label=row.name,
+            label=saved_query.name,
             summary="; ".join(parts),
         )
 
     if resource_type == "dashboard":
-        row = await session.get(Dashboard, resource_id)
-        if row is None or row.project_id != project_id:
+        dashboard = await session.get(Dashboard, resource_id)
+        if dashboard is None or dashboard.project_id != project_id:
             return None
-        widget_count = len((row.config or {}).get("widgets") or [])
-        summary = f"a dashboard named '{row.name}' with {widget_count} widget(s)"
-        if row.description:
-            summary += f", described as: {row.description}"
+        widget_count = len((dashboard.config or {}).get("widgets") or [])
+        summary = f"a dashboard named '{dashboard.name}' with {widget_count} widget(s)"
+        if dashboard.description:
+            summary += f", described as: {dashboard.description}"
         return ActiveResourceContext(
             resource_type=resource_type,
             resource_id=resource_id,
-            label=row.name,
+            label=dashboard.name,
             summary=summary,
         )
 
     if resource_type == "document":
-        row = await session.get(ProjectAsset, resource_id)
-        if row is None or row.project_id != project_id:
+        document = await session.get(ProjectAsset, resource_id)
+        if document is None or document.project_id != project_id:
             return None
-        summary = f"a project document titled '{row.title}' ({row.asset_type})"
-        if row.ai_summary:
-            summary += f", summarized as: {row.ai_summary[:500]}"
+        summary = f"a project document titled '{document.title}' ({document.asset_type})"
+        if document.ai_summary:
+            summary += f", summarized as: {document.ai_summary[:500]}"
         return ActiveResourceContext(
             resource_type=resource_type,
             resource_id=resource_id,
-            label=row.title,
+            label=document.title,
             summary=summary,
         )
 
     # resource_type == "data_source"
-    row = await session.get(DatabaseDataSource, resource_id)
-    if row is None or row.project_id != project_id:
+    data_source = await session.get(DatabaseDataSource, resource_id)
+    if data_source is None or data_source.project_id != project_id:
         return None
     summary = (
-        f"a data source named '{row.display_name}' "
-        f"(table '{row.table_name}' in database '{row.database_name}')"
+        f"a data source named '{data_source.display_name}' "
+        f"(table '{data_source.table_name}' in database '{data_source.database_name}')"
     )
     return ActiveResourceContext(
         resource_type=resource_type,
         resource_id=resource_id,
-        label=row.display_name,
+        label=data_source.display_name,
         summary=summary,
     )

@@ -50,8 +50,9 @@ def _mock_supabase(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _signing_secret(monkeypatch):
-    import app.routes.ai_proxy_permissions as perms_module
     from types import SimpleNamespace
+
+    import app.routes.ai_proxy_permissions as perms_module
 
     real_settings = perms_module.get_settings()
     fake_settings = SimpleNamespace(**real_settings.model_dump())

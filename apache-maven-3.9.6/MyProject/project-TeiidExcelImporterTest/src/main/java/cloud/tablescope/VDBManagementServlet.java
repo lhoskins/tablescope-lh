@@ -857,7 +857,7 @@ public class VDBManagementServlet extends HttpServlet {
 
         boolean isServiceNow = "servicenow".equalsIgnoreCase(translator);
         boolean isSalesforce = WildFlyCliHelper.isSalesforceTranslator(translator);
-        boolean isCustomTranslator = "hubspot".equalsIgnoreCase(translator) || "quickbooks".equalsIgnoreCase(translator);
+        boolean isCustomTranslator = "hubspot".equalsIgnoreCase(translator) || "quickbooks".equalsIgnoreCase(translator) || "google-sheets".equalsIgnoreCase(translator);
         boolean isGoogleSpreadsheet = "google-spreadsheet".equalsIgnoreCase(translator);
         boolean force = body.optBoolean("force", false);
         String instanceUrl = body.optString("instance_url", isServiceNow || isSalesforce || isCustomTranslator ? jdbcUrl : "");
@@ -909,9 +909,7 @@ public class VDBManagementServlet extends HttpServlet {
 
         try {
             // 2. Ensure the WildFly JDBC datasource or JCA connection factory exists.
-            if (isGoogleSpreadsheet) {
-                WildFlyCliHelper.ensureGoogleSpreadsheetConnectionFactory(dsName, spreadsheetId, password, clientId, clientSecret, "");
-            } else if (isSalesforce) {
+            if (isSalesforce) {
                 WildFlyCliHelper.ensureSalesforceConnectionFactory(dsName, translator, instanceUrl, username, password);
             } else if (!isServiceNow && !isCustomTranslator) {
                 WildFlyCliHelper.ensureDataSource(dsName, dbType, jdbcUrl, username, password);
@@ -944,7 +942,7 @@ public class VDBManagementServlet extends HttpServlet {
                     modelBlock = VDBXmlBuilder.buildCustomHttpModelBlock(
                             modelName, dsName, translatorDefName,
                             teiidTableName, tableName, columns);
-                } else if (isSalesforce || isGoogleSpreadsheet) {
+                } else if (isSalesforce) {
                     modelBlock = VDBXmlBuilder.buildSalesforceModelBlock(
                             modelName, dsName, translator, jndiName,
                             teiidTableName, tableName, columns);
@@ -972,11 +970,26 @@ public class VDBManagementServlet extends HttpServlet {
                         if ("quickbooks".equalsIgnoreCase(translator) && realmId != null && !realmId.isEmpty()) {
                             props.put("realmId", realmId);
                         }
-                        if (username != null && !username.isEmpty()) {
-                            props.put("username", username);
-                        }
-                        if (password != null && !password.isEmpty()) {
-                            props.put("password", password);
+                        if ("google-sheets".equalsIgnoreCase(translator)) {
+                            if (spreadsheetId != null && !spreadsheetId.isEmpty()) {
+                                props.put("spreadsheetId", spreadsheetId);
+                            }
+                            if (clientId != null && !clientId.isEmpty()) {
+                                props.put("clientId", clientId);
+                            }
+                            if (clientSecret != null && !clientSecret.isEmpty()) {
+                                props.put("clientSecret", clientSecret);
+                            }
+                            if (password != null && !password.isEmpty()) {
+                                props.put("refreshToken", password);
+                            }
+                        } else {
+                            if (username != null && !username.isEmpty()) {
+                                props.put("username", username);
+                            }
+                            if (password != null && !password.isEmpty()) {
+                                props.put("password", password);
+                            }
                         }
                         String translatorBlock = VDBXmlBuilder.buildCustomHttpTranslatorBlock(translatorDefName, translator, props);
                         vdbXml = VDBXmlBuilder.insertBefore(vdbXml, "</vdb>", translatorBlock);

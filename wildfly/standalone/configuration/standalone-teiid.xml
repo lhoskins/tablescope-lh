@@ -700,6 +700,7 @@
             <translator name="servicenow" module="org.jboss.teiid.translator.servicenow"/>
             <translator name="hubspot" module="org.jboss.teiid.translator.hubspot"/>
             <translator name="quickbooks" module="org.jboss.teiid.translator.quickbooks"/>
+            <translator name="google-sheets" module="org.jboss.teiid.translator.google.sheets"/>
             <translator name="hive" module="org.jboss.teiid.translator.hive"/>
             <translator name="snowflake" module="org.jboss.teiid.translator.snowflake"/>
             <translator name="databricks" module="org.jboss.teiid.translator.databricks"/>

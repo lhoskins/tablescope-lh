@@ -164,10 +164,51 @@ const CONNECTOR_NAMES: Record<string, string> = {
   hubspot: "HubSpot",
   quickbooks: "QuickBooks",
   servicenow: "ServiceNow",
+  google_drive: "Google Drive",
 };
 
 export function connectorDisplayName(key: string): string {
   return CONNECTOR_NAMES[key] ?? key.charAt(0).toUpperCase() + key.slice(1);
+}
+
+// ── Google Drive / Sheets connector OAuth flow ───────────────────────
+
+export interface AuthorizeSpreadsheetResponse {
+  authorizationUrl: string;
+  state: string;
+}
+
+export function authorizeGoogleSheets(): Promise<AuthorizeSpreadsheetResponse> {
+  return apiClient.post<AuthorizeSpreadsheetResponse>(
+    "/api/spreadsheet-connections/authorize",
+    {},
+  );
+}
+
+export function completeGoogleSheetsAuthorization(body: {
+  code: string;
+  state: string;
+  display_name?: string;
+}): Promise<{ id: number }> {
+  return apiClient.post<{ id: number }>(
+    "/api/spreadsheet-connections/callback",
+    body,
+  );
+}
+
+export async function testGoogleDrive(connectionId: number): Promise<{
+  success: boolean;
+  message: string;
+}> {
+  try {
+    await apiClient.get(`/api/spreadsheet-connections/${connectionId}/files`);
+    return { success: true, message: "Google Drive is accessible" };
+  } catch (err) {
+    return {
+      success: false,
+      message: err instanceof Error ? err.message : "Google Drive test failed",
+    };
+  }
 }
 
 export async function listCreatedConnections(): Promise<CreatedConnection[]> {

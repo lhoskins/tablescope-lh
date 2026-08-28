@@ -1,4 +1,5 @@
 import {
+  siGooglesheets,
   siHubspot,
   siMysql,
   siPostgresql,
@@ -91,6 +92,7 @@ const SI_ICONS: Record<string, SimpleIcon> = {
   mysql: siMysql,
   hubspot: siHubspot,
   quickbooks: siQuickbooks,
+  google_drive: siGooglesheets,
 };
 
 export function BrandLogo({
@@ -119,6 +121,7 @@ export const CONNECTOR_CHIP: Record<string, string> = {
   hubspot: "bg-[#FF7A59]/10",
   quickbooks: "bg-[#2CA01C]/10",
   servicenow: "bg-[#62D84E]/10",
+  google_drive: "bg-[#0F9D58]/10",
 };
 
 export function connectorChip(connector: string): string {

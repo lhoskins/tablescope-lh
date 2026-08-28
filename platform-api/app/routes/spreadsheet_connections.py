@@ -21,7 +21,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
@@ -278,72 +278,26 @@ class DetectTablesRequest(BaseModel):
     project_id: int | None = None
 
 
-@router.post("/{connection_id}/files/{file_id}/detect-tables")
-async def detect_tables(
-    connection_id: int,
-    file_id: str,
-    req: DetectTablesRequest,
-    session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.EDITOR)),
+async def _normalize_table(
+    detected: dict[str, Any],
+    *,
+    file_source_meta_id: int,
+    project_id: int | None,
+    tenant_id: int,
+    session: AsyncSession,
 ) -> dict[str, Any]:
-    """Detect a single rectangular table on a sheet (Workstream D fallback).
-
-    Creates a proposed ``SpreadsheetTableMapping`` and child
-    ``SpreadsheetColumnMapping`` rows for the first (or requested) tab.  The
-    mapping is not registered in Teiid until ``confirm`` is called.
-    """
-    _require_feature_enabled()
-    credential = await _load_credential(session, connection_id, context.tenant_id)
-    access_token = await _valid_access_token(session, credential)
-    client = gd.GoogleDriveClient(access_token)
-
-    try:
-        detected = await detect_google_sheet_tables(
-            client,
-            file_id,
-            sheet_name=req.sheet_name,
-            max_rows=req.max_rows,
-        )
-    except gd.GoogleDriveError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    parent_view = _parent_view_name(file_id, detected["sheet_name"])
-    parent = await session.scalar(
-        select(FileSourceMeta).where(
-            FileSourceMeta.tenant_id == context.tenant_id,
-            FileSourceMeta.owner_id == context.user_id,
-            FileSourceMeta.view_name == parent_view,
-        )
-    )
-    if parent is None:
-        parent = FileSourceMeta(
-            tenant_id=context.tenant_id,
-            owner_id=context.user_id,
-            project_id=req.project_id,
-            view_name=parent_view,
-            file_name=detected["file_name"],
-            vdb_type="user",
-            source_format="google_sheet",
-            acquisition_method="google_drive",
-            live_source_params={
-                "spreadsheet_id": file_id,
-                "sheet_name": detected["sheet_name"],
-            },
-        )
-        session.add(parent)
-        await session.flush()
-
+    """Persist or update a proposed mapping and its columns from detection."""
     mapping = await session.scalar(
         select(SpreadsheetTableMapping).where(
-            SpreadsheetTableMapping.file_source_meta_id == parent.id,
+            SpreadsheetTableMapping.file_source_meta_id == file_source_meta_id,
             SpreadsheetTableMapping.range_a1 == detected["range_a1"],
         )
     )
     if mapping is None:
         mapping = SpreadsheetTableMapping(
-            tenant_id=context.tenant_id,
-            project_id=req.project_id,
-            file_source_meta_id=parent.id,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            file_source_meta_id=file_source_meta_id,
             sheet_stable_id=None,
             sheet_name_at_creation=detected["sheet_name"],
             table_name=detected["table_name"],
@@ -359,20 +313,31 @@ async def detect_tables(
         )
         session.add(mapping)
         await session.flush()
+    else:
+        mapping.table_name = detected["table_name"]
+        mapping.header_row_index = detected["header_row_index"]
+        mapping.data_start_row_index = detected["data_start_row_index"]
+        mapping.anchor_fingerprint = detected["anchor_fingerprint"]
+        mapping.detection_method = detected["detection_method"]
 
-        for col in detected["columns"]:
-            session.add(
-                SpreadsheetColumnMapping(
-                    table_mapping_id=mapping.id,
-                    ordinal=col["ordinal"],
-                    source_label=col["source_label"],
-                    physical_column_ref=col["physical_column_ref"],
-                    relational_name=col["relational_name"],
-                    teiid_type=col["teiid_type"],
-                    classification=col["classification"],
-                )
+    await session.execute(
+        delete(SpreadsheetColumnMapping).where(
+            SpreadsheetColumnMapping.table_mapping_id == mapping.id
+        )
+    )
+    for col in detected["columns"]:
+        session.add(
+            SpreadsheetColumnMapping(
+                table_mapping_id=mapping.id,
+                ordinal=col["ordinal"],
+                source_label=col["source_label"],
+                physical_column_ref=col["physical_column_ref"],
+                relational_name=col["relational_name"],
+                teiid_type=col["teiid_type"],
+                classification=col["classification"],
             )
-        await session.flush()
+        )
+    await session.flush()
 
     columns = list(
         (
@@ -383,13 +348,151 @@ async def detect_tables(
             )
         ).all()
     )
+    return {"mapping": mapping.to_dict(), "columns": [c.to_dict() for c in columns]}
+
+
+@router.post("/{connection_id}/files/{file_id}/detect-tables")
+async def detect_tables(
+    connection_id: int,
+    file_id: str,
+    req: DetectTablesRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict[str, Any]:
+    """Detect one or more rectangular tables on a sheet (Workstream D).
+
+    Creates proposed ``SpreadsheetTableMapping`` and child
+    ``SpreadsheetColumnMapping`` rows for each discovered table on the first
+    (or requested) tab.  The mappings are not registered in Teiid until
+    ``confirm`` is called on each.
+    """
+    _require_feature_enabled()
+    credential = await _load_credential(session, connection_id, context.tenant_id)
+    access_token = await _valid_access_token(session, credential)
+    client = gd.GoogleDriveClient(access_token)
+
+    try:
+        detected_tables = await detect_google_sheet_tables(
+            client,
+            file_id,
+            sheet_name=req.sheet_name,
+            max_rows=req.max_rows,
+        )
+    except gd.GoogleDriveError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    if not detected_tables:
+        raise HTTPException(status_code=404, detail="No tables detected on this sheet.")
+
+    first = detected_tables[0]
+    parent_view = _parent_view_name(file_id, first["sheet_name"])
+    parent = await session.scalar(
+        select(FileSourceMeta).where(
+            FileSourceMeta.tenant_id == context.tenant_id,
+            FileSourceMeta.owner_id == context.user_id,
+            FileSourceMeta.view_name == parent_view,
+        )
+    )
+    if parent is None:
+        parent = FileSourceMeta(
+            tenant_id=context.tenant_id,
+            owner_id=context.user_id,
+            project_id=req.project_id,
+            view_name=parent_view,
+            file_name=first["file_name"],
+            vdb_type="user",
+            source_format="google_sheet",
+            acquisition_method="google_drive",
+            live_source_params={
+                "spreadsheet_id": file_id,
+                "sheet_name": first["sheet_name"],
+            },
+        )
+        session.add(parent)
+        await session.flush()
+
+    tables: list[dict[str, Any]] = []
+    for detected in detected_tables:
+        table = await _normalize_table(
+            detected,
+            file_source_meta_id=parent.id,
+            project_id=req.project_id,
+            tenant_id=context.tenant_id,
+            session=session,
+        )
+        tables.append(table)
 
     await session.commit()
     return {
         "fileSourceMetaId": parent.id,
-        "mapping": mapping.to_dict(),
-        "columns": [c.to_dict() for c in columns],
+        "tables": tables,
+        # Backward-compatible top-level keys for callers expecting a single table.
+        "mapping": tables[0]["mapping"],
+        "columns": tables[0]["columns"],
     }
+
+
+@router.get("/{connection_id}/files/{file_id}/tables")
+async def list_file_table_mappings(
+    connection_id: int,
+    file_id: str,
+    sheet_name: str | None = None,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """List proposed/confirmed table mappings for a Drive file.
+
+    Results are grouped by sheet.  Pass ``sheet_name`` to restrict to one tab.
+    """
+    _require_feature_enabled()
+    await _load_credential(session, connection_id, context.tenant_id)
+
+    filters = [
+        FileSourceMeta.tenant_id == context.tenant_id,
+        FileSourceMeta.owner_id == context.user_id,
+        FileSourceMeta.source_format == "google_sheet",
+        FileSourceMeta.live_source_params["spreadsheet_id"].as_string() == file_id,
+    ]
+    if sheet_name:
+        filters.append(
+            FileSourceMeta.live_source_params["sheet_name"].as_string() == sheet_name
+        )
+    parents = (
+        await session.scalars(select(FileSourceMeta).where(*filters))
+    ).all()
+
+    files: list[dict[str, Any]] = []
+    for parent in parents:
+        mappings = list(
+            (
+                await session.scalars(
+                    select(SpreadsheetTableMapping)
+                    .where(SpreadsheetTableMapping.file_source_meta_id == parent.id)
+                    .order_by(SpreadsheetTableMapping.id)
+                )
+            ).all()
+        )
+        tables = []
+        for mapping in mappings:
+            columns = list(
+                (
+                    await session.scalars(
+                        select(SpreadsheetColumnMapping)
+                        .where(SpreadsheetColumnMapping.table_mapping_id == mapping.id)
+                        .order_by(SpreadsheetColumnMapping.ordinal)
+                    )
+                ).all()
+            )
+            tables.append({"mapping": mapping.to_dict(), "columns": [c.to_dict() for c in columns]})
+        files.append(
+            {
+                "fileSourceMetaId": parent.id,
+                "sheetName": (parent.live_source_params or {}).get("sheet_name"),
+                "tables": tables,
+            }
+        )
+
+    return {"files": files}
 
 
 class ConfirmTableRequest(BaseModel):
