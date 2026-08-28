@@ -372,6 +372,7 @@ async def detect_tables(
                     classification=col["classification"],
                 )
             )
+        await session.flush()
 
     columns = list(
         (
