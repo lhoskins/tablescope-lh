@@ -370,7 +370,7 @@ _TEIID_RULES_COMMON = (
     "to one point and renders as a meaningless '2.0K' tile.\n"
     "- Alias columns with a plain identifier or double quotes (e.g. AS Month or "
     'AS "Month") — NEVER single quotes (AS \'Month\' is a syntax error).\n'
-    "- WORKED EXAMPLE for a text-typed `Date` column: SELECT FORMATTIMESTAMP(PARSETIMESTAMP(\"Date\", 'yyyy-MM-dd'), 'yyyy-MM') AS Month, COUNT(*) AS Total, SUM(CASE WHEN LOWER(\"Result\") = 'failed' THEN 1 ELSE 0 END) AS Failed FROM it_backup_jobs_CSV GROUP BY FORMATTIMESTAMP(PARSETIMESTAMP(\"Date\", 'yyyy-MM-dd'), 'yyyy-MM'); Notice how the expression in SELECT is repeated, character-for-character, in GROUP BY.\n- Do NOT use CTEs (WITH), subqueries in FROM, or derived tables. Query the "
+    "- WORKED EXAMPLE for a text-typed `Date` column: SELECT \"System\", FORMATTIMESTAMP(PARSETIMESTAMP(\"Date\", 'yyyy-MM-dd'), 'yyyy-MM') AS Month, COUNT(*) AS Total, SUM(CASE WHEN LOWER(\"Result\") = 'failed' THEN 1 ELSE 0 END) AS Failed FROM it_backup_jobs_CSV GROUP BY \"System\", FORMATTIMESTAMP(PARSETIMESTAMP(\"Date\", 'yyyy-MM-dd'), 'yyyy-MM'); Notice that every non-aggregated column in SELECT (\"System\" and the month expression) is also in GROUP BY, character-for-character.\n- Do NOT use CTEs (WITH), subqueries in FROM, or derived tables. Query the "
     "allowed tables directly with WHERE/GROUP BY/aggregations only.\n"
     "- GROUP BY must repeat the full SELECT expression, character-for-"
     "character (Teiid forbids alias references in GROUP BY). Never use "
