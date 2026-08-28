@@ -9,6 +9,7 @@ import { MembersDialog } from "./project/members-dialog";
 import { WorkspaceTabsBar } from "./project/workspace/workspace-tabs-bar";
 import { WorkspaceAssistantPanel } from "./project/workspace/workspace-assistant-panel";
 import type { WorkspaceTab } from "./project/workspace/workspace-tabs-storage";
+import type { WorkspaceCard } from "@/lib/api/workspaces";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
 import { getUserMeta } from "@/lib/auth";
 import { useProjectShell, useProjectMembers } from "@/lib/ui/use-project-data";
@@ -26,6 +27,8 @@ export function ProjectShell({
   workspaceItem = null,
   assistantSurface = "project_workspace",
   assistantContextLabel,
+  assistantDefaultOpen = false,
+  assistantWorkspaceCards = null,
   children,
 }: {
   projectId: string;
@@ -53,6 +56,12 @@ export function ProjectShell({
   assistantSurface?: "project_insights" | "project_workspace";
   /** Stable label shown when the assistant is grounded on the page itself. */
   assistantContextLabel?: string;
+  /** Open the docked AI Assistant by default (Workspace page only) unless the
+   *  user has already expressed a preference. */
+  assistantDefaultOpen?: boolean;
+  /** Cards of the active named workspace, grounding the assistant on all of
+   *  them instead of the single `workspaceItem`. */
+  assistantWorkspaceCards?: WorkspaceCard[] | null;
   children: ReactNode;
 }) {
   const router = useRouter();
@@ -94,6 +103,8 @@ export function ProjectShell({
             activeItem={workspaceItem}
             surface={assistantSurface}
             contextLabel={assistantContextLabel}
+            workspaceCards={assistantWorkspaceCards}
+            defaultOpen={assistantDefaultOpen}
           />
         </>
       }

@@ -49,6 +49,7 @@ describe("projectNavGroups", () => {
     const keys = project.map((i) => i.key);
     expect(keys).toEqual([
       "overview",
+      "workspace",
       "project-insights",
       "project-actions",
       "project-business-context",

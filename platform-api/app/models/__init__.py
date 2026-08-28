@@ -148,6 +148,7 @@ from app.models.tenant_membership import TenantAuthBinding, TenantMembership
 from app.models.user import User
 from app.models.user_auth_identity import UserAuthIdentity
 from app.models.user_vdb import UserVDB
+from app.models.workspace import Workspace, WorkspaceCard
 
 __all__ = [
     "AIAssetKPI",
@@ -274,4 +275,6 @@ __all__ = [
     "User",
     "UserAuthIdentity",
     "UserVDB",
+    "Workspace",
+    "WorkspaceCard",
 ]

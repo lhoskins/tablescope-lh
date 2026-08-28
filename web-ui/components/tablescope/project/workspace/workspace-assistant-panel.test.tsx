@@ -196,6 +196,60 @@ describe("WorkspaceAssistantPanel", () => {
     expect(signal.aborted).toBe(true);
   });
 
+  it("opens by default on the Workspace page when nothing was persisted", () => {
+    render(<WorkspaceAssistantPanel projectId="7" activeItem={null} defaultOpen />);
+    expect(screen.getByLabelText("Ask the AI Assistant")).toBeTruthy();
+  });
+
+  it("keeps a persisted collapsed preference even when defaultOpen is set", () => {
+    window.localStorage.setItem("tablescope:workspace-assistant-collapsed", "true");
+    render(<WorkspaceAssistantPanel projectId="7" activeItem={null} defaultOpen />);
+    expect(screen.getByLabelText("Open AI Assistant")).toBeTruthy();
+  });
+
+  it("grounds on every card of the active named workspace", async () => {
+    window.localStorage.setItem("tablescope:workspace-assistant-collapsed", "false");
+    submitCanonicalTurn.mockResolvedValue({
+      conversation_id: 42,
+      conversation_created: true,
+      surface: "project_workspace",
+      project_id: 7,
+      turn: { id: 1, user_message: "Compare these", sequence: 1 },
+    });
+
+    render(
+      <WorkspaceAssistantPanel
+        projectId="7"
+        activeItem={ACTIVE_TABLE}
+        workspaceCards={[
+          { id: 1, resource_type: "table", resource_id: "1", view_mode: "card", position: 0, label: "Monthly Revenue" },
+          { id: 2, resource_type: "dashboard", resource_id: "5", view_mode: "row", position: 1, label: "Exec Overview" },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Grounded on: Monthly Revenue, Exec Overview")).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("Ask the AI Assistant"), {
+      target: { value: "Compare these" },
+    });
+    fireEvent.keyDown(screen.getByLabelText("Ask the AI Assistant"), { key: "Enter" });
+
+    await waitFor(() =>
+      expect(submitCanonicalTurn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          active_resource_type: undefined,
+          active_resource_id: undefined,
+          active_resources: [
+            { resource_type: "table", resource_id: 1 },
+            { resource_type: "dashboard", resource_id: 5 },
+          ],
+        }),
+        expect.any(AbortSignal),
+      ),
+    );
+  });
+
   it("collapsing the panel persists the collapsed state", () => {
     window.localStorage.setItem("tablescope:workspace-assistant-collapsed", "false");
     render(<WorkspaceAssistantPanel projectId="7" activeItem={null} />);

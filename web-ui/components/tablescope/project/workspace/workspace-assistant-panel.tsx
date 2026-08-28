@@ -26,6 +26,7 @@ import {
   saveAssistantWidth,
 } from "./workspace-assistant-storage";
 import type { WorkspaceTab } from "./workspace-tabs-storage";
+import type { WorkspaceCard } from "@/lib/api/workspaces";
 
 function newRequestId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -39,11 +40,19 @@ export function WorkspaceAssistantPanel({
   activeItem,
   surface = "project_workspace",
   contextLabel,
+  workspaceCards,
+  defaultOpen = false,
 }: {
   projectId?: string;
   activeItem?: WorkspaceTab | null;
   surface?: "business_insights" | "project_insights" | "project_workspace";
   contextLabel?: string;
+  /** Cards of the active named workspace. When set, the assistant grounds on
+   *  every card instead of the single active tab. */
+  workspaceCards?: WorkspaceCard[] | null;
+  /** Open the panel when nothing has been persisted yet. Only the Workspace
+   *  page opts in; elsewhere the panel stays collapsed by default. */
+  defaultOpen?: boolean;
 }) {
   const projectIdNum = Number(projectId);
   const hasProject = projectId != null && projectId !== "" && Number.isFinite(projectIdNum);
@@ -59,9 +68,17 @@ export function WorkspaceAssistantPanel({
   const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    setCollapsed(loadAssistantCollapsed());
+    setCollapsed(loadAssistantCollapsed(!defaultOpen));
     setWidth(loadAssistantWidth());
-  }, []);
+  }, [defaultOpen]);
+
+  const groundedCards = (workspaceCards ?? []).filter(
+    (card) => Number.isFinite(Number(card.resource_id)),
+  );
+  const groundedLabel =
+    groundedCards.length > 0
+      ? groundedCards.map((c) => c.label ?? c.resource_type).join(", ")
+      : (activeItem?.label ?? contextLabel);
 
   // Resume conversation history only once the panel is actually opened, and
   // only once per mount -- this panel is present on every project page, so
@@ -152,8 +169,15 @@ export function WorkspaceAssistantPanel({
           project_id: hasProject ? projectIdNum : undefined,
           message,
           client_request_id: newRequestId(),
-          active_resource_type: activeItem?.type,
-          active_resource_id: activeItem?.numericId,
+          active_resource_type: groundedCards.length > 0 ? undefined : activeItem?.type,
+          active_resource_id: groundedCards.length > 0 ? undefined : activeItem?.numericId,
+          active_resources:
+            groundedCards.length > 0
+              ? groundedCards.map((card) => ({
+                  resource_type: card.resource_type,
+                  resource_id: Number(card.resource_id),
+                }))
+              : undefined,
         },
         controller.signal,
       );
@@ -245,9 +269,9 @@ export function WorkspaceAssistantPanel({
           </div>
           <div>
             <p className="text-[13px] font-medium text-ink-primary">AI Assistant</p>
-            {(activeItem || contextLabel) && (
+            {groundedLabel && (
               <p className="max-w-[14rem] truncate text-caption text-ink-tertiary">
-                Grounded on: {activeItem?.label ?? contextLabel}
+                Grounded on: {groundedLabel}
               </p>
             )}
           </div>
@@ -271,7 +295,7 @@ export function WorkspaceAssistantPanel({
       <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-3 py-3">
         {(!conversation || conversation.turns.length === 0) && !pendingQuestion && (
           <p className="text-[13px] text-ink-tertiary">
-            Ask about {activeItem ? `"${activeItem.label}"` : contextLabel ?? "this project"} or anything else in
+            Ask about {groundedLabel ? `"${groundedLabel}"` : "this project"} or anything else in
             this workspace.
           </p>
         )}
