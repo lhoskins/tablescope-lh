@@ -927,12 +927,6 @@ public class VDBManagementServlet extends HttpServlet {
                 if (isServiceNow || isCustomTranslator) {
                     vdbXml = VDBXmlBuilder.removeTranslatorBlock(vdbXml, dsName + "_" + translator);
                 }
-                if (isSalesforce) {
-                    WildFlyCliHelper.removeSalesforceConnectionFactory(dsName, translator);
-                }
-                if (isGoogleSpreadsheet) {
-                    WildFlyCliHelper.removeGoogleSpreadsheetConnectionFactory(dsName);
-                }
                 modelExists = false;
             }
 
