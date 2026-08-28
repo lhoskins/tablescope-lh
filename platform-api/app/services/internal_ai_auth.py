@@ -61,7 +61,7 @@ def _verify_signature(payload: dict[str, Any], secret: str) -> None:
 
 def _verify_timestamp(payload: dict[str, Any]) -> None:
     timestamp = payload.get("timestamp")
-    if not isinstance(timestamp, (int, float)):
+    if not isinstance(timestamp, int | float):
         raise InternalAuthError()
     age = time.time() - float(timestamp)
     if age < -10 or age > MAX_SIGNATURE_AGE_SECONDS:

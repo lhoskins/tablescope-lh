@@ -17,7 +17,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.models.dashboard import Dashboard
 from app.models.file_source_meta import FileSourceMeta
-from app.models.project import Project, ProjectMember
+from app.models.project import ProjectMember
 from app.models.saved_query import SavedQuery
 from app.services import data_source_profiler
 from app.services.analytical_method_engine.config import get_engine_mode
