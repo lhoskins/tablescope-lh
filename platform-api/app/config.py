@@ -166,6 +166,25 @@ class Settings(BaseSettings):
     business_context_v2_enabled: bool = True
     business_context_kpi_matching_enabled: bool = True
 
+    # --- Google Drive Spreadsheet connector (Increment 1: OAuth + file/tab/
+    # range discovery only. Live Teiid registration and AI-assisted
+    # multi-table detection are NOT gated by this flag -- they are not wired
+    # up yet; see the implementation plan.) ---
+    google_drive_connector_v1_enabled: bool = False
+    # Tablescope's own registered Google Cloud OAuth 2.0 client (one shared
+    # client for all tenants -- end users authorize Tablescope's app against
+    # their own Drive account, they do not register their own OAuth app).
+    google_drive_client_id: str = ""
+    google_drive_client_secret: str = ""
+    google_drive_redirect_uri: str = ""
+    # Read-only scopes only for this release (see plan section 12: "Use
+    # read-only provider access for this release; defer spreadsheet
+    # update/writeback").
+    google_drive_oauth_scopes: str = (
+        "https://www.googleapis.com/auth/drive.readonly "
+        "https://www.googleapis.com/auth/spreadsheets.readonly"
+    )
+
     # --- ServiceNow ITSM dashboards v2 ---
     # Global master switch. Roll out per tenant after the preset dashboards pass
     # regression and visual review.

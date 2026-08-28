@@ -103,6 +103,7 @@ from app.routes import scope_sets_builder as scope_sets_builder_routes
 from app.routes import scope_sets_crud as scope_sets_crud_routes
 from app.routes import scopes as scopes_routes
 from app.routes import sharing as sharing_routes
+from app.routes import spreadsheet_connections as spreadsheet_connections_routes
 from app.routes import storage as storage_routes
 from app.routes import tenant_data_planes_crud as tenant_data_planes_crud_routes
 from app.routes import tenant_data_planes_network as tenant_data_planes_network_routes
@@ -597,6 +598,7 @@ def create_app() -> FastAPI:
     app.include_router(scope_sets_crud_routes.router, prefix=api_prefix)
     app.include_router(scope_sets_builder_routes.router, prefix=api_prefix)
     app.include_router(sharing_routes.router, prefix=api_prefix)
+    app.include_router(spreadsheet_connections_routes.router, prefix=api_prefix)
     app.include_router(storage_routes.router, prefix=api_prefix)
     app.include_router(database_sources_connection_routes.router, prefix=api_prefix)
     app.include_router(
