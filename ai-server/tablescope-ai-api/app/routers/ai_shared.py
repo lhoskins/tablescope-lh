@@ -350,7 +350,7 @@ _TEIID_RULES_COMMON = (
     "PARSETIMESTAMP(\"OrderDate\", 'M/d/yyyy'); an ISO date like '2026-01-19' "
     'uses CAST("OrderDate" AS timestamp). Calling FORMATTIMESTAMP on a column '
     "that is already `date` (not `timestamp`) fails with TEIID30070 — a `date` "
-    "column goes straight to FORMATDATE, never through FORMATTIMESTAMP.\nBoth PARSETIMESTAMP and CAST(... AS timestamp) produce a `timestamp` value — use FORMATTIMESTAMP for the resulting bucket, not FORMATDATE. For a string `Date` column, the correct month bucket is FORMATTIMESTAMP(PARSETIMESTAMP("Date", 'yyyy-MM-dd'), 'yyyy-MM'); repeat the exact same expression in GROUP BY (not the alias). Calling FORMATDATE on a `timestamp` (or on a string without parsing) fails with TEIID30070.\n- "
+    "column goes straight to FORMATDATE, never through FORMATTIMESTAMP.\nBoth PARSETIMESTAMP and CAST(... AS timestamp) produce a `timestamp` value — use FORMATTIMESTAMP for the resulting bucket, not FORMATDATE. For a string `Date` column, the correct month bucket is FORMATTIMESTAMP(PARSETIMESTAMP(\"Date\", 'yyyy-MM-dd'), 'yyyy-MM'); repeat the exact same expression in GROUP BY (not the alias). Calling FORMATDATE on a `timestamp` (or on a string without parsing) fails with TEIID30070.\n- "
     "- To count days/months between two dates, NEVER subtract them "
     "(date1 - date2 raises TEIID30070) and NEVER wrap a subtraction in "
     "EXTRACT(DAY FROM ...). Use TIMESTAMPDIFF(SQL_TSI_DAY, <earlier>, <later>), "
