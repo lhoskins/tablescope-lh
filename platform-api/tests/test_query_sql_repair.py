@@ -95,3 +95,69 @@ async def test_other_errors_still_go_through_the_full_repair_loop(monkeypatch):
     assert result is None
     assert len(run_sql_calls) == 3
     assert len(repair_step_calls) == 2
+
+
+async def test_a_write_statement_never_reaches_teiid(monkeypatch):
+    """TS-ISO-002: every candidate SQL -- including the caller's original --
+    is authorized (read-only, table-allowlisted) before it ever reaches
+    _run_sql, not only on a rewrite after a Teiid failure."""
+    run_sql_calls: list[str] = []
+
+    async def fake_run_sql(**kwargs):
+        run_sql_calls.append(kwargs["sql"])
+        raise AssertionError("Teiid must never see an unauthorized statement")
+
+    monkeypatch.setattr("app.routes.query_sql_helpers._run_sql", fake_run_sql)
+
+    result, _final_sql, _bounded = await _execute_sql_with_repair(
+        raw_sql='DROP TABLE "t"',
+        tenant_id=1,
+        user_id=1,
+        project_id=1,
+        database="db",
+        endpoint=_FakeEndpoint(),
+        table_schema=[],
+        allowed_tables=["t"],
+        column_types={},
+        column_samples={},
+    )
+    assert result is None
+    assert run_sql_calls == []
+
+
+async def test_a_repair_rewrite_referencing_an_unauthorized_table_is_rejected(monkeypatch):
+    """A repair rewrite is itself untrusted AI output -- it gets the exact
+    same table-allowlist gate as the original SQL, not a free pass."""
+    run_sql_calls: list[str] = []
+
+    async def fake_run_sql(**kwargs):
+        run_sql_calls.append(kwargs["sql"])
+        raise HTTPException(status_code=500, detail="TEIID30999 some transient issue")
+
+    async def fake_repair_step(**kwargs):
+        return {
+            "action": "rewrite",
+            "sql": 'SELECT * FROM "someone_elses_project_table"',
+            "table": "",
+            "column": "",
+        }
+
+    monkeypatch.setattr("app.routes.query_sql_helpers._run_sql", fake_run_sql)
+    monkeypatch.setattr(aic, "repair_sql_step", fake_repair_step)
+
+    result, _final_sql, _bounded = await _execute_sql_with_repair(
+        raw_sql='SELECT * FROM "t"',
+        tenant_id=1,
+        user_id=1,
+        project_id=1,
+        database="db",
+        endpoint=_FakeEndpoint(),
+        table_schema=[],
+        allowed_tables=["t"],
+        column_types={},
+        column_samples={},
+    )
+    assert result is None
+    # The original SQL reached Teiid once (and failed with a real error);
+    # the unauthorized rewrite never did.
+    assert run_sql_calls == ['SELECT * FROM "t"']

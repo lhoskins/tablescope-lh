@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,10 +21,12 @@ from app.models.project import Project, ProjectMember
 from app.models.saved_query import SavedQuery
 from app.services.analytical_method_engine.config import get_engine_mode
 from app.services.analytical_method_engine.method_registry import catalog_status as analytical_catalog_status
+from app.services.internal_ai_auth import verify_internal_ai_request
 
 from .ai_proxy_schemas import (
     AIPermissionsResponse,
 )
+from .ai_proxy_shared import _authorize_project_access
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -71,43 +74,66 @@ async def ai_status(
         }
 
 
-@router.get("/permissions", response_model=AIPermissionsResponse)
+class AIPermissionsRequest(BaseModel):
+    """Signed request body -- see ``app.services.internal_ai_auth``.
+
+    ``tenant_id``/``user_id``/``project_id`` are the identifiers ai-server
+    resolved from the ORIGINAL (already-authenticated) user request that
+    triggered this AI call; they are trusted here only because the whole
+    payload carries a fresh, single-use HMAC signature only ai-server can
+    produce (see ``verify_internal_ai_request``) -- never on their own.
+    """
+
+    tenant_id: int
+    user_id: int
+    project_id: int
+    timestamp: float
+    signature: str = Field(min_length=1)
+
+
+@router.post("/permissions", response_model=AIPermissionsResponse)
 async def check_permissions(
-    tenant_id: int,
-    user_id: int,
-    project_id: int,
+    req: AIPermissionsRequest,
     session: AsyncSession = Depends(get_db),
 ) -> AIPermissionsResponse:
     """Called by the AI server to verify user permissions before building context.
 
-    Returns tenant/project membership info plus available datasources/queries.
-    This endpoint is NOT exposed to the frontend — only reachable from the
-    AI server's private network.
+    Returns tenant/project membership info plus available datasources/queries
+    -- but ONLY once the caller is authenticated (a valid, fresh, single-use
+    HMAC signature -- see ``internal_ai_auth``) AND authorized for this
+    project (owner or active member; a shared project is not automatically
+    tenant-wide, see ``_authorize_project_access``). Neither check is
+    optional or advisory: on failure this raises before any datasource,
+    query, asset, graph, KPI, or document row is ever loaded, and the error
+    is a constant, minimal 403 either way -- an unauthorized caller learns
+    nothing about whether the project exists, is shared, or who owns it.
     """
-    # Verify project exists in tenant
-    stmt = select(Project).where(
-        Project.id == project_id,
-        Project.tenant_id == tenant_id,
-    )
-    result = await session.execute(stmt)
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found",
-        )
+    await verify_internal_ai_request(req.model_dump())
+    tenant_id, user_id, project_id = req.tenant_id, req.user_id, req.project_id
 
-    # Check membership
-    is_owner = project.owner_id == user_id
-    is_member = is_owner
-    if not is_member:
-        member_stmt = select(ProjectMember).where(
-            ProjectMember.project_id == project_id,
-            ProjectMember.user_id == user_id,
-            ProjectMember.is_active.is_(True),
+    try:
+        project = await _authorize_project_access(
+            session, tenant_id=tenant_id, user_id=user_id, project_id=project_id
         )
-        member_result = await session.execute(member_stmt)
-        is_member = member_result.scalar_one_or_none() is not None
+    except HTTPException as exc:
+        # _authorize_project_access is shared with user-facing routes, where
+        # a descriptive reason ("private project, not the owner" vs "not
+        # found") is appropriate. This internal endpoint must not leak that
+        # distinction -- every denial (unauthorized OR nonexistent project)
+        # looks identical from the outside.
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden") from exc
+    is_owner = project.owner_id == user_id
+    is_member = is_owner or bool(
+        (
+            await session.execute(
+                select(ProjectMember).where(
+                    ProjectMember.project_id == project_id,
+                    ProjectMember.user_id == user_id,
+                    ProjectMember.is_active.is_(True),
+                )
+            )
+        ).scalar_one_or_none()
+    )
 
     # Fetch datasources (file_source_meta rows for this project)
     ds_stmt = select(FileSourceMeta).where(

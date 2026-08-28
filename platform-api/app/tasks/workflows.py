@@ -35,6 +35,7 @@ from app.models.shared_vdb import SharedVDB
 from app.models.user_vdb import UserVDB
 from app.services.aws_vpn_provisioning_service import AwsVpnProvisioningService
 from app.services.vdb_management import VDBManagementService
+from app.tasks.google_drive_token_refresh import refresh_google_drive_tokens
 from app.tasks.kpi_source_matching import match_kpi_data_source
 from app.tasks.llm_framework import (
     convert_fp16_to_gguf,
@@ -1500,6 +1501,7 @@ class WorkerSettings:
         rebuild_project_insight,
         schedule_stale_insight_refresh,
         refresh_quickbooks_tokens,
+        refresh_google_drive_tokens,
         match_kpi_data_source,
         stage_llm_artifact,
         deploy_llm_artifact,
@@ -1522,6 +1524,11 @@ class WorkerSettings:
         cron(refresh_quickbooks_tokens, minute=15, second=15),
         cron(refresh_quickbooks_tokens, minute=30, second=15),
         cron(refresh_quickbooks_tokens, minute=45, second=15),
+        # Refresh Google Drive OAuth2 tokens every 15 minutes.
+        cron(refresh_google_drive_tokens, minute=0, second=20),
+        cron(refresh_google_drive_tokens, minute=15, second=20),
+        cron(refresh_google_drive_tokens, minute=30, second=20),
+        cron(refresh_google_drive_tokens, minute=45, second=20),
     ]
     # Must exceed home_intelligence_project_analysis_timeout_seconds: a job
     # killed by arq writes no result and permanently stalls its run, so the

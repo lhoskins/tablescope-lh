@@ -24,6 +24,7 @@ from app.models.user_vdb import UserVDB
 from app.routes.tenants_crud import _require_user_management
 from app.schemas.tenant import UserCreate, UserRead, UserUpdate
 from app.services.allowed_domains import enforce_allowed_domain
+from app.services.crypto import encrypt_secret
 from app.services.customer_folders import CustomerFolderService
 from app.services.email_service import EmailService
 from app.services.supabase_auth_service import (
@@ -147,7 +148,7 @@ async def create_user(
             user_id=user.id,
             vdb_id=vdb_result.vdb_id,
             vdb_username=vdb_result.vdb_username,
-            encrypted_password=vdb_result.vdb_password,
+            encrypted_password=encrypt_secret(vdb_result.vdb_password),
             vdb_host=vdb_result.vdb_host,
             vdb_port=vdb_result.vdb_port,
             is_active=True,

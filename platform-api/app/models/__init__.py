@@ -133,6 +133,10 @@ from app.models.saved_query import SavedQuery
 from app.models.scope_canvas_layout import ScopeCanvasLayout
 from app.models.scope_set import ScopeSet
 from app.models.shared_vdb import SharedVDB
+from app.models.spreadsheet_table_mapping import (
+    SpreadsheetColumnMapping,
+    SpreadsheetTableMapping,
+)
 from app.models.tenant import Tenant, TenantAllowedDomain
 from app.models.tenant_ai_governance import (
     TenantAIGovernancePolicy,
@@ -185,10 +189,10 @@ __all__ = [
     "DataSourceTag",
     "DatabaseConnection",
     "DatabaseDataSource",
+    "DatabaseDataSourceAssignment",
     "DirectoryDerivedGrant",
     "DirectoryGroupRoleMapping",
     "DirectorySyncRun",
-    "DatabaseDataSourceAssignment",
     "FileImportJob",
     "FileSourceMeta",
     "FileSourceVersion",
@@ -201,7 +205,6 @@ __all__ = [
     "KnowledgeGraphBuild",
     "KnowledgeGraphHealthCheck",
     "KnowledgeGraphVersion",
-    "LdapConnection",
     "LLMArtifactFile",
     "LLMAuditEvent",
     "LLMDeployment",
@@ -210,6 +213,7 @@ __all__ = [
     "LLMModelArtifact",
     "LLMRoutingProfile",
     "LLMRuntimeTarget",
+    "LdapConnection",
     "MethodCatalog",
     "MethodCatalogAuditLog",
     "MethodCatalogVersion",
@@ -251,16 +255,18 @@ __all__ = [
     "ScopeCanvasLayout",
     "ScopeSet",
     "SharedVDB",
+    "SpreadsheetColumnMapping",
+    "SpreadsheetTableMapping",
     "SubscriptionTierCatalog",
     "Tenant",
     "TenantAIGovernancePolicy",
-    "TenantEnterpriseAuthSettings",
     "TenantAIMethodPolicy",
     "TenantAllowedDomain",
     "TenantAuthBinding",
     "TenantCustomKPI",
     "TenantCustomTag",
     "TenantDataPlane",
+    "TenantEnterpriseAuthSettings",
     "TenantMembership",
     "TenantProvisioningRequest",
     "TenantReferenceCatalog",

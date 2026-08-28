@@ -8,11 +8,24 @@ from __future__ import annotations
 import asyncio
 import json
 
+import pytest
+
 import app.routers.ai as ai
+import app.routers.ai_intelligence_repair_step as repair_step_module
 from app.models.schemas import (
     IntelligenceRepairSQLStepRequest,
     RepairSQLColumnKnowledge,
 )
+
+
+@pytest.fixture(autouse=True)
+def _skip_signature_verification(monkeypatch):
+    """These tests exercise the repair-decision logic, not HMAC verification
+    (see test_llm_client_openai_target.py / core/security.py for that) --
+    verify_signature now correctly rejects an unsigned/empty-secret request
+    instead of silently skipping it (TS-ISO-007), so tests that don't set up
+    a real signature must bypass it explicitly."""
+    monkeypatch.setattr(repair_step_module, "verify_signature", lambda *a, **k: None)
 
 
 def _capture_generate(monkeypatch, response: str) -> dict:

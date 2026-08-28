@@ -19,12 +19,14 @@ Required flow:
 """
 
 import logging
+import time
 import uuid
 from typing import Any
 
 import httpx
 
 from app.core.config import settings
+from app.core.security import sign_request
 from app.models.schemas import ContextPackage, GroundingEvidence
 from app.services import llm_client, vector_store
 
@@ -52,16 +54,24 @@ async def _verify_permissions(
 
     Returns permission context including project membership and metadata.
     """
-    # Call Tablescope app server to verify permissions
+    # Call Tablescope app server to verify permissions. Signed the same way
+    # every platform-api -> ai-server call is (see core/security.py) so the
+    # endpoint can authenticate ai-server as the caller instead of trusting
+    # whatever tenant/user/project ids show up in the request -- see
+    # platform-api's app.services.internal_ai_auth for the verifying side
+    # (TS-ISO-001).
     try:
+        payload = {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "project_id": project_id,
+            "timestamp": time.time(),
+        }
+        payload["signature"] = sign_request(payload)
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            resp = await client.get(
+            resp = await client.post(
                 f"{settings.tablescope_app_url}/api/ai/permissions",
-                params={
-                    "tenant_id": tenant_id,
-                    "user_id": user_id,
-                    "project_id": project_id,
-                },
+                json=payload,
             )
             if resp.status_code == 200:
                 return resp.json()

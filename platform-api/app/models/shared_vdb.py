@@ -41,7 +41,15 @@ class SharedVDB(TimestampMixin, Base):
         return f"postgresql://{self.vdb_host}:{self.vdb_port}/{vdb_name_with_version}"
 
     def get_decrypted_password(self) -> str:
-        return self.encrypted_password
+        """Decrypt the stored VDB password (TS-ISO-008) -- see
+        UserVDB.get_decrypted_password's docstring for the full rationale
+        of the plaintext-fallback dual-read."""
+        from app.services.crypto import decrypt_secret
+
+        try:
+            return decrypt_secret(self.encrypted_password)
+        except Exception:
+            return self.encrypted_password
 
     def to_dict(self, include_credentials: bool = False) -> dict:
         data: dict = {

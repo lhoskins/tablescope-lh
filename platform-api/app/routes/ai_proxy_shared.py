@@ -94,15 +94,28 @@ async def _forward_to_ai(path: str, payload: dict[str, Any]) -> dict[str, Any]:
             ) from e
 
 
-async def _check_project_access(
+async def _authorize_project_access(
     session: AsyncSession,
-    context: RequestContext,
+    *,
+    tenant_id: int,
+    user_id: int,
     project_id: int,
 ) -> Project:
-    """Verify user has access to the project within their tenant."""
+    """Verify ``user_id`` has access to ``project_id`` within ``tenant_id``.
+
+    The id-based core of the project access check (TS-ISO-003's "strongest
+    existing pattern"), factored out so callers that don't have a full
+    ``RequestContext`` -- e.g. an internal callback authenticated by HMAC
+    signature instead of a user JWT, see ``ai_proxy_permissions.py`` -- can
+    reuse the exact same rule instead of re-implementing it. A shared
+    project requires OWNERSHIP OR ACTIVE MEMBERSHIP, not merely same-tenant:
+    ``is_shared`` controls discoverability/presentation, not automatic
+    tenant-wide authorization (see the isolation security assessment's
+    authoritative access policy).
+    """
     stmt = select(Project).where(
         Project.id == project_id,
-        Project.tenant_id == context.tenant_id,
+        Project.tenant_id == tenant_id,
     )
     result = await session.execute(stmt)
     project = result.scalar_one_or_none()
@@ -112,29 +125,41 @@ async def _check_project_access(
             detail="Project not found in your tenant",
         )
 
-    # Check membership for shared projects
-    if project.is_shared:
-        member_stmt = select(ProjectMember).where(
-            ProjectMember.project_id == project_id,
-            ProjectMember.user_id == context.user_id,
-            ProjectMember.is_active.is_(True),
-        )
-        member_result = await session.execute(member_stmt)
-        if not member_result.scalar_one_or_none():
-            if project.owner_id != context.user_id:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="You are not a member of this project",
-                )
-    else:
-        # Private project — owner only
-        if project.owner_id != context.user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="This is a private project and you are not the owner",
-            )
+    if project.owner_id == user_id:
+        return project
 
-    return project
+    member_stmt = select(ProjectMember).where(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == user_id,
+        ProjectMember.is_active.is_(True),
+    )
+    member_result = await session.execute(member_stmt)
+    if member_result.scalar_one_or_none():
+        return project
+
+    if project.is_shared:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not a member of this project",
+        )
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="This is a private project and you are not the owner",
+    )
+
+
+async def _check_project_access(
+    session: AsyncSession,
+    context: RequestContext,
+    project_id: int,
+) -> Project:
+    """Verify user has access to the project within their tenant."""
+    return await _authorize_project_access(
+        session,
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        project_id=project_id,
+    )
 
 
 def _detect_datasource(sql: str, allowed_tables: list[str]) -> str | None:

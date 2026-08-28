@@ -10,12 +10,23 @@ from __future__ import annotations
 import asyncio
 import json
 
+import pytest
+
 import app.routers.ai as ai
+import app.routers.ai_intelligence_investigate_step as investigate_step_module
 from app.models.schemas import (
     IntelligenceInvestigateStepRequest,
     InvestigationStepResult,
 )
 from app.routers.ai_ask import _format_data_result
+
+
+@pytest.fixture(autouse=True)
+def _skip_signature_verification(monkeypatch):
+    """See test_repair_sql_step.py's identical fixture: verify_signature no
+    longer skips verification for an empty/unset secret (TS-ISO-007), so
+    tests that don't set up a real signature must bypass it explicitly."""
+    monkeypatch.setattr(investigate_step_module, "verify_signature", lambda *a, **k: None)
 
 
 def _capture_generate(monkeypatch, response: str) -> dict:

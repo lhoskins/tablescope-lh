@@ -29,6 +29,7 @@ from app.schemas.tenant_data_plane import (
     TenantDataPlaneCreate,
     TenantDataPlaneRead,
 )
+from app.services.crypto import encrypt_secret
 from app.services.customer_folders import CustomerFolderError, CustomerFolderService
 from app.services.tenant_deletion_service import (
     delete_tenant_folders,
@@ -90,7 +91,7 @@ async def _provision_vdbs_for_tenant(
             tenant_id=org_tenant_id,
             vdb_id=shared_result.vdb_id,
             vdb_username=shared_result.vdb_username,
-            encrypted_password=shared_result.vdb_password,
+            encrypted_password=encrypt_secret(shared_result.vdb_password),
             vdb_host=shared_result.vdb_host,
             vdb_port=shared_result.vdb_port,
             is_active=True,
@@ -117,7 +118,7 @@ async def _provision_vdbs_for_tenant(
             user_id=user_id,
             vdb_id=user_result.vdb_id,
             vdb_username=user_result.vdb_username,
-            encrypted_password=user_result.vdb_password,
+            encrypted_password=encrypt_secret(user_result.vdb_password),
             vdb_host=user_result.vdb_host,
             vdb_port=user_result.vdb_port,
             is_active=True,

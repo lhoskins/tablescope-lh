@@ -249,8 +249,22 @@ async def direct_login(
         if tenant is None:
             raise HTTPException(status_code=401, detail="Invalid email or password")
         query = query.where(User.tenant_id == tenant.id)
+        user = await session.scalar(query)
+    else:
+        # TS-ISO-015: email is unique per-tenant, not globally -- without a
+        # tenant_slug, a shared email across tenants previously resolved to
+        # an arbitrary (DB-order-dependent) row via plain session.scalar(),
+        # checking the password against whichever user happened to come
+        # back first. Require the tenant explicitly whenever more than one
+        # account shares this email instead of guessing.
+        candidates = (await session.scalars(query)).all()
+        if len(candidates) > 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Multiple accounts found for this email. Please specify your organization.",
+            )
+        user = candidates[0] if candidates else None
 
-    user = await session.scalar(query)
     if user is None or not user.verify_password(payload.password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
