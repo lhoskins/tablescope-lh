@@ -52,7 +52,24 @@ class UserVDB(TimestampMixin, Base):
         return f"postgresql://{self.vdb_host}:{self.vdb_port}/{vdb_name_with_version}"
 
     def get_decrypted_password(self) -> str:
-        return self.encrypted_password
+        """Decrypt the stored VDB password.
+
+        TS-ISO-008: this field used to be named "encrypted" but was written
+        and returned as plain text. New rows are genuinely Fernet-encrypted
+        (see the write sites in tenants_crud.py, tenants_users.py,
+        tenant_data_planes_crud.py, tenant_onboarding_service.py,
+        project_sharing.py). A row written before this fix still holds
+        plaintext, which is not valid Fernet ciphertext and fails to
+        decrypt -- fall back to returning it as-is (dual-read) so existing
+        connections keep working until the backfill migration re-encrypts
+        it; never write plaintext going forward.
+        """
+        from app.services.crypto import decrypt_secret
+
+        try:
+            return decrypt_secret(self.encrypted_password)
+        except Exception:
+            return self.encrypted_password
 
     def to_dict(self, include_credentials: bool = False) -> dict:
         data: dict = {

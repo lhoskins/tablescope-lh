@@ -30,6 +30,7 @@ from app.models.tenant_membership import TenantMembership
 from app.models.user import User
 from app.models.user_vdb import UserVDB
 from app.services import billing_audit as audit
+from app.services.crypto import encrypt_secret
 from app.services.email_service import EmailService
 from app.services.supabase_auth_service import SupabaseAuthService
 from app.services.tenant_provisioning_service import (
@@ -300,7 +301,7 @@ class TenantOnboardingService:
                         tenant_id=tenant.id,
                         vdb_id=shared_result.vdb_id,
                         vdb_username=shared_result.vdb_username,
-                        encrypted_password=shared_result.vdb_password,
+                        encrypted_password=encrypt_secret(shared_result.vdb_password),
                         vdb_host=shared_result.vdb_host,
                         vdb_port=shared_result.vdb_port,
                         is_active=True,
@@ -343,7 +344,7 @@ class TenantOnboardingService:
                         user_id=root_user.id,
                         vdb_id=user_result.vdb_id,
                         vdb_username=user_result.vdb_username,
-                        encrypted_password=user_result.vdb_password,
+                        encrypted_password=encrypt_secret(user_result.vdb_password),
                         vdb_host=user_result.vdb_host,
                         vdb_port=user_result.vdb_port,
                         is_active=True,

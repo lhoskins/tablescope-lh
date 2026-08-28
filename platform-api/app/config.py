@@ -77,6 +77,10 @@ class Settings(BaseSettings):
 
     sentry_dsn: str = ""
     prometheus_enabled: bool = True
+    # When set, /metrics requires a matching X-Metrics-Token header instead
+    # of being fully anonymous (TS-ISO-018). Configure the scrape job with
+    # this same value; leave unset only for local development.
+    metrics_access_token: str = ""
 
     cors_allow_origins: str = "*"
 

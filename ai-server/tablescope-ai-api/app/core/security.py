@@ -30,9 +30,20 @@ def sign_request(payload: dict[str, Any]) -> str:
 
 
 def verify_signature(payload: dict[str, Any], signature: str) -> None:
-    """Verify HMAC signature. Raises 403 if invalid."""
+    """Verify HMAC signature. Raises 403 if invalid.
+
+    An empty secret must never silently disable verification -- that is
+    exactly the failure mode this function used to have (TS-ISO-007): it
+    turned "the operator forgot to configure a secret" into "every request
+    is accepted, signed or not." Deployments (including local dev, via
+    docker-compose's shared default) must set a real, non-empty
+    AI_SIGNING_SECRET; there is no unsigned fallback.
+    """
     if not settings.ai_signing_secret:
-        return  # Skip verification if no secret configured (dev mode)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="AI_SIGNING_SECRET is not configured",
+        )
 
     # Check timestamp freshness
     timestamp = payload.get("timestamp", 0)

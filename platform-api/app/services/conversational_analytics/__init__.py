@@ -17,7 +17,10 @@ from app.services.ai_intelligence_client import AIUnavailableError as AIUnavaila
 from app.services.business_insight_project_resolver import (
     resolve_business_insight_project,
 )
-from app.services.chat_attachment_adapter import build_attachment_context
+from app.services.chat_attachment_adapter import (
+    AttachmentAuthorizationError,
+    build_attachment_context,
+)
 from app.services.insight_card_match import (
     _extract_terms as _extract_insight_terms,
 )
@@ -399,9 +402,15 @@ async def execute_turn(
         prior_turn = await session.get(AnalyticsConversationTurn, conversation.last_successful_turn_id)
     question = turn.user_message
 
-    attachment_context = await build_attachment_context(
-        session, context.tenant_id, attachment_ids or []
-    )
+    try:
+        attachment_context = await build_attachment_context(
+            session, context.tenant_id, context.user_id, conversation.id, attachment_ids or []
+        )
+    except AttachmentAuthorizationError as exc:
+        turn.status = "error"
+        turn.error_code = "attachment_unauthorized"
+        turn.assistant_message = str(exc)
+        return
     if attachment_ids:
         from sqlalchemy import update
         await session.execute(

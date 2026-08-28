@@ -148,6 +148,13 @@ async def _check_project_access(session: AsyncSession, context: RequestContext, 
         select(ProjectMember).where(
             ProjectMember.project_id == project_id,
             ProjectMember.user_id == context.user_id,
+            # TS-ISO-009: the sole membership check in this codebase that
+            # accepted a deactivated/removed ProjectMember row -- every
+            # other one filters on is_active (see ai_proxy_shared.py,
+            # project_insight.py, project_actions_shared.py,
+            # home_intelligence_suggestions.py). A removed member kept
+            # conversational-analytics access to the project indefinitely.
+            ProjectMember.is_active.is_(True),
         )
     )
     if member is not None:

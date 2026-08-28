@@ -21,6 +21,7 @@ from app.auth.context import RequestContext
 from app.models.project import Project
 from app.models.shared_vdb import SharedVDB
 from app.models.user import User
+from app.services.crypto import encrypt_secret
 from app.services.customer_folders import CustomerFolderError, CustomerFolderService
 from app.services.vdb_management import (
     VDBManagementService,
@@ -98,7 +99,7 @@ class ProjectSharingService:
                 tenant_id=project.tenant_id,
                 vdb_id=provision.vdb_id,
                 vdb_username=provision.vdb_username,
-                encrypted_password=provision.vdb_password,
+                encrypted_password=encrypt_secret(provision.vdb_password),
                 vdb_host=provision.vdb_host,
                 vdb_port=provision.vdb_port,
                 is_active=True,

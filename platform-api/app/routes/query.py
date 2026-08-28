@@ -18,6 +18,7 @@ from app.auth.context import RequestContext
 from app.auth.membership import require_membership
 from app.auth.rbac import Role, require_role
 from app.database import SessionLocal
+from app.routes.ai_proxy_shared import _authorize_project_access
 from app.routes.dashboards_widget_query import WidgetFilter, _build_where
 from app.routes.query_sql_helpers import (
     _auto_cast_aggregates,
@@ -206,6 +207,18 @@ async def query_datasource(
     # platform-api for remote file proxies.
     project_id = payload.project_id
     async with SessionLocal() as session:
+        if project_id is not None:
+            # Authorize BEFORE any VDB routing decision: a shared project
+            # routes queries to the OWNER's VDB, so without this check any
+            # same-tenant VIEWER could supply another user's shared
+            # project_id and have their SQL executed against that VDB with
+            # no membership check at all (TS-ISO-002).
+            await _authorize_project_access(
+                session,
+                tenant_id=context.tenant_id,
+                user_id=context.user_id,
+                project_id=project_id,
+            )
         database = await _resolve_vdb_database(
             session=session, context=context, project_id=project_id
         )
@@ -261,6 +274,11 @@ async def query_datasource(
             offset=payload.offset,
         )
     else:
+        if project_id is not None and allowed_tables and payload.tableName not in allowed_tables:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Unauthorized table reference: {payload.tableName}",
+            )
         final_sql = f'SELECT * FROM "{payload.tableName}" LIMIT {payload.limit} OFFSET {payload.offset}'
         result = await _run_sql(
             database=database,

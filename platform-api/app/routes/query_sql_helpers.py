@@ -20,6 +20,7 @@ from app.auth.context import RequestContext
 from app.config import get_settings
 from app.models.user_vdb import UserVDB
 from app.services.connection_pool import pool_manager
+from app.services.sql_authorization import SQLAuthorizationError, authorize_sql
 from app.services.sql_repair_agent import run_repair_loop
 from app.services.teiid_sql import (
     normalize_teiid_identifiers,
@@ -408,6 +409,14 @@ async def _execute_sql_with_repair(
         )
 
     async def _execute(candidate: str) -> dict[str, Any]:
+        # Authorize EVERY attempt, not only the caller's original SQL: a
+        # repair rewrite is itself untrusted (AI-generated from a failing
+        # query) and must pass the same read-only + table-allowlist gate
+        # immediately before it, too, ever reaches Teiid (TS-ISO-002).
+        try:
+            authorize_sql(candidate, allowed_tables)
+        except SQLAuthorizationError as exc:
+            raise HTTPException(status_code=400, detail=exc.reason) from exc
         bounded = _apply_pagination(candidate, limit, offset)
         return await _run_sql(
             database=database,

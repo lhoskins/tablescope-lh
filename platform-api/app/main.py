@@ -515,6 +515,28 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     settings = get_settings()
 
+    # TS-ISO-007: an empty signing secret must never mean "every internal
+    # ai-server<->platform-api call is accepted unsigned" -- that was
+    # exactly the prior failure mode (see ai-server's core/security.py and
+    # this app's internal_ai_auth.py, both of which now fail closed on an
+    # empty secret at request time too). Refuse to even start in production
+    # so the gap can never go live silently.
+    if settings.environment == "production" and not settings.tablescope_ai_signing_secret:
+        raise RuntimeError(
+            "TABLESCOPE_AI_SIGNING_SECRET must be set in production -- it "
+            "authenticates every ai-server <-> platform-api internal call."
+        )
+    # TS-ISO-018: CORS_ALLOW_ORIGINS defaults to "*" for local development.
+    # Combined with allow_credentials=True below, a wildcard origin is
+    # exploitable (Starlette echoes the request Origin back rather than a
+    # literal "*" whenever credentials are allowed) -- require an explicit
+    # origin allowlist in production instead.
+    if settings.environment == "production" and settings.cors_allow_origins.strip() in ("", "*"):
+        raise RuntimeError(
+            "CORS_ALLOW_ORIGINS must be set to an explicit comma-separated "
+            "origin allowlist in production, not left as the wildcard default."
+        )
+
     app = FastAPI(
         title="Tablescope Platform API",
         version=__version__,

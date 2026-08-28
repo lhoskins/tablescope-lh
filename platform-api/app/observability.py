@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hmac
 import logging
+import time
 
 from fastapi import FastAPI
 from prometheus_client import (
@@ -59,12 +61,28 @@ def mount_metrics(app: FastAPI) -> None:
     @app.middleware("http")
     async def _record_metrics(request: Request, call_next):
         method = request.method
-        path = request.url.path
-        with request_latency.labels(method=method, path=path).time():
-            response = await call_next(request)
+        start = time.monotonic()
+        response = await call_next(request)
+        elapsed = time.monotonic() - start
+        # Label by the matched ROUTE TEMPLATE (e.g. "/api/projects/{id}"),
+        # not the raw resolved path -- the raw path embeds tenant/project/
+        # user IDs straight into label values (TS-ISO-018), which both
+        # leaks them to anyone who can read /metrics and creates unbounded
+        # label cardinality (a new label per distinct ID ever requested).
+        # The route is only set on request.scope AFTER routing, i.e. after
+        # call_next() above -- so timing must be measured manually here
+        # instead of via the usual `with histogram.time():` wrapper.
+        route = request.scope.get("route")
+        path = getattr(route, "path", None) or "unmatched"
+        request_latency.labels(method=method, path=path).observe(elapsed)
         request_counter.labels(method=method, path=path, status=str(response.status_code)).inc()
         return response
 
     @app.get("/metrics", include_in_schema=False)
-    async def metrics() -> Response:
+    async def metrics(request: Request) -> Response:
+        settings = get_settings()
+        if settings.metrics_access_token:
+            provided = request.headers.get("X-Metrics-Token", "")
+            if not hmac.compare_digest(provided, settings.metrics_access_token):
+                return Response(status_code=404)
         return Response(generate_latest(REGISTRY), media_type=CONTENT_TYPE_LATEST)
