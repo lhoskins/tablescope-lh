@@ -1,7 +1,8 @@
 """Detect rectangular tables inside a Google Sheet for Workstream D.
 
 Uses the live Sheet's grid dimensions, fetches the candidate range with
-UNFORMATTED_VALUE, and returns a proposed ``SpreadsheetTableMapping`` shape.
+UNFORMATTED_VALUE, finds disjoint rectangular bands of non-empty cells, and
+returns a proposed ``SpreadsheetTableMapping`` shape for each discovered table.
 """
 
 from __future__ import annotations
@@ -91,16 +92,138 @@ def _detect_used_range(values: list[list[Any]]) -> tuple[int, int, int, int, lis
     return first_row, last_row, first_col, last_col, headers, data_rows
 
 
+def _find_table_regions(values: list[list[Any]]) -> list[tuple[int, int, int, int]]:
+    """Find disjoint rectangular regions separated by empty rows/columns.
+
+    Each region is a tuple ``(start_row, end_row, start_col, end_col)`` in
+    0-based indices.  The matrix is padded so every row has the same width.
+    """
+    if not values:
+        return []
+
+    n_rows = len(values)
+    n_cols = max((len(row) for row in values), default=0)
+    padded = [row + [None] * (n_cols - len(row)) for row in values]
+
+    # Row bands: consecutive non-empty rows.
+    row_nonempty = [any(_is_non_empty(c) for c in r) for r in padded]
+    row_bands: list[tuple[int, int]] = []
+    start: int | None = None
+    for r_idx, ne in enumerate(row_nonempty):
+        if ne and start is None:
+            start = r_idx
+        if not ne and start is not None:
+            row_bands.append((start, r_idx - 1))
+            start = None
+    if start is not None:
+        row_bands.append((start, n_rows - 1))
+
+    # For each row band, split by completely empty columns within that band.
+    regions: list[tuple[int, int, int, int]] = []
+    for r_start, r_end in row_bands:
+        col_nonempty = [
+            any(_is_non_empty(padded[r][c]) for r in range(r_start, r_end + 1))
+            for c in range(n_cols)
+        ]
+        c_start: int | None = None
+        for c_idx, ne in enumerate(col_nonempty):
+            if ne and c_start is None:
+                c_start = c_idx
+            if not ne and c_start is not None:
+                regions.append((r_start, r_end, c_start, c_idx - 1))
+                c_start = None
+        if c_start is not None:
+            regions.append((r_start, r_end, c_start, n_cols - 1))
+
+    return regions
+
+
+def _build_columns(
+    first_col: int,
+    headers: list[str],
+    data_rows: list[list[Any]],
+) -> list[dict[str, Any]]:
+    """Build column metadata from a region's headers and data rows."""
+    columns: list[dict[str, Any]] = []
+    seen_relational_names: dict[str, int] = {}
+    for offset, header in enumerate(headers):
+        abs_col = first_col + offset
+        sample = [
+            row[offset] if offset < len(row) else None
+            for row in data_rows
+        ]
+        classification = _classify(header or "", [str(v) for v in sample])
+        teiid_type = _teiid_type_for(header or "", classification, sample)
+        base_rel_name = sanitize_identifier(header or f"Column_{abs_col + 1}")
+        count = seen_relational_names.get(base_rel_name, 0) + 1
+        seen_relational_names[base_rel_name] = count
+        relational_name = base_rel_name if count == 1 else f"{base_rel_name}_{count}"
+        columns.append(
+            {
+                "ordinal": abs_col,
+                "source_label": header or f"Column_{abs_col + 1}",
+                "physical_column_ref": _column_letter(abs_col + 1),
+                "relational_name": relational_name,
+                "teiid_type": teiid_type,
+                "classification": classification,
+            }
+        )
+    return columns
+
+
+def _build_table(
+    table_index: int,
+    file_name: str,
+    sheet_name: str,
+    padded_values: list[list[Any]],
+    region: tuple[int, int, int, int],
+    detection_method: str,
+) -> dict[str, Any]:
+    """Build a single table proposal from a discovered region."""
+    r_start, r_end, c_start, c_end = region
+    region_rows = [row[c_start : c_end + 1] for row in padded_values[r_start : r_end + 1]]
+
+    first_row, last_row, first_col, last_col, headers, data_rows = _detect_used_range(region_rows)
+
+    abs_first_row = r_start + first_row
+    abs_last_row = r_start + last_row
+    abs_first_col = c_start + first_col
+    abs_last_col = c_start + last_col
+
+    start_a1 = f"{_column_letter(abs_first_col + 1)}{abs_first_row + 1}"
+    end_a1 = f"{_column_letter(abs_last_col + 1)}{abs_last_row + 1}"
+    range_a1 = f"{_quote_sheet_name(sheet_name)}!{start_a1}:{end_a1}"
+
+    table_name = sheet_name if table_index == 0 and detection_method == "single_table_fallback" else f"{sheet_name} Table {table_index + 1}"
+
+    columns = _build_columns(abs_first_col, headers, data_rows)
+    fingerprint = hashlib.sha256(
+        json.dumps(headers, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+    return {
+        "file_name": file_name,
+        "sheet_name": sheet_name,
+        "table_name": table_name,
+        "range_a1": range_a1,
+        "header_row_index": abs_first_row,
+        "data_start_row_index": abs_first_row + 1,
+        "anchor_fingerprint": fingerprint,
+        "detection_method": detection_method,
+        "columns": columns,
+    }
+
+
 async def detect_google_sheet_tables(
     client: GoogleDriveClient,
     file_id: str,
     sheet_name: str | None = None,
     max_rows: int = 1000,
-) -> dict[str, Any]:
-    """Return a single-table fallback proposal for the requested sheet.
+) -> list[dict[str, Any]]:
+    """Return one or more rectangular table proposals for the requested sheet.
 
-    The result is a plain dict; the caller persists ``SpreadsheetTableMapping``
-    and ``SpreadsheetColumnMapping`` rows.
+    The result is a list of plain dicts; the caller persists
+    ``SpreadsheetTableMapping`` and ``SpreadsheetColumnMapping`` rows.
     """
     meta = await client.get_file_metadata(file_id)
     file_name = meta.get("name") or file_id
@@ -128,48 +251,22 @@ async def detect_google_sheet_tables(
     range_a1 = f"{_quote_sheet_name(title)}!{start}:{end}"
 
     values = await client.get_range_values(file_id, range_a1)
-    first_row, last_row, first_col, last_col, headers, data_rows = _detect_used_range(values)
+    if not values:
+        raise GoogleDriveError("Sheet appears to be empty.")
 
-    columns = []
-    seen_relational_names: dict[str, int] = {}
-    for offset, header in enumerate(headers):
-        abs_col = first_col + offset
-        sample = [
-            row[offset] if offset < len(row) else None
-            for row in data_rows
-        ]
-        classification = _classify(header or "", [str(v) for v in sample])
-        teiid_type = _teiid_type_for(header or "", classification, sample)
-        base_rel_name = sanitize_identifier(header or f"Column_{abs_col + 1}")
-        count = seen_relational_names.get(base_rel_name, 0) + 1
-        seen_relational_names[base_rel_name] = count
-        relational_name = base_rel_name if count == 1 else f"{base_rel_name}_{count}"
-        columns.append(
-            {
-                "ordinal": abs_col,
-                "source_label": header or f"Column_{abs_col + 1}",
-                "physical_column_ref": _column_letter(abs_col + 1),
-                "relational_name": relational_name,
-                "teiid_type": teiid_type,
-                "classification": classification,
-            }
-        )
+    n_cols = max((len(row) for row in values), default=0)
+    padded = [row + [None] * (n_cols - len(row)) for row in values]
 
-    header_row_index = first_row
-    data_start_row_index = first_row + 1
-    end_a1 = f"{_column_letter(last_col + 1)}{last_row + 1}"
-    final_range_a1 = f"{_quote_sheet_name(title)}!{_column_letter(first_col + 1)}{first_row + 1}:{end_a1}"
+    regions = _find_table_regions(padded)
+    if not regions:
+        raise GoogleDriveError("Sheet appears to be empty.")
 
-    fingerprint = hashlib.sha256(json.dumps(headers, sort_keys=True).encode("utf-8")).hexdigest()
+    if len(regions) == 1:
+        methods = ["single_table_fallback"]
+    else:
+        methods = ["banded_range"] * len(regions)
 
-    return {
-        "file_name": file_name,
-        "sheet_name": title,
-        "table_name": title,
-        "range_a1": final_range_a1,
-        "header_row_index": header_row_index,
-        "data_start_row_index": data_start_row_index,
-        "anchor_fingerprint": fingerprint,
-        "detection_method": "single_table_fallback",
-        "columns": columns,
-    }
+    return [
+        _build_table(i, file_name, title, padded, region, methods[i])
+        for i, region in enumerate(regions)
+    ]
