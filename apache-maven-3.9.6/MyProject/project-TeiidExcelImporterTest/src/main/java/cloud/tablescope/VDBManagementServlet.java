@@ -858,6 +858,7 @@ public class VDBManagementServlet extends HttpServlet {
         boolean isServiceNow = "servicenow".equalsIgnoreCase(translator);
         boolean isSalesforce = WildFlyCliHelper.isSalesforceTranslator(translator);
         boolean isCustomTranslator = "hubspot".equalsIgnoreCase(translator) || "quickbooks".equalsIgnoreCase(translator);
+        boolean isGoogleSpreadsheet = "google-spreadsheet".equalsIgnoreCase(translator);
         boolean force = body.optBoolean("force", false);
         String instanceUrl = body.optString("instance_url", isServiceNow || isSalesforce || isCustomTranslator ? jdbcUrl : "");
         if (isSalesforce) {
@@ -865,6 +866,9 @@ public class VDBManagementServlet extends HttpServlet {
         }
         String realmId = body.optString("realm_id", "");
         String environment = body.optString("environment", "production");
+        String spreadsheetId = body.optString("spreadsheet_id", "");
+        String clientId = body.optString("client_id", "");
+        String clientSecret = body.optString("client_secret", "");
 
         String teiidHost = body.optString("teiid_host", "localhost");
         int teiidPort = body.has("teiid_port") ? body.getInt("teiid_port") : 9990;
@@ -905,7 +909,9 @@ public class VDBManagementServlet extends HttpServlet {
 
         try {
             // 2. Ensure the WildFly JDBC datasource or JCA connection factory exists.
-            if (isSalesforce) {
+            if (isGoogleSpreadsheet) {
+                WildFlyCliHelper.ensureGoogleSpreadsheetConnectionFactory(dsName, spreadsheetId, password, clientId, clientSecret, "");
+            } else if (isSalesforce) {
                 WildFlyCliHelper.ensureSalesforceConnectionFactory(dsName, translator, instanceUrl, username, password);
             } else if (!isServiceNow && !isCustomTranslator) {
                 WildFlyCliHelper.ensureDataSource(dsName, dbType, jdbcUrl, username, password);
@@ -924,6 +930,9 @@ public class VDBManagementServlet extends HttpServlet {
                 if (isSalesforce) {
                     WildFlyCliHelper.removeSalesforceConnectionFactory(dsName, translator);
                 }
+                if (isGoogleSpreadsheet) {
+                    WildFlyCliHelper.removeGoogleSpreadsheetConnectionFactory(dsName);
+                }
                 modelExists = false;
             }
 
@@ -941,7 +950,7 @@ public class VDBManagementServlet extends HttpServlet {
                     modelBlock = VDBXmlBuilder.buildCustomHttpModelBlock(
                             modelName, dsName, translatorDefName,
                             teiidTableName, tableName, columns);
-                } else if (isSalesforce) {
+                } else if (isSalesforce || isGoogleSpreadsheet) {
                     modelBlock = VDBXmlBuilder.buildSalesforceModelBlock(
                             modelName, dsName, translator, jndiName,
                             teiidTableName, tableName, columns);

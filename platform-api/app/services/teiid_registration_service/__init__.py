@@ -378,6 +378,85 @@ class TeiidRegistrationService:
         await pool_manager.evict_by_vdb_id(vdb_id)
         return body
 
+    async def register_google_sheets_source(
+        self,
+        *,
+        vdb_id: str,
+        org_id: int,
+        user_id: int,
+        spreadsheet_id: str,
+        refresh_token: str,
+        client_id: str,
+        client_secret: str,
+        sheet_name: str,
+        teiid_table_name: str,
+        model_name: str,
+        ds_name: str,
+        jndi_name: str,
+        view_name: str,
+        columns: list[dict],
+    ) -> dict:
+        """Register a Google Sheet tab using the native Teiid google-spreadsheet translator.
+
+        Creates a JCA connection factory in WildFly for the Google Spreadsheet
+        resource adapter, then adds a physical model + view to the VDB.
+        """
+        payload = {
+            "vdb_id": vdb_id,
+            "org_id": org_id,
+            "user_id": user_id,
+            "teiid_host": "localhost",
+            "teiid_port": 9990,
+            "db_type": "google-spreadsheet",
+            "translator": "google-spreadsheet",
+            "jdbc_url": "",
+            "instance_url": "",
+            "spreadsheet_id": spreadsheet_id,
+            "table_name": sheet_name,
+            "username": "",
+            "password": refresh_token,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "model_name": model_name,
+            "teiid_table_name": teiid_table_name,
+            "jndi_name": jndi_name,
+            "ds_name": ds_name,
+            "view_name": view_name,
+            "schema_name": "",
+            "columns": columns,
+            "force": True,
+        }
+
+        safe_payload = {k: v for k, v in payload.items() if k != "password"}
+        logger.info("Registering Google Sheets source in Teiid: %s", safe_payload)
+
+        try:
+            response = await self._client.post(
+                "/TeiidExcelImporterTest/vdb-management/createDatabaseSource",
+                json=payload,
+            )
+        except httpx.RequestError as exc:
+            raise TeiidRegistrationError(
+                f"Failed to contact Teiid servlet: {exc}"
+            ) from exc
+
+        if response.status_code >= 400:
+            raise TeiidRegistrationError(
+                f"Teiid rejected Google Sheets source registration: "
+                f"{response.status_code} {response.text}"
+            )
+
+        try:
+            body = response.json()
+        except Exception:
+            body = {"raw": response.text}
+
+        if isinstance(body, dict) and body.get("error"):
+            raise TeiidRegistrationError(str(body["error"]))
+
+        await pool_manager.evict_by_vdb_id(vdb_id)
+        return body
+
     async def register_database_source(
         self,
         *,

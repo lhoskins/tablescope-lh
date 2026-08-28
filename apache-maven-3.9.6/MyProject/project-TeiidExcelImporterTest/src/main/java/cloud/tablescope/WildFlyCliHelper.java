@@ -174,4 +174,58 @@ public class WildFlyCliHelper {
             LOGGER.log(Level.WARNING, "Could not remove Salesforce connection factory " + dsName + ": " + e.getMessage(), e);
         }
     }
+
+    /** Add or replace a Google Spreadsheet resource-adapter connection factory. */
+    public static void ensureGoogleSpreadsheetConnectionFactory(String dsName, String spreadsheetId,
+                                                                 String refreshToken, String clientId,
+                                                                 String clientSecret, String apiVersion) throws Exception {
+        // The google resource adapter is already declared in standalone-teiid.xml.
+        try {
+            runCliChecked("/subsystem=resource-adapters/resource-adapter=google/connection-definitions=" + dsName + ":remove");
+        } catch (Exception e) {
+            LOGGER.log(Level.INFO, "Ignoring Google spreadsheet connection factory removal for " + dsName + ": " + e.getMessage());
+        }
+
+        String addCmd = "/subsystem=resource-adapters/resource-adapter=google/connection-definitions=" + dsName + ":add("
+                + "jndi-name=\"java:/" + dsName + "\", "
+                + "class-name=\"org.teiid.resource.adapter.google.SpreadsheetManagedConnectionFactory\", "
+                + "enabled=true, use-java-context=true)";
+        runCliChecked(addCmd);
+
+        String escSpreadsheetId = spreadsheetId == null ? "" : spreadsheetId.replace("\\", "\\\\").replace("\"", "\\\"");
+        runCliChecked("/subsystem=resource-adapters/resource-adapter=google/connection-definitions=" + dsName
+                + "/config-properties=SpreadsheetId:add(value=\"" + escSpreadsheetId + "\")");
+
+        String escRefreshToken = refreshToken == null ? "" : refreshToken.replace("\\", "\\\\").replace("\"", "\\\"");
+        runCliChecked("/subsystem=resource-adapters/resource-adapter=google/connection-definitions=" + dsName
+                + "/config-properties=RefreshToken:add(value=\"" + escRefreshToken + "\")");
+
+        String escClientId = clientId == null ? "" : clientId.replace("\\", "\\\\").replace("\"", "\\\"");
+        runCliChecked("/subsystem=resource-adapters/resource-adapter=google/connection-definitions=" + dsName
+                + "/config-properties=ClientId:add(value=\"" + escClientId + "\")");
+
+        String escClientSecret = clientSecret == null ? "" : clientSecret.replace("\\", "\\\\").replace("\"", "\\\"");
+        runCliChecked("/subsystem=resource-adapters/resource-adapter=google/connection-definitions=" + dsName
+                + "/config-properties=ClientSecret:add(value=\"" + escClientSecret + "\")");
+
+        String ver = (apiVersion == null || apiVersion.isEmpty()) ? "v4" : apiVersion;
+        runCliChecked("/subsystem=resource-adapters/resource-adapter=google/connection-definitions=" + dsName
+                + "/config-properties=ApiVersion:add(value=\"" + ver + "\")");
+
+        runCliChecked("/subsystem=resource-adapters/resource-adapter=google/connection-definitions=" + dsName
+                + "/config-properties=BatchSize:add(value=\"4096\")");
+
+        runCliChecked("/subsystem=resource-adapters/resource-adapter=google:activate");
+        LOGGER.info("Google spreadsheet connection factory created/updated: " + dsName);
+    }
+
+    public static void removeGoogleSpreadsheetConnectionFactory(String dsName) {
+        try {
+            runCliChecked("/subsystem=resource-adapters/resource-adapter=google/connection-definitions=" + dsName + ":remove");
+            runCliChecked("/subsystem=resource-adapters/resource-adapter=google:activate");
+            LOGGER.info("Removed Google spreadsheet connection factory: " + dsName);
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Could not remove Google spreadsheet connection factory " + dsName + ": " + e.getMessage(), e);
+        }
+    }
 }

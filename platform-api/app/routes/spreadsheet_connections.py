@@ -13,6 +13,7 @@ dark until explicitly turned on per the plan's rollout section.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from datetime import UTC, datetime
@@ -28,9 +29,20 @@ from app.auth.rbac import Role, require_role
 from app.config import get_settings
 from app.database import get_db
 from app.models.connector_credential import ConnectorCredential
+from app.models.file_source_meta import FileSourceMeta
+from app.models.spreadsheet_table_mapping import (
+    SpreadsheetColumnMapping,
+    SpreadsheetTableMapping,
+)
 from app.services import google_drive as gd
 from app.services.crypto import encrypt_secret
+from app.services.google_drive.detection import detect_google_sheet_tables
+from app.services.google_drive.registration import (
+    GoogleSheetsRegistrationError,
+    confirm_and_register_google_sheet,
+)
 from app.services.saas_source_service import decrypt_config
+from app.services.teiid_registration_service.naming import sanitize_identifier
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/spreadsheet-connections", tags=["spreadsheet-connector"])
@@ -44,6 +56,11 @@ def _require_feature_enabled() -> None:
             status_code=404,
             detail="The Google Drive Spreadsheet connector is not enabled.",
         )
+
+
+def _parent_view_name(file_id: str, sheet_name: str) -> str:
+    h = hashlib.sha256(file_id.encode()).hexdigest()[:16]
+    return f"gdrive_{h}_{sanitize_identifier(sheet_name)}"
 
 
 async def _load_credential(
@@ -253,3 +270,165 @@ async def preview_range(
     except gd.GoogleDriveError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {"rangeA1": req.range_a1, "values": values}
+
+
+class DetectTablesRequest(BaseModel):
+    sheet_name: str | None = None
+    max_rows: int = Field(default=1000, ge=1, le=50000)
+    project_id: int | None = None
+
+
+@router.post("/{connection_id}/files/{file_id}/detect-tables")
+async def detect_tables(
+    connection_id: int,
+    file_id: str,
+    req: DetectTablesRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict[str, Any]:
+    """Detect a single rectangular table on a sheet (Workstream D fallback).
+
+    Creates a proposed ``SpreadsheetTableMapping`` and child
+    ``SpreadsheetColumnMapping`` rows for the first (or requested) tab.  The
+    mapping is not registered in Teiid until ``confirm`` is called.
+    """
+    _require_feature_enabled()
+    credential = await _load_credential(session, connection_id, context.tenant_id)
+    access_token = await _valid_access_token(session, credential)
+    client = gd.GoogleDriveClient(access_token)
+
+    try:
+        detected = await detect_google_sheet_tables(
+            client,
+            file_id,
+            sheet_name=req.sheet_name,
+            max_rows=req.max_rows,
+        )
+    except gd.GoogleDriveError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    parent_view = _parent_view_name(file_id, detected["sheet_name"])
+    parent = await session.scalar(
+        select(FileSourceMeta).where(
+            FileSourceMeta.tenant_id == context.tenant_id,
+            FileSourceMeta.owner_id == context.user_id,
+            FileSourceMeta.view_name == parent_view,
+        )
+    )
+    if parent is None:
+        parent = FileSourceMeta(
+            tenant_id=context.tenant_id,
+            owner_id=context.user_id,
+            project_id=req.project_id,
+            view_name=parent_view,
+            file_name=detected["file_name"],
+            vdb_type="user",
+            source_format="google_sheet",
+            acquisition_method="google_drive",
+            live_source_params={
+                "spreadsheet_id": file_id,
+                "sheet_name": detected["sheet_name"],
+            },
+        )
+        session.add(parent)
+        await session.flush()
+
+    mapping = await session.scalar(
+        select(SpreadsheetTableMapping).where(
+            SpreadsheetTableMapping.file_source_meta_id == parent.id,
+            SpreadsheetTableMapping.range_a1 == detected["range_a1"],
+        )
+    )
+    if mapping is None:
+        mapping = SpreadsheetTableMapping(
+            tenant_id=context.tenant_id,
+            project_id=req.project_id,
+            file_source_meta_id=parent.id,
+            sheet_stable_id=None,
+            sheet_name_at_creation=detected["sheet_name"],
+            table_name=detected["table_name"],
+            range_a1=detected["range_a1"],
+            range_policy="dynamic_rows",
+            header_row_index=detected["header_row_index"],
+            data_start_row_index=detected["data_start_row_index"],
+            anchor_fingerprint=detected["anchor_fingerprint"],
+            detection_method=detected["detection_method"],
+            detection_confidence=1.0,
+            user_confirmed=False,
+            status="proposed",
+        )
+        session.add(mapping)
+        await session.flush()
+
+        for col in detected["columns"]:
+            session.add(
+                SpreadsheetColumnMapping(
+                    table_mapping_id=mapping.id,
+                    ordinal=col["ordinal"],
+                    source_label=col["source_label"],
+                    physical_column_ref=col["physical_column_ref"],
+                    relational_name=col["relational_name"],
+                    teiid_type=col["teiid_type"],
+                    classification=col["classification"],
+                )
+            )
+
+    columns = list(
+        (
+            await session.scalars(
+                select(SpreadsheetColumnMapping)
+                .where(SpreadsheetColumnMapping.table_mapping_id == mapping.id)
+                .order_by(SpreadsheetColumnMapping.ordinal)
+            )
+        ).all()
+    )
+
+    await session.commit()
+    return {
+        "fileSourceMetaId": parent.id,
+        "mapping": mapping.to_dict(),
+        "columns": [c.to_dict() for c in columns],
+    }
+
+
+class ConfirmTableRequest(BaseModel):
+    display_name: str = Field(min_length=1, max_length=255)
+    project_id: int | None = None
+
+
+@router.post("/{connection_id}/files/{file_id}/tables/{mapping_id}/confirm")
+async def confirm_table(
+    connection_id: int,
+    file_id: str,
+    mapping_id: int,
+    req: ConfirmTableRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict[str, Any]:
+    """Confirm a proposed table mapping and register it as a live Teiid source.
+
+    This is Workstream E: it creates the query-builder-visible ``FileSourceMeta``
+    row, calls the google-spreadsheet translator via the Teiid servlet, and
+    optionally auto-creates a project saved query.
+    """
+    _require_feature_enabled()
+    credential = await _load_credential(session, connection_id, context.tenant_id)
+    mapping = await session.get(SpreadsheetTableMapping, mapping_id)
+    if mapping is None or mapping.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Table mapping not found.")
+
+    try:
+        child = await confirm_and_register_google_sheet(
+            session,
+            credential=credential,
+            file_id=file_id,
+            mapping=mapping,
+            display_name=req.display_name,
+            project_id=req.project_id,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+        )
+    except GoogleSheetsRegistrationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return child.to_dict()
