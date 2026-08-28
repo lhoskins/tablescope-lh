@@ -24,6 +24,7 @@ from app.models.schemas import (
     InvestigationStepResult,
 )
 from app.services import llm_client
+from app.services.llm_client import _catalog_text
 
 from .ai_shared import _parse_json_response
 
@@ -38,7 +39,19 @@ _INVESTIGATE_SYSTEM_PROMPT = (
     "explanation instead of answering from a single number. You never write "
     "SQL yourself; each sub-question you propose is a plain-language "
     "analytical question that a downstream system turns into a query and "
-    "runs for you. Respond with a single JSON object and nothing else."
+    "runs for you.\n"
+    "You are given a catalog of the project's real sources below, each with "
+    "its actual columns and (when available) a profile: row count, the date "
+    "column's real range, and a few categorical columns' actual values. "
+    "Every sub-question you propose MUST be answerable from a column that "
+    "genuinely appears in that catalog -- never propose a breakdown by a "
+    "category, code, or attribute that is not listed, no matter how "
+    "plausible it sounds. If a source's profile shows the date range covers "
+    "a single period (e.g. one month), a trend/rising/falling question "
+    "cannot be answered from it -- do not propose a sub-question chasing a "
+    "trend that isn't there; finish and let the answer state the data is a "
+    "single-period snapshot instead. Respond with a single JSON object and "
+    "nothing else."
 )
 
 
@@ -61,7 +74,9 @@ def _step_block(steps: list[InvestigationStepResult]) -> str:
 
 
 def _investigate_step_prompt(req: IntelligenceInvestigateStepRequest) -> str:
+    catalog = _catalog_text([], req.source_catalog)
     return (
+        f"{catalog}\n\n"
         f"Original question: {req.question}\n\n"
         f"Evidence gathered so far:\n{_step_block(req.steps)}\n\n"
         f"You may run at most {req.steps_remaining} more sub-question(s) "

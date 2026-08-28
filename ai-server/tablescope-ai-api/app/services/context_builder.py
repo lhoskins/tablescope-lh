@@ -312,6 +312,12 @@ def context_to_prompt_text(context: ContextPackage) -> str:
                 parts.append(f"  - {name}: {col_str}")
             else:
                 parts.append(f"  - {name}")
+            # Data profile (row count, date range, categorical values) so a
+            # prose answer never claims a trend or breakdown the data cannot
+            # actually support.
+            profile_summary = ds.get("profile_summary")
+            if profile_summary:
+                parts.append(f"      profile: {profile_summary}")
 
     # Relevant documents
     if context.allowed_context.get("documents"):

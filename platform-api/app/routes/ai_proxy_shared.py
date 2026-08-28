@@ -22,6 +22,7 @@ from app.config import get_settings
 from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project, ProjectMember
 from app.models.saved_query import SavedQuery
+from app.services import data_source_profiler
 from app.services.home_intelligence import TableInfo, find_relationship_candidates
 from app.services.knowledge_graph_ai_context import collect_knowledge_graph_ai_context
 from app.services.llm_framework import resolve_active_routing_for_capability
@@ -181,15 +182,20 @@ def _detect_datasource(sql: str, allowed_tables: list[str]) -> str | None:
 
 async def _build_source_catalog(
     session: AsyncSession,
+    context: RequestContext,
     *,
-    tenant_id: int,
     project_id: int,
 ) -> list[dict[str, Any]]:
     """Build the AI source catalog (data sources + saved queries) for a project.
 
-    Each entry carries the source name, its known columns, and a short
-    description so the AI server can semantically match the user's request to
-    real project sources instead of inventing table names from the prompt.
+    Each entry carries the source name, its known columns, a short
+    description, and -- when the source has one -- a data profile summary
+    (row count, date range, a few categorical columns' distinct values) read
+    from the profile every upload already computes, so the AI server can
+    semantically match the user's request to real project sources, and
+    ground SQL generation and the "why" investigation planner in what the
+    data actually contains instead of inventing columns, guessing an
+    unsupported date window, or assuming a trend exists.
     """
     catalog: list[dict[str, Any]] = []
 
@@ -197,11 +203,18 @@ async def _build_source_catalog(
         await session.scalars(
             select(FileSourceMeta).where(
                 FileSourceMeta.project_id == project_id,
-                FileSourceMeta.tenant_id == tenant_id,
+                FileSourceMeta.tenant_id == context.tenant_id,
                 FileSourceMeta.archived.is_(False),
             )
         )
     ).all()
+
+    profiles: dict[str, str] = {}
+    try:
+        profiles = await data_source_profiler.profile_sources(session, list(ds_rows))
+    except Exception as exc:  # pragma: no cover - defensive, profiling is best-effort
+        logger.debug("Source profiling failed, continuing without it: %s", exc)
+
     for ds in ds_rows:
         columns = [
             str(c.get("name"))
@@ -217,6 +230,7 @@ async def _build_source_catalog(
                 "columns": columns,
                 "description": description or None,
                 "kind": "table",
+                "profile_summary": profiles.get(ds.view_name),
             }
         )
 

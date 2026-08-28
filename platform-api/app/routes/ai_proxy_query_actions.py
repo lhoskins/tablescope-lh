@@ -362,7 +362,7 @@ async def ai_generate_and_save_query(
     try:
         if not generated_sql:  # not resolved by fuzzy source match
             source_catalog = await _build_source_catalog(
-                session, tenant_id=context.tenant_id, project_id=req.project_id
+                session, context, project_id=req.project_id
             )
             payload = {
                 "tenant_id": context.tenant_id,

@@ -56,6 +56,14 @@ def _format_investigation_steps(question: str, steps: list[dict[str, Any]]) -> s
         "explains the WHY, citing the specific findings below rather than "
         "restating only the last step.",
         "",
+        "If the question asks about a trend (rising, falling, increasing, "
+        "improving) and the evidence below spans fewer than 2 distinct time "
+        "periods -- e.g. every date/month value in the rows is the same, or "
+        "only one period was returned -- you CANNOT determine a trend. Say "
+        "so explicitly instead of guessing a direction, and answer from the "
+        "available snapshot instead: the overall rate/total and which "
+        "category or segment contributes the most, with their numbers.",
+        "",
     ]
     for i, step in enumerate(steps, start=1):
         sub_q = step.get("sub_question") or ""

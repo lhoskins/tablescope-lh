@@ -450,7 +450,7 @@ async def _generate_sql_for_question(
     relationship_hints = _relationship_hints(sources)
 
     source_catalog = await _build_source_catalog(
-        session, tenant_id=context.tenant_id, project_id=project_id
+        session, context, project_id=project_id
     )
     # AIUnavailableError propagates as-is (not wrapped in HTTPException) so
     # callers can tell "the AI service itself is unreachable" apart from "the

@@ -3,6 +3,7 @@
 from pydantic import BaseModel, Field
 
 from .common import AIBaseRequest
+from .query import SourceCatalogEntry
 
 
 class PlannedAnalysis(BaseModel):
@@ -138,6 +139,12 @@ class IntelligenceInvestigateStepRequest(AIBaseRequest):
     question: str = ""
     steps: list[InvestigationStepResult] = Field(default_factory=list)
     steps_remaining: int = 0
+    # The same source catalog SQL generation uses (name/columns/description,
+    # plus a profile summary of row count, date range, and categorical
+    # values per source), so the planner only proposes sub-questions about
+    # columns that actually exist and can tell when the data can't support a
+    # "trend" at all -- instead of reasoning from the bare question text.
+    source_catalog: list[SourceCatalogEntry] = Field(default_factory=list)
 
 
 class IntelligenceInvestigateStepResponse(BaseModel):

@@ -319,16 +319,22 @@ async def investigate_step(
     question: str,
     steps: list[dict[str, Any]],
     steps_remaining: int,
+    source_catalog: list[dict[str, Any]] | None = None,
 ) -> dict[str, str] | None:
     """Ask the "why" investigation agent for the single next planning step.
 
     Given the original question and every sub-query run so far (``steps``,
     each a bounded summary -- sub_question/sql/columns/row_count/
     sample_rows/error, never the full result set), decide whether to run one
-    more targeted sub-question or stop. Returns ``{"action": "query"|
-    "finish", "sub_question": ...}``, or None if the AI is disabled. The
-    caller owns the loop and its own step budget -- this makes a single
-    decision per call and never generates or executes SQL itself.
+    more targeted sub-question or stop. ``source_catalog`` (the same catalog
+    SQL generation uses, including each source's row count / date range /
+    categorical values) grounds that decision in what the project's data
+    actually contains, so the planner proposes sub-questions about real
+    columns and recognizes when the data can't support a "trend" at all.
+    Returns ``{"action": "query"|"finish", "sub_question": ...}``, or None if
+    the AI is disabled. The caller owns the loop and its own step budget --
+    this makes a single decision per call and never generates or executes
+    SQL itself.
     """
     result = await _post_with_model(
         "/ai/intelligence/investigate-step",
@@ -339,6 +345,7 @@ async def investigate_step(
             "question": question,
             "steps": steps,
             "steps_remaining": steps_remaining,
+            "source_catalog": source_catalog or [],
         },
     )
     if result is None:

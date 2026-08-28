@@ -14,6 +14,13 @@ class SourceCatalogEntry(BaseModel):
     columns: list[str] = Field(default_factory=list)
     description: str | None = None
     kind: str = "table"  # "table" (data source view) or "query" (saved query)
+    # Row count, date range, and a few categorical columns' distinct values,
+    # e.g. "40 rows; \"Date\" range 2026-06-13 to 2026-06-24 (text); \"System\"
+    # values: ERP, FileServer, MES, PLM" -- read from the source's existing
+    # upload-time profile so the model never invents a column, guesses a date
+    # window the data can't satisfy, or assumes a trend where there's only one
+    # period.
+    profile_summary: str | None = None
 
 
 class GenerateSQLRequest(AIBaseRequest):

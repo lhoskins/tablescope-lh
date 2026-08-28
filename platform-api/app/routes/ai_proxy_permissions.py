@@ -19,6 +19,7 @@ from app.models.dashboard import Dashboard
 from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project, ProjectMember
 from app.models.saved_query import SavedQuery
+from app.services import data_source_profiler
 from app.services.analytical_method_engine.config import get_engine_mode
 from app.services.analytical_method_engine.method_registry import catalog_status as analytical_catalog_status
 from app.services.internal_ai_auth import verify_internal_ai_request
@@ -142,8 +143,16 @@ async def check_permissions(
         FileSourceMeta.archived.is_(False),
     )
     ds_result = await session.execute(ds_stmt)
+    ds_rows = list(ds_result.scalars())
+
+    profiles: dict[str, str] = {}
+    try:
+        profiles = await data_source_profiler.profile_sources(session, ds_rows)
+    except Exception as exc:  # pragma: no cover - defensive, profiling is best-effort
+        logger.debug("Source profiling failed, continuing without it: %s", exc)
+
     datasources: list[dict[str, Any]] = []
-    for ds in ds_result.scalars():
+    for ds in ds_rows:
         ds_entry: dict[str, Any] = {
             "id": ds.id,
             "view_name": ds.view_name,
@@ -155,6 +164,9 @@ async def check_permissions(
                 {"name": c.get("name", ""), "type": c.get("type", "string")}
                 for c in ds.column_types
             ]
+        profile_summary = profiles.get(ds.view_name or "")
+        if profile_summary:
+            ds_entry["profile_summary"] = profile_summary
         datasources.append(ds_entry)
 
     # Fetch saved queries

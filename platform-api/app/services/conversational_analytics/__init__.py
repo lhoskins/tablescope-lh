@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.context import RequestContext
 from app.models.analytics_conversation import AnalyticsConversation, AnalyticsConversationTurn
 from app.models.chat_attachment import ChatAttachment
-from app.routes.ai_proxy import _ask_and_run_core, _forward_prose_answer
+from app.routes.ai_proxy import _ask_and_run_core, _build_source_catalog, _forward_prose_answer
 from app.services import ai_intelligence_client as ai_intelligence_client
 from app.services.ai_governance import ai_governance_service, infer_governance_key
 from app.services.ai_grounding import gather_grounding_evidence
@@ -271,6 +271,19 @@ async def _run_investigation(
     steps: list[dict[str, Any]] = []
     last_successful_run: dict[str, Any] | None = None
 
+    # Built once, reused for every planning step: the same catalog (with each
+    # source's row count / date range / categorical values) that grounds SQL
+    # generation, so the planner proposes sub-questions about columns that
+    # actually exist and knows when the data can't support a "trend" at all,
+    # instead of only ever seeing the original question and prior step
+    # summaries. Best-effort -- an empty catalog degrades to today's behavior,
+    # never blocks the investigation.
+    try:
+        source_catalog = await _build_source_catalog(session, context, project_id=project_id)
+    except Exception as exc:
+        logger.warning("Could not build source catalog for investigation planner: %s", exc)
+        source_catalog = []
+
     for step_num in range(_MAX_INVESTIGATION_STEPS):
         steps_remaining = _MAX_INVESTIGATION_STEPS - step_num
         try:
@@ -281,6 +294,7 @@ async def _run_investigation(
                 question=question,
                 steps=steps,
                 steps_remaining=steps_remaining,
+                source_catalog=source_catalog,
             )
         except AIUnavailableError:
             decision = None

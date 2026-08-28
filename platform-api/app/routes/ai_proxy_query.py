@@ -55,7 +55,7 @@ async def generate_sql(
     relationship_hints = _relationship_hints(sources)
 
     source_catalog = await _build_source_catalog(
-        session, tenant_id=context.tenant_id, project_id=req.project_id
+        session, context, project_id=req.project_id
     )
 
     payload = {

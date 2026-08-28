@@ -348,6 +348,13 @@ _SEMANTIC_RULES = (
     "the catalog). Do not invent columns.\n"
     "- If no available source reasonably matches the request, return exactly "
     "'NEED_CLARIFICATION' (and nothing else) instead of guessing.\n"
+    "- When a source below has a 'profile' line, it tells you the row count "
+    "and, for the date column, its real range. Before applying a relative "
+    "date filter ('last 30 days', 'this quarter', 'year over year'), check "
+    "that range: if 'now' or the requested window falls outside it, or the "
+    "range covers less time than the requested window, do NOT add a filter "
+    "that would exclude all the rows the profile shows exist — query the "
+    "data as it is instead of a filter guessed from wall-clock time.\n"
 )
 
 
@@ -367,14 +374,18 @@ def _catalog_text(
             columns = getattr(entry, "columns", None)
             description = getattr(entry, "description", None)
             kind = getattr(entry, "kind", None)
+            profile_summary = getattr(entry, "profile_summary", None)
             if isinstance(entry, dict):
                 columns = entry.get("columns")
                 description = entry.get("description")
                 kind = entry.get("kind")
+                profile_summary = entry.get("profile_summary")
             col_str = ", ".join(columns or []) or "(columns unknown)"
             label = "saved query" if kind == "query" else "data source"
             desc = f" — {description}" if description else ""
             lines.append(f'- "{name}" [{label}]{desc}\n    columns: {col_str}')
+            if profile_summary:
+                lines.append(f"    profile: {profile_summary}")
         if lines:
             return "Available sources (use ONLY these):\n" + "\n".join(lines)
     return "Available sources (use ONLY these table names): " + ", ".join(
