@@ -12,6 +12,7 @@ import { BrandLogo, connectorChip } from "../database-connectors/brand-logo";
 import { TableSelectModal } from "./table-select-modal";
 import { SaaSSourceModal } from "./saas-source-modal";
 import { NetworkRepositoryModal } from "./network-repository-modal";
+import { GoogleSheetsSourceModal } from "./google-sheets-source-modal";
 import { useConnectedSourceActions } from "./use-connected-source-actions";
 
 function isSourceAdded(sources: SessionSource[], src: ConnectedSource): boolean {
@@ -21,6 +22,13 @@ function isSourceAdded(sources: SessionSource[], src: ConnectedSource): boolean 
     );
   }
   if (src.kind === "saas" && src.credentialId) {
+    if (src.connectorType === "google_drive") {
+      return sources.some(
+        (s) =>
+          s.sourceType === "google_drive" &&
+          s.connectionConfig.credential_id === String(src.credentialId),
+      );
+    }
     return sources.some(
       (s) =>
         s.isSaaS &&
@@ -135,18 +143,22 @@ export function ConnectedSourcesSection() {
     error,
     activeDbSourceId,
     activeSaasCredential,
+    activeGoogleSheetsCredential,
     activeNetworkConnection,
     openDbFromConnectedSource,
     openSaasFromConnectedSource,
     openNetworkFromConnectedSource,
     closeDbModal,
     closeSaasModal,
+    closeGoogleSheetsModal,
     closeNetworkModal,
   } = useConnectedSourceActions();
 
   const handleAction = (src: ConnectedSource) => {
     if (src.kind === "database") {
       openDbFromConnectedSource(src);
+    } else if (src.kind === "saas" && src.connectorType === "google_drive") {
+      openSaasFromConnectedSource(src);
     } else if (src.kind === "saas") {
       openSaasFromConnectedSource(src);
     } else if (src.kind === "network_repository") {
@@ -190,6 +202,12 @@ export function ConnectedSourcesSection() {
       )}
       {activeSaasCredential && (
         <SaaSSourceModal credential={activeSaasCredential} onClose={closeSaasModal} />
+      )}
+      {activeGoogleSheetsCredential && (
+        <GoogleSheetsSourceModal
+          credential={activeGoogleSheetsCredential}
+          onClose={closeGoogleSheetsModal}
+        />
       )}
       {activeNetworkConnection && (
         <NetworkRepositoryModal

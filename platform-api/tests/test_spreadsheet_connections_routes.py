@@ -297,3 +297,67 @@ async def test_connection_not_found_for_a_different_tenant(client, service_heade
         f"/api/spreadsheet-connections/{connection_id}/files", headers=headers_b
     )
     assert r.status_code == 404
+
+
+async def test_detect_tables_finds_multiple_tables(client, service_headers, monkeypatch):
+    import app.routes.spreadsheet_connections as sc
+    import app.services.google_drive.oauth as gd_oauth
+
+    tenant, user, headers = await _setup(client, service_headers, "gd-detect-multi")
+    monkeypatch.setattr(sc, "_require_feature_enabled", lambda: None)
+
+    state = gd_oauth.create_state_token(tenant_id=tenant["id"], user_id=user["id"])
+
+    async def fake_exchange(*, code):
+        return {"access_token": "at", "refresh_token": "rt", "expires_at": 9e15}
+
+    monkeypatch.setattr(sc.gd, "exchange_code_for_tokens", fake_exchange)
+    r = await client.post(
+        "/api/spreadsheet-connections/callback",
+        json={"code": "c", "state": state},
+        headers=headers,
+    )
+    connection_id = r.json()["id"]
+
+    class _FakeClient:
+        def __init__(self, access_token):
+            pass
+
+        async def get_file_metadata(self, file_id):
+            return {"name": "Multi"}
+
+        async def list_sheet_tabs(self, file_id):
+            return [{"title": "Sheet1", "rowCount": 20, "columnCount": 10}]
+
+        async def get_range_values(self, file_id, range_a1):
+            return [
+                ["A", "B", "C"],
+                [1, 2, 3],
+                [],
+                ["D", "E", "F"],
+                [4, 5, 6],
+            ]
+
+    monkeypatch.setattr(sc.gd, "GoogleDriveClient", _FakeClient)
+
+    r = await client.post(
+        f"/api/spreadsheet-connections/{connection_id}/files/f1/detect-tables",
+        json={},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "tables" in body
+    assert len(body["tables"]) == 2
+    assert body["tables"][0]["mapping"]["rangeA1"] == "'Sheet1'!A1:C2"
+    assert body["tables"][1]["mapping"]["rangeA1"] == "'Sheet1'!A4:C5"
+    assert "mapping" in body and "columns" in body
+
+    r = await client.get(
+        f"/api/spreadsheet-connections/{connection_id}/files/f1/tables",
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    list_body = r.json()
+    assert len(list_body["files"]) == 1
+    assert len(list_body["files"][0]["tables"]) == 2

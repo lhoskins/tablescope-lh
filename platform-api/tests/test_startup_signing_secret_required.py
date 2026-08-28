@@ -31,6 +31,7 @@ def test_production_without_secret_refuses_to_start(monkeypatch):
 def test_production_with_secret_starts(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv("TABLESCOPE_AI_SIGNING_SECRET", "a-real-secret")
+    monkeypatch.setenv("CORS_ALLOW_ORIGINS", "https://app.tablescope.cloud")
     create_app()  # must not raise
 
 

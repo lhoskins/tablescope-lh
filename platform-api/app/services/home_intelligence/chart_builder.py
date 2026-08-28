@@ -3,13 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 from app.services.visualization_engine import (
-    _Shape as Shape,
-)
-from app.services.visualization_engine import (
     ChartType,
     derive_shape,
     rank_visualizations,
     select_visualization,
+)
+from app.services.visualization_engine import (
+    _Shape as Shape,
 )
 
 from .formatting import _fmt_num

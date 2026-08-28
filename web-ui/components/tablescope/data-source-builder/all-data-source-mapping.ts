@@ -10,12 +10,14 @@ const SOURCE_TYPES = new Set<SourceType>([
   "salesforce",
   "hubspot",
   "quickbooks",
+  "google_drive",
 ]);
 
 function toSourceType(value: string | null | undefined): SourceType {
-  return value && SOURCE_TYPES.has(value as SourceType)
-    ? (value as SourceType)
-    : "postgresql";
+  if (!value) return "postgresql";
+  if (value === "google_sheet") return "google_drive";
+  if (SOURCE_TYPES.has(value as SourceType)) return value as SourceType;
+  return "postgresql";
 }
 
 export function allDataSourceToSessionSource(item: AllDataSource): SessionSource {
@@ -24,7 +26,9 @@ export function allDataSourceToSessionSource(item: AllDataSource): SessionSource
   const sourceType: SourceType = isFile
     ? item.connectorType === "excel" || item.connectorType === "xlsx"
       ? "excel"
-      : "csv"
+      : item.connectorType === "google_sheet"
+        ? "google_drive"
+        : "csv"
     : isSaaS
       ? toSourceType(item.connectorType)
       : toSourceType(item.dbType);
@@ -63,6 +67,9 @@ export function allDataSourceToSessionSource(item: AllDataSource): SessionSource
           name: item.name,
           rows: 0,
           columns: Array.from({ length: item.columns }, (_, i) => `col_${i}`),
+          acquisitionMethod:
+            sourceType === "google_drive" ? "google_drive" : "local_upload",
+          sourceHost: sourceType === "google_drive" ? "Google Drive" : undefined,
         }
       : undefined,
   };

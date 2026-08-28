@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects", tags=["projects"])
 
 
-def _action_home_item(action: ProjectAction, project: Project) -> dict:
+def _action_home_item(action: ProjectAction, project: Project | _ProjectMeta) -> dict:
     """Serialize the compact action shape used by the personalized Home page."""
     return {
         "id": action.id,

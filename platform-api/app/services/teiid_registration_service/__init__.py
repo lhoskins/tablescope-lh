@@ -396,10 +396,10 @@ class TeiidRegistrationService:
         view_name: str,
         columns: list[dict],
     ) -> dict:
-        """Register a Google Sheet tab using the native Teiid google-spreadsheet translator.
+        """Register a Google Sheet tab using the v4 google-sheets translator.
 
-        Creates a JCA connection factory in WildFly for the Google Spreadsheet
-        resource adapter, then adds a physical model + view to the VDB.
+        Adds a physical model + view to the VDB with OAuth credentials stored
+        in translator properties.
         """
         payload = {
             "vdb_id": vdb_id,
@@ -407,8 +407,8 @@ class TeiidRegistrationService:
             "user_id": user_id,
             "teiid_host": "localhost",
             "teiid_port": 9990,
-            "db_type": "google-spreadsheet",
-            "translator": "google-spreadsheet",
+            "db_type": "google-sheets",
+            "translator": "google-sheets",
             "jdbc_url": "",
             "instance_url": "",
             "spreadsheet_id": spreadsheet_id,

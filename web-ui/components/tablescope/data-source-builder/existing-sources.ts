@@ -13,12 +13,14 @@ const SOURCE_TYPES = new Set<SourceType>([
   "salesforce",
   "hubspot",
   "quickbooks",
+  "google_drive",
 ]);
 
 function toSourceType(value: string | null | undefined): SourceType {
-  return value && SOURCE_TYPES.has(value as SourceType)
-    ? (value as SourceType)
-    : "postgresql";
+  if (!value) return "postgresql";
+  if (value === "google_sheet") return "google_drive";
+  if (SOURCE_TYPES.has(value as SourceType)) return value as SourceType;
+  return "postgresql";
 }
 
 /**
@@ -31,7 +33,11 @@ export function buildExistingSources(items: MyDataSource[]): SessionSource[] {
     if (item.kind === "file") {
       const fmt = item.sourceFormat?.toLowerCase();
       const sourceType: SourceType =
-        fmt === "excel" || fmt === "xlsx" || fmt === "xls" ? "excel" : "csv";
+        fmt === "excel" || fmt === "xlsx" || fmt === "xls"
+          ? "excel"
+          : fmt === "google_sheet"
+            ? "google_drive"
+            : "csv";
       return {
         id: `existing-file-${item.id}`,
         sourceType,
@@ -49,6 +55,9 @@ export function buildExistingSources(items: MyDataSource[]): SessionSource[] {
           name: item.name,
           rows: 0,
           columns: Array.from({ length: item.columns }, (_, i) => `col_${i}`),
+          acquisitionMethod:
+            sourceType === "google_drive" ? "google_drive" : "local_upload",
+          sourceHost: sourceType === "google_drive" ? "Google Drive" : undefined,
         },
         tables: [
           {
