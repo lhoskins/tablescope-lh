@@ -131,6 +131,7 @@ async def detect_google_sheet_tables(
     first_row, last_row, first_col, last_col, headers, data_rows = _detect_used_range(values)
 
     columns = []
+    seen_relational_names: dict[str, int] = {}
     for offset, header in enumerate(headers):
         abs_col = first_col + offset
         sample = [
@@ -139,12 +140,16 @@ async def detect_google_sheet_tables(
         ]
         classification = _classify(header or "", [str(v) for v in sample])
         teiid_type = _teiid_type_for(header or "", classification, sample)
+        base_rel_name = sanitize_identifier(header or f"Column_{abs_col + 1}")
+        count = seen_relational_names.get(base_rel_name, 0) + 1
+        seen_relational_names[base_rel_name] = count
+        relational_name = base_rel_name if count == 1 else f"{base_rel_name}_{count}"
         columns.append(
             {
                 "ordinal": abs_col,
                 "source_label": header or f"Column_{abs_col + 1}",
                 "physical_column_ref": _column_letter(abs_col + 1),
-                "relational_name": sanitize_identifier(header or f"Column_{abs_col + 1}"),
+                "relational_name": relational_name,
                 "teiid_type": teiid_type,
                 "classification": classification,
             }
