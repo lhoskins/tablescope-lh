@@ -54,4 +54,85 @@ describe("WorkspaceTabBar", () => {
     fireEvent.click(screen.getByRole("button", { name: "+ New Workspace" }));
     expect(onCreate).toHaveBeenCalledTimes(2);
   });
+
+  it("hides the actions menu for a workspace the current user doesn't own", () => {
+    render(
+      <WorkspaceTabBar
+        workspaces={workspaces}
+        activeWorkspaceId={1}
+        onSelect={vi.fn()}
+        onCreate={vi.fn()}
+        currentUserId={99}
+        onRename={vi.fn()}
+        onPublish={vi.fn()}
+        onUnpublish={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: /Revenue review actions/ })).toBeNull();
+  });
+
+  it("renames the workspace via the kebab menu", () => {
+    const onRename = vi.fn();
+    render(
+      <WorkspaceTabBar
+        workspaces={workspaces}
+        activeWorkspaceId={1}
+        onSelect={vi.fn()}
+        onCreate={vi.fn()}
+        currentUserId={3}
+        onRename={onRename}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Revenue review actions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+    const input = screen.getByDisplayValue("Revenue review");
+    fireEvent.change(input, { target: { value: "Q3 review" } });
+    fireEvent.blur(input);
+    expect(onRename).toHaveBeenCalledWith(1, "Q3 review");
+  });
+
+  it("publishes a private workspace and unpublishes a shared one", () => {
+    const onPublish = vi.fn();
+    const onUnpublish = vi.fn();
+    render(
+      <WorkspaceTabBar
+        workspaces={workspaces}
+        activeWorkspaceId={1}
+        onSelect={vi.fn()}
+        onCreate={vi.fn()}
+        currentUserId={3}
+        onPublish={onPublish}
+        onUnpublish={onUnpublish}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Revenue review actions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+    expect(onPublish).toHaveBeenCalledWith(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ops actions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Unpublish" }));
+    expect(onUnpublish).toHaveBeenCalledWith(2);
+  });
+
+  it("deletes a workspace via the kebab menu", () => {
+    const onDelete = vi.fn();
+    render(
+      <WorkspaceTabBar
+        workspaces={workspaces}
+        activeWorkspaceId={1}
+        onSelect={vi.fn()}
+        onCreate={vi.fn()}
+        currentUserId={3}
+        onDelete={onDelete}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Revenue review actions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(onDelete).toHaveBeenCalledWith(1);
+  });
 });

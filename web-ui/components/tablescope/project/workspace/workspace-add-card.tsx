@@ -5,9 +5,12 @@ import { IconPlus } from "@tabler/icons-react";
 import { cn } from "@/lib/cn";
 import {
   useProjectDashboards,
+  useProjectDataSources,
   useProjectDocuments,
   useProjectQueries,
 } from "@/lib/ui/use-project-data";
+import { isDatabase } from "../data-sources-screen/is-database";
+import { isSaas } from "../data-sources-screen/is-saas";
 import type { WorkspaceCard } from "@/lib/api/workspaces";
 import type { WorkspaceResourceType } from "./workspace-tabs-storage";
 
@@ -27,6 +30,7 @@ export function useAddableResources(
   const { data: queries } = useProjectQueries(projectId);
   const { data: dashboards } = useProjectDashboards(projectId);
   const { data: documents } = useProjectDocuments(projectId);
+  const { data: dataSources } = useProjectDataSources(projectId);
 
   const resources = useMemo<AddableResource[]>(
     () => [
@@ -45,8 +49,18 @@ export function useAddableResources(
         resource_id: String(d.id),
         label: d.title,
       })),
+      // Only database/SaaS sources resolve as a "data_source" workspace card
+      // (backend looks the id up as a DatabaseDataSource) -- file sources are
+      // tracked separately by FileSourceMeta.id and aren't addressable here.
+      ...(dataSources ?? [])
+        .filter((d) => (isDatabase(d) || isSaas(d)) && typeof d.id === "number")
+        .map((d) => ({
+          resource_type: "data_source" as const,
+          resource_id: String(d.id),
+          label: d.fileName,
+        })),
     ],
-    [queries, dashboards, documents],
+    [queries, dashboards, documents, dataSources],
   );
 
   const pinned = useMemo(
@@ -86,7 +100,7 @@ export function WorkspaceAddCard({
         <ul aria-label="Add a resource to this workspace" className="mt-2 max-h-64 overflow-y-auto rounded-md border border-line-tertiary">
           {resources.length === 0 && (
             <li className="px-3 py-2 text-[12px] text-ink-tertiary">
-              This project has no tables, dashboards or documents yet.
+              This project has no tables, dashboards, documents or data sources yet.
             </li>
           )}
           {resources.map((resource) => {
