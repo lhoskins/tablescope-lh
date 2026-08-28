@@ -14,6 +14,7 @@ import {
   listCreatedConnections,
   listInstalledConnectors,
   testDbConnection,
+  testGoogleDrive,
   testSaasCredential,
   type CreatedConnection,
   type InstalledConnector,
@@ -22,6 +23,7 @@ import { ConnectorCarousel } from "./connector-carousel";
 import { connectorSpec } from "./connector-fields";
 import { BrandLogo, connectorChip } from "./brand-logo";
 import { ConnectionModal } from "./connection-modal";
+import { GoogleSheetsConnectionModal } from "./google-sheets-connection-modal";
 
 const INSTALLED_QK = ["connectors", "installed"];
 const CREATED_QK = ["connectors", "created-connections"];
@@ -77,9 +79,11 @@ export function DatabaseConnectorsWorkspace({
     setTestMsg(null);
     try {
       const res =
-        conn.kind === "database"
-          ? await testDbConnection(conn.id)
-          : await testSaasCredential(conn.id);
+        conn.connectorKey === "google_drive"
+          ? await testGoogleDrive(conn.id)
+          : conn.kind === "database"
+            ? await testDbConnection(conn.id)
+            : await testSaasCredential(conn.id);
       setTestMsg({ id, ok: res.success, text: res.message });
       refreshCreated();
     } catch (err) {
@@ -105,7 +109,8 @@ export function DatabaseConnectorsWorkspace({
     }
   };
 
-  const activeSpec = modalKey ? connectorSpec(modalKey) : undefined;
+  const activeSpec =
+    modalKey && modalKey !== "google_drive" ? connectorSpec(modalKey) : undefined;
 
   return (
     <div className="space-y-8">
@@ -219,7 +224,7 @@ export function DatabaseConnectorsWorkspace({
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1.5">
-                        {projectId && onUseInBuilder ? (
+                        {projectId && onUseInBuilder && c.connectorKey !== "google_drive" ? (
                           <Button
                             variant="brandSoft"
                             size="sm"
@@ -227,7 +232,7 @@ export function DatabaseConnectorsWorkspace({
                           >
                             Use in Data Source Builder
                           </Button>
-                        ) : projectId ? (
+                        ) : projectId && c.connectorKey !== "google_drive" ? (
                           <Button
                             variant="brandSoft"
                             size="sm"
@@ -240,13 +245,15 @@ export function DatabaseConnectorsWorkspace({
                             Use in Data Source Builder
                           </Button>
                         ) : null}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => openEdit(c)}
-                        >
-                          Edit
-                        </Button>
+                        {c.connectorKey !== "google_drive" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openEdit(c)}
+                          >
+                            Edit
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="sm"
@@ -287,6 +294,16 @@ export function DatabaseConnectorsWorkspace({
           onSaved={() => {
             setModalKey(null);
             setEditTarget(null);
+            refreshCreated();
+          }}
+        />
+      )}
+
+      {modalKey === "google_drive" && (
+        <GoogleSheetsConnectionModal
+          onClose={() => setModalKey(null)}
+          onSaved={() => {
+            setModalKey(null);
             refreshCreated();
           }}
         />

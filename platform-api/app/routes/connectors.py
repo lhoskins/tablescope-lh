@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends
 
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
+from app.config import get_settings
 from app.connectors.registry import supported_connectors
 from app.services.database_introspection_service import DB_TYPES
 
@@ -32,6 +33,7 @@ _LABELS: dict[str, str] = {
     "hubspot": "HubSpot",
     "quickbooks": "QuickBooks",
     "servicenow": "ServiceNow",
+    "google_drive": "Google Drive",
 }
 
 # Order shown in the UI grid.
@@ -46,6 +48,7 @@ _ORDER = [
     "hubspot",
     "quickbooks",
     "servicenow",
+    "google_drive",
 ]
 
 
@@ -59,7 +62,11 @@ async def list_installed_connectors(
 
     connectors: list[dict] = []
     for key in _ORDER:
-        if key in database:
+        if key == "google_drive":
+            if not get_settings().google_drive_connector_v1_enabled:
+                continue
+            kind = "saas"
+        elif key in database:
             kind = "database"
         elif key in saas:
             kind = "saas"
