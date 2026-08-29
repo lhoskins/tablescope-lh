@@ -29,7 +29,7 @@ export function useProjectShell(projectId: string) {
 
   const all = summaries ?? [];
   const project = all.find((p) => p.id === projectId) ?? null;
-  const otherProjects = all.filter((p) => p.id !== projectId).slice(0, 6);
+  const otherProjects = all.filter((p) => p.id !== projectId);
 
   return {
     user: identity?.user ?? FALLBACK_USER,

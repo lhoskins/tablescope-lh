@@ -8,7 +8,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import {
   IconChevronDown,
-  IconPlus,
   IconUsers,
   IconUserCircle,
   IconLogout,
@@ -28,14 +27,14 @@ import type {
 
 import {
   homeNavGroups,
-  projectNavGroups,
   canViewSettings,
-  type NavGroup,
   type NavItem,
 } from "./nav";import { COLLAPSE_STORAGE_KEY } from "./sidebar/collapse-storage-key";
 import { SidebarProps } from "./sidebar/sidebar-props";
 import { NavGroupBlock } from "./sidebar/nav-group-block";
+import { NavRow } from "./sidebar/nav-row";
 import { AccountMenu } from "./sidebar/account-menu";
+import { ProjectsTree } from "./sidebar/projects-tree";
 
 
 
@@ -45,7 +44,6 @@ export function Sidebar({
   tenant,
   user,
   project,
-  otherProjects = [],
   counts,
   className,
 }: SidebarProps) {
@@ -73,10 +71,15 @@ export function Sidebar({
     });
   };
 
-  const groups =
-    mode === "project" && project
-      ? projectNavGroups(project.id, user, tenant)
-      : homeNavGroups(user);
+  // The sidebar's core nav (Home / Business Insight / Projects / AI Assistant)
+  // stays identical between home and project mode -- it no longer switches
+  // its link set per page (see docs/ux-workspace-redesign-gap-analysis.md
+  // §2). "Projects" is spliced out of that list and rendered as the
+  // disclosure tree instead of a plain link.
+  const homeItems = homeNavGroups(user)[0].items;
+  const projectsIndex = homeItems.findIndex((i) => i.key === "projects");
+  const beforeProjects = homeItems.slice(0, projectsIndex);
+  const afterProjects = homeItems.slice(projectsIndex + 1);
 
   const isPlatformAdmin =
     Boolean(user.isSuperAdmin) || user.rawRole === "root_admin";
@@ -198,15 +201,30 @@ export function Sidebar({
           collapsed ? "px-2" : "px-3",
         )}
       >
-        {groups.map((group, i) => (
-          <NavGroupBlock
-            key={group.heading ?? `g${i}`}
-            group={group}
-            activeNav={activeNav}
-            counts={counts}
+        <div className="space-y-0.5">
+          {beforeProjects.map((item) => (
+            <NavRow
+              key={item.key}
+              item={item}
+              active={item.key === activeNav}
+              count={item.countKey ? counts?.[item.countKey] : undefined}
+              collapsed={collapsed}
+            />
+          ))}
+          <ProjectsTree
+            currentProjectId={mode === "project" ? project?.id : null}
             collapsed={collapsed}
           />
-        ))}
+          {afterProjects.map((item) => (
+            <NavRow
+              key={item.key}
+              item={item}
+              active={item.key === activeNav}
+              count={item.countKey ? counts?.[item.countKey] : undefined}
+              collapsed={collapsed}
+            />
+          ))}
+        </div>
 
         {mode === "home" && adminManagementItems.length > 0 && (
           <NavGroupBlock
@@ -214,45 +232,6 @@ export function Sidebar({
             activeNav={activeNav}
             collapsed={collapsed}
           />
-        )}
-
-        {mode === "project" && otherProjects.length > 0 && (
-          <div className="space-y-0.5">
-            {!collapsed && (
-              <div className="px-2.5 pb-1 pt-3 text-caption uppercase tracking-wide text-ink-tertiary">
-                Other Projects
-              </div>
-            )}
-            {collapsed && <div className="pt-3" />}
-            {otherProjects.map((p) => (
-              <Link
-                key={p.id}
-                href={`/projects/${p.id}`}
-                title={collapsed ? p.name : undefined}
-                className={cn(
-                  "flex items-center rounded-md text-[13px] text-ink-tertiary hover:bg-bg-secondary hover:text-ink-primary",
-                  collapsed ? "justify-center px-0 py-2" : "gap-2.5 px-2.5 py-1.5",
-                )}
-              >
-                <span
-                  className="h-2 w-2 shrink-0 rounded-full"
-                  style={{ background: p.accent ?? accentFor(p.id) }}
-                />
-                {!collapsed && <span className="flex-1 truncate">{p.name}</span>}
-              </Link>
-            ))}
-            <Link
-              href="/projects?new=1"
-              title={collapsed ? "New project" : undefined}
-              className={cn(
-                "flex items-center rounded-md text-[13px] text-ink-tertiary hover:bg-bg-secondary hover:text-ink-primary",
-                collapsed ? "justify-center px-0 py-2" : "gap-2.5 px-2.5 py-1.5",
-              )}
-            >
-              <IconPlus size={15} stroke={1.8} className="shrink-0" />
-              {!collapsed && <span>New project</span>}
-            </Link>
-          </div>
         )}
       </nav>
 
