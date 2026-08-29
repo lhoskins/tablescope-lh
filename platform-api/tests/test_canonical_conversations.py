@@ -399,6 +399,69 @@ async def test_project_workspace_grounds_on_active_table(
     assert "Active workspace item" in captured["question"]
 
 
+async def test_project_workspace_grounds_on_multiple_active_resources(
+    client, db_session, service_headers, monkeypatch
+):
+    tenant, _, project, headers = await _setup(client, service_headers, "pw-multi")
+
+    from app.models import Dashboard, SavedQuery
+
+    query = SavedQuery(
+        project_id=project["id"],
+        name="Monthly Revenue",
+        description="Revenue by month",
+        sql_text='SELECT * FROM "sales"',
+    )
+    dashboard = Dashboard(
+        project_id=project["id"],
+        tenant_id=tenant["id"],
+        name="Exec Overview",
+        config={"widgets": []},
+    )
+    db_session.add_all([query, dashboard])
+    await db_session.commit()
+    await db_session.refresh(query)
+    await db_session.refresh(dashboard)
+
+    captured: dict = {}
+
+    async def _fake_capture(*args, **kwargs):
+        captured["question"] = kwargs.get("question", "")
+        return {
+            "question": kwargs.get("question", ""),
+            "sql": "SELECT 1",
+            "columns": ["x"],
+            "rows": [{"x": 1}],
+            "suggestedVisualization": {"type": "bar", "title": "x"},
+            "explanation": "ok",
+            "dataSourcesUsed": [],
+            "status": "success",
+            "error": None,
+        }
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core", _fake_capture
+    )
+
+    r = await client.post(
+        "/api/conversational-analytics/canonical-turns",
+        json={
+            "surface": "project_workspace",
+            "project_id": project["id"],
+            "message": "Summarize my workspace",
+            "client_request_id": "req-multi",
+            "active_resources": [
+                {"resource_type": "table", "resource_id": query.id},
+                {"resource_type": "dashboard", "resource_id": dashboard.id},
+            ],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert "Monthly Revenue" in captured["question"]
+    assert "Exec Overview" in captured["question"]
+
+
 async def test_project_workspace_active_resource_from_another_project_is_ignored(
     client, db_session, service_headers, monkeypatch
 ):

@@ -121,15 +121,28 @@ def _format_context_prompt(project_context: dict[str, Any] | None) -> str:
     return "\n".join(parts)[:1200]
 
 
-def _format_active_resource_prompt(active_resource: ActiveResourceContext | None) -> str:
-    """Return a short grounding line for the project workspace's active tab."""
-    if not active_resource:
+def _format_active_resource_prompt(
+    active_resources: list[ActiveResourceContext] | None,
+) -> str:
+    """Return a short grounding block for the workspace's active items.
+
+    A named workspace pins several cards at once, so every resolved card is
+    listed. The assistant keeps full project access; this only narrows its
+    default focus."""
+    if not active_resources:
         return ""
-    return (
-        "--- Active workspace item ---\n"
-        f"The user currently has {active_resource.summary} open in this project workspace.\n"
-        "--- End active workspace item ---"
-    )
+    if len(active_resources) == 1:
+        body = (
+            f"The user currently has {active_resources[0].summary} "
+            "open in this project workspace.\n"
+        )
+    else:
+        lines = "\n".join(f"- {r.summary}" for r in active_resources)
+        body = (
+            "The user currently has these items open in this project workspace:\n"
+            f"{lines}\n"
+        )
+    return f"--- Active workspace items ---\n{body}--- End active workspace items ---"
 
 
 def _live_query_score(
@@ -403,7 +416,7 @@ async def execute_turn(
     *,
     datasource_id: int | None = None,
     attachment_ids: list[int] | None = None,
-    active_resource: ActiveResourceContext | None = None,
+    active_resources: list[ActiveResourceContext] | None = None,
 ) -> None:
     """Execute a single turn and mutate its persisted fields in place.
 
@@ -460,10 +473,10 @@ async def execute_turn(
         question = f"{attachment_context}\n\n{question}"
         sql_question = f"{attachment_context}\n\n{sql_question}"
 
-    active_resource_prompt = _format_active_resource_prompt(active_resource)
+    active_resource_prompt = _format_active_resource_prompt(active_resources)
     if active_resource_prompt:
-        # Same pattern as attachment_context above: the active workspace tab
-        # grounds the model's prompts only, never the persisted user message.
+        # Same pattern as attachment_context above: the active workspace items
+        # ground the model's prompts only, never the persisted user message.
         question = f"{active_resource_prompt}\n\n{question}"
         sql_question = f"{active_resource_prompt}\n\n{sql_question}"
 

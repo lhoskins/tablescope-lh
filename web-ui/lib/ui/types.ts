@@ -52,6 +52,7 @@ export type NavKey =
   | "admin-settings"
   // Project-mode nav
   | "overview"
+  | "workspace"
   | "project-data-sources"
   | "project-queries"
   | "project-scopes"

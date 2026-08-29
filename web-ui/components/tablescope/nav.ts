@@ -12,6 +12,7 @@ import {
   IconBuildingBank,
   IconClipboardList,
   IconBinaryTree,
+  IconLayoutGrid,
   type Icon,
 } from "@tabler/icons-react";
 import type { CurrentUser, NavKey, TenantSummary } from "@/lib/ui/types";
@@ -78,6 +79,12 @@ export function projectNavGroups(
           label: "Project Home",
           href: base,
           icon: IconHome,
+        },
+        {
+          key: "workspace",
+          label: "Workspace",
+          href: `${base}/workspace`,
+          icon: IconLayoutGrid,
         },
         {
           key: "project-insights",

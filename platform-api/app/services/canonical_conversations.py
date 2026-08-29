@@ -20,7 +20,10 @@ from app.auth.context import RequestContext
 from app.auth.rbac import Role
 from app.models import AnalyticsConversation, AnalyticsConversationTurn, Project
 from app.services.conversational_analytics import execute_turn
-from app.services.workspace_context import resolve_active_resource_context
+from app.services.workspace_context import (
+    ActiveResourceContext,
+    resolve_active_resource_contexts,
+)
 
 
 def _is_conversation_reader(context: RequestContext, conversation: AnalyticsConversation) -> bool:
@@ -138,6 +141,7 @@ async def append_canonical_turn(
     attachment_ids: list[int] | None = None,
     active_resource_type: str | None = None,
     active_resource_id: int | None = None,
+    active_resources: list[tuple[str | None, int | None]] | None = None,
 ) -> CanonicalTurnResult:
     """Append one turn to the canonical Insight thread for this scope.
 
@@ -229,13 +233,15 @@ async def append_canonical_turn(
     session.add(turn)
     await session.flush()
 
-    active_resource = None
+    # A workspace grounds on every card pinned to it; the single
+    # active_resource_type/id pair is the one-card case of that list.
+    requested_resources = active_resources or [(active_resource_type, active_resource_id)]
+    resolved_resources: list[ActiveResourceContext] = []
     if surface == CanonicalConversationSurface.PROJECT_WORKSPACE and project_id is not None:
-        active_resource = await resolve_active_resource_context(
+        resolved_resources = await resolve_active_resource_contexts(
             session,
             project_id=project_id,
-            resource_type=active_resource_type,
-            resource_id=active_resource_id,
+            resources=requested_resources,
         )
 
     await execute_turn(
@@ -245,7 +251,7 @@ async def append_canonical_turn(
         turn,
         datasource_id=data_source_id,
         attachment_ids=attachment_ids or [],
-        active_resource=active_resource,
+        active_resources=resolved_resources,
     )
 
     if turn.status == "success":

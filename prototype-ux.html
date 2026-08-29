@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Tablescope UX Prototype v4</title>
+<style>
+:root {
+  --bg-primary:#ffffff;--bg-secondary:#f7f7f6;--bg-tertiary:#fafaf9;
+  --text-primary:#1a1917;--text-secondary:#5c5a55;--text-tertiary:#9b9893;
+  --border-secondary:#ddd9d0;--border-tertiary:#edeae3;
+  --brand-50:#e6f1fb;--brand-500:#185fa5;--brand-700:#0c447c;
+  --color-ai:#534ab7;--color-ai-bg:#eeedfe;
+  --color-success:#0f6e56;--color-success-bg:#e1f5ee;
+  --color-warning:#854f0b;--color-warning-bg:#faeeda;
+  --radius-sm:6px;--radius-md:8px;--radius-lg:12px;
+  --sidebar-w:200px;--right-w:280px;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,"Inter",ui-sans-serif,system-ui,"Segoe UI",sans-serif;font-size:13px;background:var(--bg-secondary);color:var(--text-primary);-webkit-font-smoothing:antialiased;height:100vh;overflow:hidden;}
+
+/* ── Switcher ── */
+#switcher{position:fixed;top:0;left:0;right:0;z-index:1000;background:#1a1917;display:flex;align-items:center;gap:4px;padding:6px 12px;}
+#switcher span{color:#9b9893;margin-right:6px;font-weight:600;font-size:12px;}
+.sw-btn{background:#2d2b28;color:#d4d2ce;border:1px solid #3d3b38;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;font-family:inherit;}
+.sw-btn:hover{background:#3d3b38;}
+.sw-btn.active{background:var(--brand-500);color:#fff;border-color:var(--brand-500);}
+.screen{display:none;position:fixed;top:36px;left:0;right:0;bottom:0;}
+.screen.active{display:flex;}
+
+/* ── Sidebar ── */
+.sidebar{width:var(--sidebar-w);min-width:var(--sidebar-w);background:var(--bg-primary);border-right:1px solid var(--border-tertiary);display:flex;flex-direction:column;overflow:hidden;}
+.sidebar-logo-row{display:flex;align-items:center;justify-content:space-between;padding:12px 14px 8px;}
+.sidebar-logo{font-size:14px;font-weight:700;color:var(--text-primary);}
+.collapse-btn{width:26px;height:26px;border:none;background:none;cursor:pointer;color:var(--text-tertiary);display:flex;align-items:center;justify-content:center;border-radius:var(--radius-sm);}
+.collapse-btn:hover{background:var(--bg-secondary);}
+.tenant-pill{margin:0 10px 4px;border:1px solid var(--border-secondary);border-radius:var(--radius-md);display:flex;align-items:center;gap:7px;padding:7px 9px;font-size:12px;font-weight:500;}
+.tenant-avatar{width:22px;height:22px;border-radius:4px;background:var(--brand-50);color:var(--brand-700);font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.sidebar-nav{flex:1;overflow-y:auto;padding:4px 8px 12px;}
+.sidebar-footer{border-top:1px solid var(--border-tertiary);padding:8px 10px;}
+
+/* Nav rows */
+.nav-row{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:var(--radius-sm);font-size:12px;color:var(--text-secondary);cursor:pointer;text-decoration:none;margin-bottom:1px;}
+.nav-row:hover{background:var(--bg-secondary);color:var(--text-primary);}
+.nav-row.active{background:var(--brand-50);color:var(--brand-500);font-weight:600;}
+.nav-row svg{width:14px;height:14px;flex-shrink:0;opacity:0.75;}
+.nav-count{margin-left:auto;background:var(--brand-50);color:var(--brand-700);font-size:10px;font-weight:600;padding:1px 5px;border-radius:99px;}
+
+/* Projects tree */
+.proj-section{margin-bottom:1px;}
+.proj-trigger{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:var(--radius-sm);font-size:12px;color:var(--text-secondary);cursor:pointer;width:100%;text-align:left;border:none;background:none;font-family:inherit;}
+.proj-trigger:hover{background:var(--bg-secondary);color:var(--text-primary);}
+.proj-trigger svg.icon{width:14px;height:14px;flex-shrink:0;opacity:0.75;}
+.chev{width:11px;height:11px;flex-shrink:0;color:var(--text-tertiary);transition:transform .18s;}
+.chev.open{transform:rotate(180deg);}
+.projects-tree{display:none;margin-left:8px;border-left:1px solid var(--border-tertiary);padding-left:7px;padding-bottom:3px;}
+.projects-tree.open{display:block;}
+.vis-hdr{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-tertiary);padding:6px 4px 2px;display:flex;align-items:center;gap:4px;cursor:pointer;border:none;background:none;font-family:inherit;width:100%;text-align:left;}
+.vis-hdr:hover{color:var(--text-secondary);}
+
+/* Project row */
+.proj-row{display:flex;align-items:center;margin-bottom:1px;border-radius:var(--radius-sm);}
+.proj-row-link{display:flex;align-items:center;gap:6px;flex:1;min-width:0;padding:3px 5px;border-radius:var(--radius-sm);cursor:pointer;text-decoration:none;}
+.proj-row-link:hover{background:var(--bg-secondary);}
+.proj-row.selected>.proj-row-link{background:var(--brand-50);}
+.proj-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.proj-name{font-size:11.5px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.proj-date{font-size:10px;color:var(--text-tertiary);}
+.proj-add{font-size:10px;font-weight:600;color:var(--brand-500);margin-left:auto;flex-shrink:0;cursor:pointer;padding:0 3px;}
+
+/* Asset tree */
+.asset-tree{display:none;margin-left:12px;border-left:1px solid var(--border-tertiary);padding-left:7px;}
+.asset-tree.open{display:block;}
+.asset-grp-hdr{display:flex;align-items:center;gap:4px;font-size:10.5px;font-weight:600;color:var(--text-secondary);padding:4px 3px 2px;cursor:pointer;border:none;background:none;font-family:inherit;width:100%;text-align:left;}
+.asset-grp-hdr:hover{color:var(--text-primary);}
+.ag-name{flex:1;text-align:left;}
+.plus-btn{font-size:13px;color:var(--brand-500);font-weight:700;width:16px;height:16px;display:flex;align-items:center;justify-content:center;border-radius:3px;}
+.plus-btn:hover{background:var(--brand-50);}
+.asset-item{display:flex;align-items:center;gap:5px;padding:2px 3px;border-radius:3px;font-size:11px;color:var(--text-tertiary);cursor:pointer;margin-bottom:1px;user-select:none;}
+.asset-item:hover{background:var(--bg-secondary);color:var(--text-primary);}
+.asset-item.open-in-ws{color:var(--brand-500);font-weight:500;}
+.asset-item svg{width:10px;height:10px;flex-shrink:0;opacity:.6;}
+
+/* ── Main wrap ── */
+.main-wrap{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;}
+.topbar{height:44px;border-bottom:1px solid var(--border-tertiary);background:var(--bg-primary);display:flex;align-items:center;justify-content:space-between;padding:0 14px;flex-shrink:0;}
+.topbar-breadcrumb{display:flex;align-items:center;gap:6px;font-size:13px;}
+.tb-section{color:var(--text-tertiary);font-weight:400;}
+.tb-sep{color:var(--border-secondary);}
+.tb-project{font-weight:700;color:var(--text-primary);}
+.tb-badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700;background:var(--color-success-bg);color:var(--color-success);margin-left:4px;}
+.topbar-right{display:flex;align-items:center;gap:10px;}
+.visibility-row{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-secondary);}
+.toggle-switch{position:relative;display:inline-block;width:36px;height:20px;flex-shrink:0;}
+.toggle-switch input{opacity:0;width:0;height:0;}
+.toggle-slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:var(--border-secondary);border-radius:20px;transition:.2s;}
+.toggle-slider:before{position:absolute;content:"";height:14px;width:14px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.2s;}
+.toggle-switch input:checked+.toggle-slider{background:var(--brand-500);}
+.toggle-switch input:checked+.toggle-slider:before{transform:translateX(16px);}
+.members-btn{display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:var(--radius-md);border:1px solid var(--border-secondary);background:var(--bg-primary);font-size:12px;font-weight:500;cursor:pointer;color:var(--text-primary);font-family:inherit;}
+.members-btn:hover{background:var(--bg-secondary);}
+
+/* Nav card grid */
+.nav-card-grid{display:flex;align-items:stretch;gap:7px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--border-tertiary);background:var(--bg-primary);flex-shrink:0;}
+.nav-card{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:8px 10px;border:1px solid var(--border-secondary);border-radius:var(--radius-lg);cursor:pointer;min-width:68px;text-align:center;background:var(--bg-primary);font-family:inherit;font-size:11px;font-weight:500;color:var(--text-secondary);transition:background .12s,border-color .12s;}
+.nav-card:hover{background:var(--bg-secondary);color:var(--text-primary);}
+.nav-card.active{background:var(--brand-50);border-color:var(--brand-500);color:var(--brand-500);font-weight:600;}
+.nav-card svg{width:16px;height:16px;opacity:.7;}
+.nav-card.active svg{opacity:1;}
+
+/* Workspace tab bar */
+.workspace-tabs{display:flex;align-items:center;padding:0 14px;border-bottom:1px solid var(--border-tertiary);background:var(--bg-primary);flex-shrink:0;overflow-x:auto;}
+.ws-tab{padding:9px 12px;font-size:12px;color:var(--text-secondary);cursor:pointer;border:none;background:none;font-family:inherit;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;}
+.ws-tab:hover{color:var(--text-primary);}
+.ws-tab.active{color:var(--brand-500);font-weight:600;border-bottom-color:var(--brand-500);}
+.ws-tab-new{padding:9px 8px;color:var(--brand-500);font-size:12px;font-weight:600;cursor:pointer;border:none;background:none;font-family:inherit;white-space:nowrap;}
+
+/* Content split area */
+.content-split{flex:1;display:flex;overflow:hidden;}
+
+/* Canvas area (left) */
+.canvas-area{flex:1;overflow-y:auto;padding:12px;display:flex;flex-wrap:wrap;gap:10px;align-content:flex-start;background:var(--bg-secondary);}
+/* Row mode (default) */
+.ws-card{width:100%;}
+/* Card mode: 3 per row */
+.ws-card.card-mode{width:calc(33.333% - 7px);min-width:180px;aspect-ratio:1;overflow:hidden;cursor:pointer;}
+.ws-card.card-mode .ws-card-body{display:none;}
+/* Mini table preview grid inside card-mode */
+.card-mini-preview{padding:8px 10px 4px;display:flex;flex-direction:column;gap:3px;}
+.card-mini-header-row{display:grid;gap:3px;margin-bottom:2px;}
+.card-mini-cell{height:7px;border-radius:2px;background:var(--border-secondary);}
+.card-mini-cell.hdr{background:var(--border-secondary);opacity:.7;}
+.card-mini-data-row{display:grid;gap:3px;}
+.card-mini-data-row .card-mini-cell{background:var(--border-tertiary);}
+.card-mini-meta{padding:0 10px 8px;font-size:10px;color:var(--text-tertiary);display:flex;align-items:center;gap:6px;}
+/* Document card content */
+.card-doc-body{padding:8px 10px;}
+.card-doc-summary{font-size:10.5px;color:var(--text-secondary);line-height:1.5;margin-bottom:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+.card-doc-tags{display:flex;flex-wrap:wrap;gap:4px;}
+.card-doc-tag{font-size:9.5px;padding:2px 7px;border-radius:99px;background:var(--bg-secondary);border:1px solid var(--border-tertiary);color:var(--text-secondary);}
+.card-doc-tag.ai{background:var(--color-ai-bg);color:var(--color-ai);border-color:transparent;}
+
+/* Table/doc card in workspace */
+.ws-card{background:var(--bg-primary);border:1px solid var(--border-tertiary);border-radius:var(--radius-lg);overflow:hidden;flex-shrink:0;}
+.ws-card.minimized{flex-shrink:0;}
+.ws-card-header{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border-tertiary);background:var(--bg-tertiary);}
+.ws-card-title{font-size:12px;font-weight:600;color:var(--text-primary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ws-card-actions{display:flex;align-items:center;gap:4px;flex-shrink:0;}
+.ws-icon-btn{width:22px;height:22px;border:1px solid var(--border-secondary);border-radius:4px;background:var(--bg-primary);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text-tertiary);}
+.ws-icon-btn:hover{background:var(--bg-secondary);color:var(--text-primary);}
+.ws-icon-btn svg{width:11px;height:11px;}
+
+/* Card 3-state view toggle */
+.view-toggle{display:flex;align-items:center;border:1px solid var(--border-secondary);border-radius:5px;overflow:hidden;flex-shrink:0;}
+.vt-btn{padding:3px 7px;font-size:10px;font-weight:600;background:var(--bg-primary);border:none;cursor:pointer;color:var(--text-tertiary);font-family:inherit;border-right:1px solid var(--border-secondary);display:flex;align-items:center;gap:3px;white-space:nowrap;}
+.vt-btn:last-child{border-right:none;}
+.vt-btn:hover{background:var(--bg-secondary);color:var(--text-primary);}
+.vt-btn.active{background:var(--brand-50);color:var(--brand-500);}
+.vt-btn svg{width:10px;height:10px;}
+
+/* Full-table canvas mode */
+.canvas-full-mode{display:flex;flex-direction:column;flex:1;overflow:hidden;background:var(--bg-primary);}
+.canvas-full-header{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border-tertiary);background:var(--bg-tertiary);flex-shrink:0;}
+.canvas-full-title{font-size:13px;font-weight:700;color:var(--text-primary);flex:1;}
+.canvas-full-actions{display:flex;align-items:center;gap:6px;}
+.canvas-full-table{flex:1;overflow:auto;}
+
+/* Data preview table */
+.preview-tbl{width:100%;border-collapse:collapse;font-size:11px;}
+.preview-tbl th{padding:5px 10px;text-align:left;font-size:10px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border-tertiary);background:var(--bg-tertiary);}
+.preview-tbl td{padding:6px 10px;border-bottom:1px solid var(--border-tertiary);color:var(--text-secondary);}
+.preview-tbl tr:last-child td{border-bottom:none;}
+.preview-tbl tr:hover td{background:var(--bg-tertiary);}
+.preview-tbl td.num{font-weight:500;color:var(--text-primary);}
+
+/* More... section in asset tree */
+.asset-more-btn{width:100%;text-align:left;padding:5px 8px 5px 12px;font-size:11px;font-weight:600;color:var(--text-tertiary);background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:5px;font-family:inherit;letter-spacing:.01em;}
+.asset-more-btn:hover{color:var(--text-secondary);}
+.asset-more-btn svg{width:9px;height:9px;flex-shrink:0;transition:transform .15s;}
+.asset-more-btn.open svg{transform:rotate(90deg);}
+.asset-ai-group{display:none;padding-left:4px;}
+.asset-ai-group.open{display:block;}
+.asset-ai-item{padding:3px 8px 3px 20px;font-size:10.5px;color:var(--text-secondary);display:flex;align-items:center;gap:5px;cursor:pointer;}
+.asset-ai-item:hover{background:var(--bg-secondary);}
+.asset-ai-badge{font-size:9px;font-weight:700;padding:1px 5px;border-radius:99px;background:var(--color-ai-bg);color:var(--color-ai);flex-shrink:0;}
+
+/* Minimized tile */
+.ws-card-tile{background:var(--bg-primary);border:1px solid var(--border-tertiary);border-radius:var(--radius-lg);padding:10px 14px;display:flex;align-items:center;gap:10px;cursor:pointer;flex-shrink:0;}
+.ws-card-tile:hover{background:var(--bg-secondary);}
+.ws-tile-icon{width:28px;height:28px;border-radius:6px;background:var(--brand-50);color:var(--brand-700);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.ws-tile-icon svg{width:14px;height:14px;}
+.ws-tile-name{font-size:12px;font-weight:600;color:var(--text-primary);flex:1;}
+.ws-tile-meta{font-size:11px;color:var(--text-tertiary);}
+
+/* ── Right panel ── */
+.right-panel{width:var(--right-w);min-width:180px;max-width:600px;border-left:1px solid var(--border-tertiary);background:var(--bg-primary);display:flex;flex-direction:column;overflow:hidden;position:relative;flex-shrink:0;}
+.rp-resize-handle{position:absolute;left:0;top:0;bottom:0;width:5px;cursor:col-resize;z-index:10;background:transparent;}
+.rp-resize-handle:hover,.rp-resize-handle.dragging{background:var(--brand-500);opacity:0.35;}
+.rp-tabs{display:flex;border-bottom:1px solid var(--border-tertiary);padding:0 12px;flex-shrink:0;}
+.rp-tab{padding:10px 12px;font-size:12px;font-weight:500;color:var(--text-secondary);cursor:pointer;border:none;background:none;font-family:inherit;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;}
+.rp-tab:hover{color:var(--text-primary);}
+.rp-tab.active{color:var(--brand-500);font-weight:600;border-bottom-color:var(--brand-500);}
+.rp-body{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;}
+.rp-context-block{border:1px solid var(--border-tertiary);border-radius:var(--radius-md);overflow:hidden;}
+.rp-ctx-hdr{padding:8px 12px;font-size:11px;font-weight:600;color:var(--text-secondary);background:var(--bg-tertiary);border-bottom:1px solid var(--border-tertiary);}
+.rp-ctx-body{padding:10px 12px;min-height:80px;color:var(--text-tertiary);font-size:12px;line-height:1.6;}
+.rp-chat-area{flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px;}
+.chat-bubble{padding:8px 10px;border-radius:var(--radius-md);font-size:12px;line-height:1.5;max-width:92%;}
+.chat-bubble.ai{background:var(--bg-secondary);color:var(--text-primary);align-self:flex-start;}
+.chat-bubble.user{background:var(--brand-500);color:#fff;align-self:flex-end;}
+.rp-chat-input-row{border-top:1px solid var(--border-tertiary);padding:8px 10px;display:flex;align-items:center;gap:7px;flex-shrink:0;}
+.rp-input{flex:1;height:32px;border:1px solid var(--border-secondary);border-radius:var(--radius-md);padding:0 10px;font-size:12px;font-family:inherit;color:var(--text-primary);background:var(--bg-secondary);}
+.rp-input:focus{outline:none;border-color:var(--brand-500);background:var(--bg-primary);}
+.rp-send{width:30px;height:30px;border-radius:var(--radius-md);background:var(--brand-500);color:#fff;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;}
+.rp-send:hover{background:var(--brand-700);}
+
+/* Info panel */
+.info-stat-row{display:flex;gap:6px;flex-wrap:wrap;}
+.info-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:99px;font-size:11px;font-weight:600;}
+.info-badge.ai{background:var(--color-ai-bg);color:var(--color-ai);}
+.info-badge.success{background:var(--color-success-bg);color:var(--color-success);}
+.info-section{margin-bottom:10px;}
+.info-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-tertiary);margin-bottom:4px;}
+.info-val{font-size:12px;color:var(--text-primary);line-height:1.5;}
+
+/* Add Context panel */
+.ctx-empty{text-align:center;padding:24px 12px;color:var(--text-tertiary);font-size:12px;}
+.ctx-chip{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border-secondary);border-radius:var(--radius-md);cursor:pointer;background:var(--bg-primary);}
+.ctx-chip:hover{background:var(--bg-secondary);}
+.ctx-chip-icon{width:26px;height:26px;border-radius:5px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.ctx-chip-label{font-size:12px;font-weight:500;color:var(--text-primary);}
+.ctx-chip-sub{font-size:11px;color:var(--text-tertiary);}
+
+/* Data Sources screen */
+.stat-bar{display:flex;align-items:center;flex-wrap:wrap;background:var(--bg-primary);border:1px solid var(--border-tertiary);border-radius:var(--radius-lg);padding:8px 16px;margin-bottom:14px;}
+.stat-item{display:flex;align-items:center;gap:8px;padding:5px 14px;border-left:1px solid var(--border-tertiary);cursor:pointer;border-radius:var(--radius-sm);background:none;border-top:none;border-right:none;border-bottom:none;font-family:inherit;}
+.stat-item:first-child{border-left:none;padding-left:0;}
+.stat-item:hover{background:var(--bg-secondary);}
+.stat-item.active-tile{background:var(--brand-50);outline:1px solid #b5d4f4;border-radius:6px;}
+.stat-icon{width:30px;height:30px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;}
+.si-blue{background:var(--brand-50);color:var(--brand-700);}
+.si-ai{background:var(--color-ai-bg);color:var(--color-ai);}
+.si-green{background:var(--color-success-bg);color:var(--color-success);}
+.si-warn{background:var(--color-warning-bg);color:var(--color-warning);}
+.stat-val{font-size:14px;font-weight:700;color:var(--text-primary);line-height:1.2;}
+.stat-label{font-size:11px;color:var(--text-tertiary);}
+.filter-bar{display:flex;align-items:center;gap:7px;margin-bottom:14px;flex-wrap:wrap;}
+.filter-pill{padding:4px 11px;border-radius:var(--radius-md);border:1px solid var(--border-secondary);background:var(--bg-primary);color:var(--text-secondary);font-size:12px;font-weight:500;font-family:inherit;cursor:pointer;}
+.filter-pill:hover{background:var(--bg-secondary);}
+.filter-pill.active{background:var(--brand-50);border-color:var(--brand-500);color:var(--brand-700);}
+.search-wrap{position:relative;flex:1;min-width:180px;}
+.search-icon{position:absolute;left:8px;top:50%;transform:translateY(-50%);color:var(--text-tertiary);pointer-events:none;}
+.search-box{height:30px;width:100%;border:1px solid var(--border-secondary);border-radius:var(--radius-md);background:var(--bg-primary);padding:0 9px 0 28px;font-size:12px;color:var(--text-primary);font-family:inherit;}
+.search-box:focus{outline:none;border-color:var(--brand-500);}
+.card{background:var(--bg-primary);border:1px solid var(--border-tertiary);border-radius:var(--radius-lg);overflow:hidden;}
+.card-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border-tertiary);}
+.data-table{width:100%;border-collapse:collapse;font-size:12px;}
+.data-table thead tr{border-bottom:1px solid var(--border-tertiary);background:var(--bg-tertiary);}
+.data-table th{padding:7px 14px;text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-tertiary);}
+.data-table tbody tr{border-bottom:1px solid var(--border-tertiary);cursor:pointer;}
+.data-table tbody tr:last-child{border-bottom:none;}
+.data-table tbody tr:hover{background:var(--bg-secondary);}
+.data-table td{padding:9px 14px;color:var(--text-secondary);}
+.data-table td.primary{color:var(--text-primary);font-weight:500;}
+.main-body{flex:1;overflow-y:auto;padding:16px;}
+
+/* Btn utils */
+.btn{display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:var(--radius-md);font-size:11.5px;font-weight:500;font-family:inherit;cursor:pointer;border:1px solid transparent;}
+.btn-primary{background:var(--brand-500);color:#fff;border-color:var(--brand-500);}
+.btn-primary:hover{background:var(--brand-700);}
+.btn-secondary{background:var(--bg-primary);color:var(--text-primary);border-color:var(--border-secondary);}
+.btn-secondary:hover{background:var(--bg-secondary);}
+</style>
+</head>
+<body>
+
+<div id="switcher">
+  <span>Screens:</span>
+  <button class="sw-btn active" onclick="showScreen(0,this)">1 · Workspace (tables open)</button>
+  <button class="sw-btn" onclick="showScreen(1,this)">2 · Workspace (Info tab)</button>
+  <button class="sw-btn" onclick="showScreen(2,this)">3 · Workspace (mixed Row + Card)</button>
+  <button class="sw-btn" onclick="showScreen(3,this)">4 · Workspace (Full Table mode)</button>
+  <button class="sw-btn" onclick="showScreen(4,this)">5 · Data Sources (filter tiles)</button>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     SHARED SIDEBAR SNIPPET (re-used across screens via JS clone — written once below, cloned per screen)
+     ══════════════════════════════════════════════════════ -->
+
+<!-- ══════════════════════════════════════════════════════
+     SCREEN 1 · Workspace — two table cards open, Chat tab
+     ══════════════════════════════════════════════════════ -->
+<div class="screen active" id="screen-0">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo-row"><span class="sidebar-logo">Tablescope</span><button class="collapse-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg></button></div>
+    <div class="tenant-pill"><span class="tenant-avatar">SI</span><span>Simplicit, Inc</span></div>
+    <nav class="sidebar-nav">
+      <a class="nav-row" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>Home</a>
+      <a class="nav-row" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>Business Insight</a>
+      <!-- Projects -->
+      <div class="proj-section">
+        <button class="proj-trigger" onclick="tog(this,'tree0')">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          <span style="flex:1;text-align:left;font-size:12px;">Projects</span>
+          <span class="nav-count">8</span>
+          <svg class="chev open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="projects-tree open" id="tree0">
+          <button class="vis-hdr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:9px;height:9px"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>PRIVATE (1)<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:9px;height:9px;margin-left:auto;"><polyline points="6 9 12 15 18 9"/></svg></button>
+          <!-- API Costs project (selected) -->
+          <div class="proj-row selected">
+            <a class="proj-row-link" onclick="togAsset('asset0')">
+              <span class="proj-dot" style="background:#e85d04;"></span>
+              <span><div class="proj-name">API Costs</div><div class="proj-date">2 days ago</div></span>
+              <span class="proj-add">+ Add</span>
+            </a>
+          </div>
+          <!-- Asset tree -->
+          <div class="asset-tree open" id="asset0">
+            <div>
+              <button class="asset-grp-hdr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:10px;height:10px;opacity:.6;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><span class="ag-name">Tables</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:9px;height:9px;opacity:.4;"><polyline points="6 9 12 15 18 9"/></svg><span class="plus-btn">+</span></button>
+              <div class="asset-item open-in-ws"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>OpenAI Export Invoice</div>
+              <div class="asset-item open-in-ws"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Google Cloud Gemini</div>
+              <div class="asset-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Azure OpenAI Usage</div>
+              <div class="asset-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Anthropic Billing</div>
+            </div>
+            <div>
+              <button class="asset-grp-hdr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:10px;height:10px;opacity:.6;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span class="ag-name">Documents</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:9px;height:9px;opacity:.4;"><polyline points="6 9 12 15 18 9"/></svg><span class="plus-btn">+</span></button>
+              <div class="asset-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>AI Budget Report.pdf</div>
+              <div class="asset-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Vendor Contracts.pdf</div>
+            </div>
+            <div>
+              <button class="asset-grp-hdr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:10px;height:10px;opacity:.6;"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg><span class="ag-name">Data Sources</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:9px;height:9px;opacity:.4;"><polyline points="6 9 12 15 18 9"/></svg><span class="plus-btn">+</span></button>
+              <div class="asset-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>OpenAI_CSV</div>
+              <div class="asset-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>GCP_Billing_CSV</div>
+            </div>
+          </div>
+          <!-- Shared projects (collapsed) -->
+          <button class="vis-hdr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:9px;height:9px"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>SHARED (7)<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:9px;height:9px;margin-left:auto;transform:rotate(-90deg)"><polyline points="6 9 12 15 18 9"/></svg></button>
+          <div style="padding-left:4px;">
+            <div class="proj-row"><a class="proj-row-link"><span class="proj-dot" style="background:#185fa5;"></span><span><div class="proj-name">IT</div><div class="proj-date">1 week ago</div></span></a></div>
+            <div class="proj-row"><a class="proj-row-link"><span class="proj-dot" style="background:#7c3aed;"></span><span><div class="proj-name">Procurement</div><div class="proj-date">2 weeks ago</div></span></a></div>
+            <div class="proj-row"><a class="proj-row-link"><span class="proj-dot" style="background:#0f6e56;"></span><span><div class="proj-name">Quality</div><div class="proj-date">2 weeks ago</div></span></a></div>
+          </div>
+        </div>
+      </div>
+      <a class="nav-row" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z"/></svg>AI Assistant</a>
+    </nav>
+    <div class="sidebar-footer"><a class="nav-row" href="#" style="margin:0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:14px;height:14px;opacity:.75;"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg>Settings</a></div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main-wrap">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span class="tb-section">Projects</span>
+        <span class="tb-sep">/</span>
+        <span class="tb-project">API Costs</span>
+        <span class="tb-badge">Active</span>
+      </div>
+      <div class="topbar-right">
+        <div class="visibility-row">
+          <span id="vis-label-1">Private</span>
+          <label class="toggle-switch"><input type="checkbox" onchange="document.getElementById('vis-label-1').textContent=this.checked?'Shared':'Private'"/><span class="toggle-slider"></span></label>
+        </div>
+        <button class="members-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:13px;height:13px;"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Members</button>
+      </div>
+    </div>
+
+    <!-- Nav card grid -->
+    <div class="nav-card-grid">
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Overview</span></button>
+      <button class="nav-card active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><span>Workspace</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg><span>Tables</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span>Documents</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9M15 21V9"/></svg><span>Dashboards</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 21 1.9-5.7a8.5 8.5 0 1 1 3.8 3.8z"/></svg><span>Chats</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z"/></svg><span>Insights<br/>&amp; Actions</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M3 12h3M18 12h3M12 3v3M12 18v3"/></svg><span>Scopes</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg><span>Knowledge<br/>Graphs</span></button>
+      <button class="nav-card" onclick="showScreen(3,document.querySelectorAll('.sw-btn')[3])"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg><span>Data<br/>Sources</span></button>
+
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span>Reference</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg><span>APIs</span></button>
+    </div>
+
+    <!-- Workspace tab bar -->
+    <div class="workspace-tabs">
+      <button class="ws-tab active">Tokens_Input_Output</button>
+      <button class="ws-tab">Costs by LLM Provider</button>
+      <button class="ws-tab">Servers_Infrastructure</button>
+      <button class="ws-tab-new">+</button>
+    </div>
+
+    <!-- Split: canvas + right panel -->
+    <div class="content-split">
+      <!-- Canvas -->
+      <div class="canvas-area">
+        <!-- Table card 1 -->
+        <div class="ws-card" id="s0-c1">
+          <div class="ws-card-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;color:var(--brand-500);flex-shrink:0;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+            <span class="ws-card-title">OpenAI Export Invoice yyyy/mm – yyyy/mm</span>
+            <div class="ws-card-actions">
+              <div class="view-toggle">
+                <button class="vt-btn" onclick="setView('s0-c1','card')">Card</button>
+                <button class="vt-btn active" onclick="setView('s0-c1','row')">Row</button>
+                <button class="vt-btn" onclick="setView('s0-c1','full')">Full</button>
+              </div>
+              <button class="ws-icon-btn" title="Close" style="color:var(--text-tertiary);">✕</button>
+            </div>
+          </div>
+          <div style="overflow-x:auto;">
+            <table class="preview-tbl">
+              <thead><tr><th>Month</th><th>Model</th><th>Input Tokens</th><th>Output Tokens</th><th>Cost ($)</th></tr></thead>
+              <tbody>
+                <tr><td>2024-01</td><td>gpt-4</td><td class="num">4,120,000</td><td class="num">890,000</td><td class="num">$148.20</td></tr>
+                <tr><td>2024-02</td><td>gpt-4</td><td class="num">5,340,000</td><td class="num">1,100,000</td><td class="num">$195.60</td></tr>
+                <tr><td>2024-03</td><td>gpt-4o</td><td class="num">6,780,000</td><td class="num">1,430,000</td><td class="num">$172.40</td></tr>
+                <tr><td>2024-04</td><td>gpt-4o</td><td class="num">7,200,000</td><td class="num">1,580,000</td><td class="num">$183.90</td></tr>
+                <tr><td>2024-05</td><td>gpt-4o-mini</td><td class="num">9,100,000</td><td class="num">2,010,000</td><td class="num">$89.40</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Table card 2 -->
+        <div class="ws-card" id="s0-c2">
+          <div class="ws-card-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;color:var(--brand-500);flex-shrink:0;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+            <span class="ws-card-title">Google Cloud Gemini</span>
+            <div class="ws-card-actions">
+              <div class="view-toggle">
+                <button class="vt-btn" onclick="setView('s0-c2','card')">Card</button>
+                <button class="vt-btn active" onclick="setView('s0-c2','row')">Row</button>
+                <button class="vt-btn" onclick="setView('s0-c2','full')">Full</button>
+              </div>
+              <button class="ws-icon-btn" title="Close" style="color:var(--text-tertiary);">✕</button>
+            </div>
+          </div>
+          <div style="overflow-x:auto;">
+            <table class="preview-tbl">
+              <thead><tr><th>Month</th><th>Model</th><th>Input Tokens</th><th>Output Tokens</th><th>Cost ($)</th></tr></thead>
+              <tbody>
+                <tr><td>2024-01</td><td>gemini-pro</td><td class="num">2,800,000</td><td class="num">620,000</td><td class="num">$49.00</td></tr>
+                <tr><td>2024-02</td><td>gemini-pro</td><td class="num">3,100,000</td><td class="num">710,000</td><td class="num">$54.25</td></tr>
+                <tr><td>2024-03</td><td>gemini-1.5-pro</td><td class="num">4,400,000</td><td class="num">980,000</td><td class="num">$86.90</td></tr>
+                <tr><td>2024-04</td><td>gemini-1.5-pro</td><td class="num">5,200,000</td><td class="num">1,150,000</td><td class="num">$102.70</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right panel — Chat tab active -->
+      <div class="right-panel" id="rp-s0">
+        <div class="rp-resize-handle" onmousedown="initRpResize(event,'rp-s0')"></div>
+        <div class="rp-tabs">
+          <button class="rp-tab active">Chat</button>
+          <button class="rp-tab" onclick="showScreen(1,document.querySelectorAll('.sw-btn')[1])">Info</button>
+          <button class="rp-tab">Add Context</button>
+        </div>
+        <div class="rp-chat-area">
+          <div class="chat-bubble ai">I can see two tables in this workspace: <strong>OpenAI Export Invoice</strong> and <strong>Google Cloud Gemini</strong>. What would you like to know?</div>
+        </div>
+        <div class="rp-chat-input-row">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:16px;height:16px;color:var(--color-ai);flex-shrink:0;"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z"/></svg>
+          <input class="rp-input" placeholder="Where am I spending the most on API infrastructure?" />
+          <button class="rp-send">↑</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     SCREEN 2 · Workspace — Info tab (click table to see details)
+     ══════════════════════════════════════════════════════ -->
+<div class="screen" id="screen-1">
+  <aside class="sidebar">
+    <div class="sidebar-logo-row"><span class="sidebar-logo">Tablescope</span><button class="collapse-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg></button></div>
+    <div class="tenant-pill"><span class="tenant-avatar">SI</span><span>Simplicit, Inc</span></div>
+    <nav class="sidebar-nav">
+      <a class="nav-row" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>Home</a>
+      <a class="nav-row" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/></svg>Business Insight</a>
+      <div class="proj-section">
+        <button class="proj-trigger"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span style="flex:1;text-align:left;font-size:12px;">Projects</span><span class="nav-count">8</span><svg class="chev open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg></button>
+        <div class="projects-tree open">
+          <button class="vis-hdr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:9px;height:9px"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>PRIVATE (1)</button>
+          <div class="proj-row selected"><a class="proj-row-link"><span class="proj-dot" style="background:#e85d04;"></span><span><div class="proj-name">API Costs</div><div class="proj-date">2 days ago</div></span><span class="proj-add">+ Add</span></a></div>
+          <div class="asset-tree open">
+            <div>
+              <button class="asset-grp-hdr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:10px;height:10px;opacity:.6;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><span class="ag-name">Tables</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:9px;height:9px;opacity:.4;"><polyline points="6 9 12 15 18 9"/></svg><span class="plus-btn">+</span></button>
+              <div class="asset-item open-in-ws" style="outline:1px solid var(--brand-500);border-radius:4px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:10px;height:10px;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>OpenAI Export Invoice</div>
+              <div class="asset-item open-in-ws"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:10px;height:10px;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Google Cloud Gemini</div>
+              <div class="asset-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:10px;height:10px;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Azure OpenAI Usage</div>
+            </div>
+            <div>
+              <button class="asset-grp-hdr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:10px;height:10px;opacity:.6;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span class="ag-name">Documents</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:9px;height:9px;opacity:.4;"><polyline points="6 9 12 15 18 9"/></svg><span class="plus-btn">+</span></button>
+              <div class="asset-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:10px;height:10px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>AI Budget Report.pdf</div>
+            </div>
+          </div>
+          <button class="vis-hdr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:9px;height:9px"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>SHARED (7)<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:9px;height:9px;margin-left:auto;transform:rotate(-90deg)"><polyline points="6 9 12 15 18 9"/></svg></button>
+        </div>
+      </div>
+      <a class="nav-row" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z"/></svg>AI Assistant</a>
+    </nav>
+    <div class="sidebar-footer"><a class="nav-row" href="#" style="margin:0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:14px;height:14px;opacity:.75;"><circle cx="12" cy="12" r="3"/></svg>Settings</a></div>
+  </aside>
+
+  <div class="main-wrap">
+    <div class="topbar"><div class="topbar-breadcrumb"><span class="tb-section">Projects</span><span class="tb-sep">/</span><span class="tb-project">API Costs</span><span class="tb-badge">Active</span></div><div class="topbar-right"><div class="visibility-row"><span id="vis-label-2">Private</span><label class="toggle-switch"><input type="checkbox" onchange="document.getElementById('vis-label-2').textContent=this.checked?'Shared':'Private'"/><span class="toggle-slider"></span></label></div><button class="members-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:13px;height:13px;"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Members</button></div></div>
+    <div class="nav-card-grid">
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Overview</span></button>
+      <button class="nav-card active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><span>Workspace</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg><span>Tables</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span>Documents</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9M15 21V9"/></svg><span>Dashboards</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 21 1.9-5.7a8.5 8.5 0 1 1 3.8 3.8z"/></svg><span>Chats</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z"/></svg><span>Insights<br/>&amp; Actions</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M3 12h3M18 12h3M12 3v3M12 18v3"/></svg><span>Scopes</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg><span>Knowledge<br/>Graphs</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg><span>Data<br/>Sources</span></button>
+
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span>Reference</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg><span>APIs</span></button>
+    </div>
+    <div class="workspace-tabs"><button class="ws-tab active">Tokens_Input_Output</button><button class="ws-tab">Costs by LLM Provider</button><button class="ws-tab">Servers_Infrastructure</button><button class="ws-tab-new">+</button><button class="btn btn-primary" style="margin-left:auto;margin-right:4px;padding:4px 10px;font-size:11px;">+ New Workspace</button></div>
+    <div class="content-split">
+      <div class="canvas-area">
+        <div class="ws-card" style="outline:2px solid var(--brand-500);">
+          <div class="ws-card-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;color:var(--brand-500);flex-shrink:0;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+            <span class="ws-card-title">OpenAI Export Invoice yyyy/mm – yyyy/mm</span>
+            <div class="ws-card-actions"><button class="ws-icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button><button class="ws-icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button><button class="ws-icon-btn">✕</button></div>
+          </div>
+          <div style="overflow-x:auto;"><table class="preview-tbl"><thead><tr><th>Month</th><th>Model</th><th>Input Tokens</th><th>Output Tokens</th><th>Cost ($)</th></tr></thead><tbody><tr><td>2024-01</td><td>gpt-4</td><td class="num">4,120,000</td><td class="num">890,000</td><td class="num">$148.20</td></tr><tr><td>2024-02</td><td>gpt-4</td><td class="num">5,340,000</td><td class="num">1,100,000</td><td class="num">$195.60</td></tr><tr><td>2024-03</td><td>gpt-4o</td><td class="num">6,780,000</td><td class="num">1,430,000</td><td class="num">$172.40</td></tr></tbody></table></div>
+        </div>
+        <div class="ws-card">
+          <div class="ws-card-header"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;color:var(--brand-500);flex-shrink:0;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><span class="ws-card-title">Google Cloud Gemini</span><div class="ws-card-actions"><button class="ws-icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button><button class="ws-icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button><button class="ws-icon-btn">✕</button></div></div>
+          <div style="overflow-x:auto;"><table class="preview-tbl"><thead><tr><th>Month</th><th>Model</th><th>Input Tokens</th><th>Output Tokens</th><th>Cost ($)</th></tr></thead><tbody><tr><td>2024-01</td><td>gemini-pro</td><td class="num">2,800,000</td><td class="num">620,000</td><td class="num">$49.00</td></tr><tr><td>2024-02</td><td>gemini-pro</td><td class="num">3,100,000</td><td class="num">710,000</td><td class="num">$54.25</td></tr></tbody></table></div>
+        </div>
+      </div>
+
+      <!-- Right panel — Info tab -->
+      <div class="right-panel" id="rp-s1">
+        <div class="rp-resize-handle" onmousedown="initRpResize(event,'rp-s1')"></div>
+        <div class="rp-tabs">
+          <button class="rp-tab" onclick="showScreen(0,document.querySelectorAll('.sw-btn')[0])">Chat</button>
+          <button class="rp-tab active">Info</button>
+          <button class="rp-tab">Add Context</button>
+        </div>
+        <div class="rp-body">
+          <p style="font-size:11px;color:var(--text-tertiary);margin-bottom:6px;">Click a table or document in the canvas to see its details here.</p>
+          <!-- Info for currently selected table (blue outlined above) -->
+          <div style="background:var(--brand-50);border:1px solid #b5d4f4;border-radius:var(--radius-md);padding:10px 12px;margin-bottom:10px;">
+            <div style="font-size:11px;font-weight:700;color:var(--brand-700);margin-bottom:6px;">📊 OpenAI Export Invoice</div>
+            <div class="info-section"><div class="info-label">Source</div><div class="info-val">OpenAI_CSV</div></div>
+            <div class="info-section"><div class="info-label">Origin</div><div class="info-val"><span class="info-badge ai">AI Generated</span></div></div>
+            <div class="info-section"><div class="info-label">Columns</div><div class="info-val" style="font-size:11px;">Month, Model, Input Tokens, Output Tokens, Cost ($)</div></div>
+            <div class="info-section"><div class="info-label">Rows</div><div class="info-val">5 (preview) · 62 total</div></div>
+            <div class="info-section"><div class="info-label">Last run</div><div class="info-val">2h ago · avg 1.2s</div></div>
+            <div class="info-section"><div class="info-label">SQL</div><div style="font-size:11px;font-family:monospace;background:var(--bg-secondary);padding:6px 8px;border-radius:4px;color:var(--text-secondary);line-height:1.5;">SELECT month, model,<br/>  SUM(input_tokens),<br/>  SUM(output_tokens),<br/>  SUM(cost_usd)<br/>FROM openai_csv<br/>GROUP BY month, model</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     SCREEN 3 · Workspace — one card minimized to tile
+     ══════════════════════════════════════════════════════ -->
+<div class="screen" id="screen-2">
+  <aside class="sidebar">
+    <div class="sidebar-logo-row"><span class="sidebar-logo">Tablescope</span><button class="collapse-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg></button></div>
+    <div class="tenant-pill"><span class="tenant-avatar">SI</span><span>Simplicit, Inc</span></div>
+    <nav class="sidebar-nav">
+      <a class="nav-row" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>Home</a>
+      <a class="nav-row" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/></svg>Business Insight</a>
+      <div class="proj-section">
+        <button class="proj-trigger"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span style="flex:1;text-align:left;font-size:12px;">Projects</span><span class="nav-count">8</span><svg class="chev open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg></button>
+        <div class="projects-tree open">
+          <button class="vis-hdr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:9px;height:9px"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>PRIVATE (1)</button>
+          <div class="proj-row selected"><a class="proj-row-link"><span class="proj-dot" style="background:#e85d04;"></span><span><div class="proj-name">API Costs</div></span><span class="proj-add">+ Add</span></a></div>
+          <div class="asset-tree open">
+            <div><button class="asset-grp-hdr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:10px;height:10px;opacity:.6;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><span class="ag-name">Tables</span><span class="plus-btn">+</span></button>
+              <div class="asset-item open-in-ws"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:10px;height:10px;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>OpenAI Export Invoice</div>
+              <div class="asset-item open-in-ws"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:10px;height:10px;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Google Cloud Gemini</div>
+              <div class="asset-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:10px;height:10px;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Azure OpenAI Usage</div>
+            </div>
+            <div><button class="asset-grp-hdr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:10px;height:10px;opacity:.6;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span class="ag-name">Documents</span><span class="plus-btn">+</span></button>
+              <div class="asset-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:10px;height:10px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>AI Budget Report.pdf</div>
+            </div>
+          </div>
+          <button class="vis-hdr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:9px;height:9px"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>SHARED (7)</button>
+        </div>
+      </div>
+      <a class="nav-row" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z"/></svg>AI Assistant</a>
+    </nav>
+    <div class="sidebar-footer"><a class="nav-row" href="#" style="margin:0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:14px;height:14px;opacity:.75;"><circle cx="12" cy="12" r="3"/></svg>Settings</a></div>
+  </aside>
+  <div class="main-wrap">
+    <div class="topbar"><div class="topbar-breadcrumb"><span class="tb-section">Projects</span><span class="tb-sep">/</span><span class="tb-project">API Costs</span><span class="tb-badge">Active</span></div><div class="topbar-right"><div class="visibility-row"><span id="vis-label-3">Private</span><label class="toggle-switch"><input type="checkbox" onchange="document.getElementById('vis-label-3').textContent=this.checked?'Shared':'Private'"/><span class="toggle-slider"></span></label></div><button class="members-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:13px;height:13px;"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Members</button></div></div>
+    <div class="nav-card-grid">
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Overview</span></button>
+      <button class="nav-card active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><span>Workspace</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg><span>Tables</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span>Documents</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9M15 21V9"/></svg><span>Dashboards</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 21 1.9-5.7a8.5 8.5 0 1 1 3.8 3.8z"/></svg><span>Chats</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z"/></svg><span>Insights<br/>&amp; Actions</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M3 12h3M18 12h3M12 3v3M12 18v3"/></svg><span>Scopes</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg><span>Knowledge<br/>Graphs</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg><span>Data<br/>Sources</span></button>
+
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span>Reference</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg><span>APIs</span></button>
+    </div>
+    <div class="workspace-tabs"><button class="ws-tab active">Tokens_Input_Output</button><button class="ws-tab">Costs by LLM Provider</button><button class="ws-tab">Servers_Infrastructure</button><button class="ws-tab-new">+</button><button class="btn btn-primary" style="margin-left:auto;margin-right:4px;padding:4px 10px;font-size:11px;">+ New Workspace</button></div>
+    <div class="content-split">
+      <div class="canvas-area">
+
+        <!-- ① Expanded table (Row mode, full width) -->
+        <div class="ws-card" id="s2-c1">
+          <div class="ws-card-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;color:var(--brand-500);flex-shrink:0;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+            <span class="ws-card-title">OpenAI Export Invoice yyyy/mm – yyyy/mm</span>
+            <div class="ws-card-actions">
+              <div class="view-toggle">
+                <button class="vt-btn" onclick="setView('s2-c1','card')">Card</button>
+                <button class="vt-btn active" onclick="setView('s2-c1','row')">Row</button>
+                <button class="vt-btn" onclick="setView('s2-c1','full')">Full</button>
+              </div>
+              <button class="ws-icon-btn">✕</button>
+            </div>
+          </div>
+          <div style="overflow-x:auto;">
+            <table class="preview-tbl">
+              <thead><tr><th>Month</th><th>Model</th><th>Input Tokens</th><th>Output Tokens</th><th>Cost ($)</th></tr></thead>
+              <tbody>
+                <tr><td>2024-01</td><td>gpt-4</td><td class="num">4,120,000</td><td class="num">890,000</td><td class="num">$148.20</td></tr>
+                <tr><td>2024-02</td><td>gpt-4</td><td class="num">5,340,000</td><td class="num">1,100,000</td><td class="num">$195.60</td></tr>
+                <tr><td>2024-03</td><td>gpt-4o</td><td class="num">6,780,000</td><td class="num">1,430,000</td><td class="num">$172.40</td></tr>
+                <tr><td>2024-04</td><td>gpt-4o</td><td class="num">7,200,000</td><td class="num">1,580,000</td><td class="num">$183.90</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ② Square card — Table (Card mode, ~33% width) -->
+        <div class="ws-card card-mode" id="s2-c2">
+          <div class="ws-card-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;color:var(--brand-500);flex-shrink:0;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+            <span class="ws-card-title">Google Cloud Gemini</span>
+            <div class="ws-card-actions">
+              <div class="view-toggle">
+                <button class="vt-btn active" onclick="setView('s2-c2','card')">Card</button>
+                <button class="vt-btn" onclick="setView('s2-c2','row')">Row</button>
+                <button class="vt-btn" onclick="setView('s2-c2','full')">Full</button>
+              </div>
+              <button class="ws-icon-btn">✕</button>
+            </div>
+          </div>
+          <div class="card-mini-preview">
+            <div class="card-mini-header-row" style="grid-template-columns:repeat(5,1fr);"><div class="card-mini-cell hdr"></div><div class="card-mini-cell hdr"></div><div class="card-mini-cell hdr"></div><div class="card-mini-cell hdr"></div><div class="card-mini-cell hdr"></div></div>
+            <div class="card-mini-data-row" style="grid-template-columns:repeat(5,1fr);"><div class="card-mini-cell"></div><div class="card-mini-cell"></div><div class="card-mini-cell"></div><div class="card-mini-cell"></div><div class="card-mini-cell"></div></div>
+            <div class="card-mini-data-row" style="grid-template-columns:repeat(5,1fr);"><div class="card-mini-cell"></div><div class="card-mini-cell"></div><div class="card-mini-cell"></div><div class="card-mini-cell"></div><div class="card-mini-cell"></div></div>
+            <div class="card-mini-data-row" style="grid-template-columns:repeat(5,1fr);"><div class="card-mini-cell"></div><div class="card-mini-cell"></div><div class="card-mini-cell"></div><div class="card-mini-cell"></div><div class="card-mini-cell"></div></div>
+            <div class="card-mini-data-row" style="grid-template-columns:repeat(5,1fr);"><div class="card-mini-cell"></div><div class="card-mini-cell"></div><div class="card-mini-cell"></div><div class="card-mini-cell"></div><div class="card-mini-cell"></div></div>
+            <div class="card-mini-data-row" style="grid-template-columns:repeat(5,1fr);"><div class="card-mini-cell"></div><div class="card-mini-cell"></div><div class="card-mini-cell"></div><div class="card-mini-cell"></div><div class="card-mini-cell"></div></div>
+          </div>
+          <div class="card-mini-meta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:10px;height:10px;opacity:.5;"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/></svg>GCP_Billing_CSV &nbsp;·&nbsp; 48 rows</div>
+        </div>
+
+        <!-- ③ Square card — Document (Card mode, ~33% width) -->
+        <div class="ws-card card-mode" id="s2-c3">
+          <div class="ws-card-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;color:var(--color-ai);flex-shrink:0;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span class="ws-card-title">AI Budget Report.pdf</span>
+            <div class="ws-card-actions">
+              <div class="view-toggle">
+                <button class="vt-btn active" onclick="setView('s2-c3','card')">Card</button>
+                <button class="vt-btn" onclick="setView('s2-c3','row')">Row</button>
+                <button class="vt-btn" onclick="setView('s2-c3','full')">Full</button>
+              </div>
+              <button class="ws-icon-btn">✕</button>
+            </div>
+          </div>
+          <div class="card-doc-body">
+            <div class="card-doc-summary">AI infrastructure spending across OpenAI, GCP, and Azure for FY2024, with cost breakdown by model and team.</div>
+            <div class="card-doc-tags">
+              <span class="card-doc-tag ai">AI Indexed</span>
+              <span class="card-doc-tag">Finance</span>
+              <span class="card-doc-tag">FY2024</span>
+            </div>
+          </div>
+          <div class="card-mini-meta">Updated 3 days ago</div>
+        </div>
+
+        <!-- ④ Second expanded table (Row mode, full width) -->
+        <div class="ws-card" id="s2-c4">
+          <div class="ws-card-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;color:var(--brand-500);flex-shrink:0;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+            <span class="ws-card-title">Azure OpenAI Usage</span>
+            <div class="ws-card-actions">
+              <div class="view-toggle">
+                <button class="vt-btn" onclick="setView('s2-c4','card')">Card</button>
+                <button class="vt-btn active" onclick="setView('s2-c4','row')">Row</button>
+                <button class="vt-btn" onclick="setView('s2-c4','full')">Full</button>
+              </div>
+              <button class="ws-icon-btn">✕</button>
+            </div>
+          </div>
+          <div style="overflow-x:auto;">
+            <table class="preview-tbl">
+              <thead><tr><th>Month</th><th>Deployment</th><th>Input Tokens</th><th>Output Tokens</th><th>Cost ($)</th></tr></thead>
+              <tbody>
+                <tr><td>2024-01</td><td>gpt-35-turbo</td><td class="num">1,240,000</td><td class="num">310,000</td><td class="num">$22.80</td></tr>
+                <tr><td>2024-02</td><td>gpt-35-turbo</td><td class="num">1,590,000</td><td class="num">390,000</td><td class="num">$29.10</td></tr>
+                <tr><td>2024-03</td><td>gpt-4</td><td class="num">2,100,000</td><td class="num">480,000</td><td class="num">$78.60</td></tr>
+                <tr><td>2024-04</td><td>gpt-4o</td><td class="num">3,400,000</td><td class="num">720,000</td><td class="num">$86.20</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+      <!-- Right panel — Chat tab -->
+      <div class="right-panel" id="rp-s2">
+        <div class="rp-resize-handle" onmousedown="initRpResize(event,'rp-s2')"></div>
+        <div class="rp-tabs"><button class="rp-tab active">Chat</button><button class="rp-tab">Info</button><button class="rp-tab">Add Context</button></div>
+        <div class="rp-chat-area"><div class="chat-bubble ai">Workspace: <strong>Tokens_Input_Output</strong><br/>OpenAI Export Invoice (minimized) + Google Cloud Gemini are in scope.</div></div>
+        <div class="rp-chat-input-row">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:16px;height:16px;color:var(--color-ai);flex-shrink:0;"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z"/></svg>
+          <input class="rp-input" placeholder="Ask about this workspace…" />
+          <button class="rp-send">↑</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     SCREEN 4 · Workspace — Full Table mode
+     ══════════════════════════════════════════════════════ -->
+<div class="screen" id="screen-3">
+  <!-- Compact sidebar (same project context) -->
+  <aside class="sidebar">
+    <div class="sidebar-logo-row"><span class="sidebar-logo">Tablescope</span></div>
+    <div class="tenant-pill"><span class="tenant-avatar">SI</span><span>Simplicit, Inc</span></div>
+    <nav class="sidebar-nav">
+      <a class="nav-row" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:14px;height:14px;"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Home</a>
+      <a class="nav-row" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:14px;height:14px;"><circle cx="12" cy="12" r="10"/></svg>Business Insight</a>
+      <div class="proj-section">
+        <button class="proj-trigger"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span style="flex:1;text-align:left;font-size:12px;">Projects</span><span class="nav-count">8</span><svg class="chev open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg></button>
+        <div class="projects-tree open">
+          <button class="vis-hdr">PRIVATE (1)</button>
+          <div class="proj-row selected"><a class="proj-row-link"><span class="proj-dot" style="background:#e85d04;"></span><span><div class="proj-name">API Costs</div></span><span class="proj-add">+ Add</span></a></div>
+          <div class="asset-tree open">
+            <div><button class="asset-grp-hdr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:10px;height:10px;opacity:.6;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><span class="ag-name">Tables</span><span class="plus-btn">+</span></button>
+              <!-- This item is in Full mode — shown with full-table indicator -->
+              <div class="asset-item open-in-ws" style="outline:2px solid var(--brand-500);border-radius:4px;font-weight:600;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:10px;height:10px;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>OpenAI Export Invoice <span style="font-size:9px;color:var(--brand-500);margin-left:auto;">[Full]</span></div>
+              <div class="asset-item" style="opacity:0.4;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:10px;height:10px;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Google Cloud Gemini</div>
+              <div class="asset-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:10px;height:10px;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Azure OpenAI Usage</div>
+            </div>
+          </div>
+          <button class="vis-hdr">SHARED (7)</button>
+        </div>
+      </div>
+      <a class="nav-row" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:14px;height:14px;"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z"/></svg>AI Assistant</a>
+    </nav>
+    <div class="sidebar-footer"><a class="nav-row" href="#" style="margin:0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:14px;height:14px;opacity:.75;"><circle cx="12" cy="12" r="3"/></svg>Settings</a></div>
+  </aside>
+
+  <div class="main-wrap">
+    <!-- Topbar -->
+    <div class="topbar"><div class="topbar-breadcrumb"><span class="tb-section">Projects</span><span class="tb-sep">/</span><span class="tb-project">API Costs</span><span class="tb-badge">Active</span></div><div class="topbar-right"><div class="visibility-row"><span>Private</span><label class="toggle-switch"><input type="checkbox"/><span class="toggle-slider"></span></label></div><button class="members-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:13px;height:13px;"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>Members</button></div></div>
+
+    <!-- Nav cards (same as always) -->
+    <div class="nav-card-grid">
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Overview</span></button>
+      <button class="nav-card active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><span>Workspace</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg><span>Tables</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span>Documents</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9M15 21V9"/></svg><span>Dashboards</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 21 1.9-5.7a8.5 8.5 0 1 1 3.8 3.8z"/></svg><span>Chats</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z"/></svg><span>Insights<br/>&amp; Actions</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M3 12h3M18 12h3M12 3v3M12 18v3"/></svg><span>Scopes</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg><span>Knowledge<br/>Graphs</span></button>
+      <button class="nav-card" onclick="showScreen(4,document.querySelectorAll('.sw-btn')[4])"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg><span>Data<br/>Sources</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span>Reference</span></button>
+      <button class="nav-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg><span>APIs</span></button>
+    </div>
+
+    <!-- Workspace tab bar -->
+    <div class="workspace-tabs"><button class="ws-tab active">Tokens_Input_Output</button><button class="ws-tab">Costs by LLM Provider</button><button class="ws-tab-new">+</button><button class="btn btn-primary" style="margin-left:auto;margin-right:4px;padding:4px 10px;font-size:11px;">+ New Workspace</button></div>
+
+    <!-- Full Table mode: canvas takes entire area, other cards hidden -->
+    <div class="content-split">
+      <div class="canvas-full-mode">
+        <div class="canvas-full-header">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;color:var(--brand-500);flex-shrink:0;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+          <span class="canvas-full-title">OpenAI Export Invoice yyyy/mm – yyyy/mm</span>
+          <span style="font-size:11px;color:var(--text-tertiary);margin-right:10px;">Full Table — 1 other table hidden</span>
+          <div class="canvas-full-actions">
+            <!-- View toggle: Full is active -->
+            <div class="view-toggle">
+              <button class="vt-btn" title="Card" onclick="showScreen(2,document.querySelectorAll('.sw-btn')[2])"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg>Card</button>
+              <button class="vt-btn" title="Row" onclick="showScreen(0,document.querySelectorAll('.sw-btn')[0])"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18"/></svg>Row</button>
+              <button class="vt-btn active" title="Full table"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>Full</button>
+            </div>
+            <button class="btn btn-secondary" style="font-size:11px;padding:4px 9px;" title="Move to its own workspace tab">Break to new workspace</button>
+            <button class="ws-icon-btn" title="Close" style="color:var(--text-tertiary);">✕</button>
+          </div>
+        </div>
+        <!-- Full table preview — more rows visible -->
+        <div class="canvas-full-table">
+          <table class="preview-tbl" style="font-size:12px;">
+            <thead><tr><th>Month</th><th>Model</th><th>Input Tokens</th><th>Output Tokens</th><th>Cost ($)</th><th>Requests</th><th>Avg Latency (ms)</th><th>Error Rate</th></tr></thead>
+            <tbody>
+              <tr><td>2024-01</td><td>gpt-4</td><td class="num">4,120,000</td><td class="num">890,000</td><td class="num">$148.20</td><td class="num">18,400</td><td class="num">1,240</td><td class="num">0.4%</td></tr>
+              <tr><td>2024-02</td><td>gpt-4</td><td class="num">5,340,000</td><td class="num">1,100,000</td><td class="num">$195.60</td><td class="num">22,800</td><td class="num">1,180</td><td class="num">0.3%</td></tr>
+              <tr><td>2024-03</td><td>gpt-4o</td><td class="num">6,780,000</td><td class="num">1,430,000</td><td class="num">$172.40</td><td class="num">31,200</td><td class="num">890</td><td class="num">0.2%</td></tr>
+              <tr><td>2024-04</td><td>gpt-4o</td><td class="num">7,200,000</td><td class="num">1,580,000</td><td class="num">$183.90</td><td class="num">34,100</td><td class="num">860</td><td class="num">0.2%</td></tr>
+              <tr><td>2024-05</td><td>gpt-4o-mini</td><td class="num">9,100,000</td><td class="num">2,010,000</td><td class="num">$89.40</td><td class="num">48,700</td><td class="num">420</td><td class="num">0.1%</td></tr>
+              <tr><td>2024-06</td><td>gpt-4o-mini</td><td class="num">11,400,000</td><td class="num">2,580,000</td><td class="num">$112.60</td><td class="num">61,200</td><td class="num">410</td><td class="num">0.1%</td></tr>
+              <tr><td>2024-07</td><td>gpt-4o</td><td class="num">8,900,000</td><td class="num">1,970,000</td><td class="num">$226.10</td><td class="num">40,300</td><td class="num">920</td><td class="num">0.3%</td></tr>
+              <tr><td>2024-08</td><td>gpt-4o-mini</td><td class="num">13,200,000</td><td class="num">3,100,000</td><td class="num">$131.00</td><td class="num">72,400</td><td class="num">390</td><td class="num">0.1%</td></tr>
+              <tr><td>2024-09</td><td>o1-preview</td><td class="num">2,100,000</td><td class="num">980,000</td><td class="num">$343.50</td><td class="num">8,400</td><td class="num">12,400</td><td class="num">0.5%</td></tr>
+              <tr><td>2024-10</td><td>o1-mini</td><td class="num">4,800,000</td><td class="num">1,700,000</td><td class="num">$152.00</td><td class="num">18,200</td><td class="num">5,800</td><td class="num">0.2%</td></tr>
+              <tr><td>2024-11</td><td>gpt-4o</td><td class="num">9,600,000</td><td class="num">2,200,000</td><td class="num">$244.80</td><td class="num">44,100</td><td class="num">870</td><td class="num">0.2%</td></tr>
+              <tr><td>2024-12</td><td>gpt-4o-mini</td><td class="num">15,400,000</td><td class="num">3,700,000</td><td class="num">$153.00</td><td class="num">84,200</td><td class="num">380</td><td class="num">0.1%</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Right panel still visible in Full mode -->
+      <div class="right-panel" id="rp-s3">
+        <div class="rp-resize-handle" onmousedown="initRpResize(event,'rp-s3')"></div>
+        <div class="rp-tabs"><button class="rp-tab active">Chat</button><button class="rp-tab">Info</button><button class="rp-tab">Add Context</button></div>
+        <div class="rp-chat-area">
+          <div class="chat-bubble ai">Viewing <strong>OpenAI Export Invoice</strong> in full table mode. What would you like to know?</div>
+          <div class="chat-bubble user">Which model had the highest cost in Q3?</div>
+          <div class="chat-bubble ai"><strong>gpt-4o</strong> had the highest cost in Q3 at $226.10 (July 2024), followed by gpt-4o-mini at $131.00 (August).</div>
+        </div>
+        <div class="rp-chat-input-row">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:16px;height:16px;color:var(--color-ai);flex-shrink:0;"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z"/></svg>
+          <input class="rp-input" placeholder="Ask about this table…" />
+          <button class="rp-send">↑</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     SCREEN 5 · Data Sources (filter tiles)
+     ══════════════════════════════════════════════════════ -->
+<div class="screen" id="screen-4">
+  <aside class="sidebar">
+    <div class="sidebar-logo-row"><span class="sidebar-logo">Tablescope</span></div>
+    <div class="tenant-pill"><span class="tenant-avatar">SI</span><span>Simplicit, Inc</span></div>
+    <nav class="sidebar-nav">
+      <a class="nav-row" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>Home</a>
+      <a class="nav-row" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/></svg>Business Insight</a>
+      <a class="nav-row" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>Projects<span class="nav-count" style="margin-left:auto;">8</span></a>
+      <a class="nav-row" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z"/></svg>AI Assistant</a>
+    </nav>
+    <div class="sidebar-footer"><a class="nav-row" href="#" style="margin:0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:14px;height:14px;opacity:.75;"><circle cx="12" cy="12" r="3"/></svg>Settings</a></div>
+  </aside>
+  <div class="main-wrap">
+    <div class="topbar"><div class="topbar-breadcrumb"><span class="tb-section">Projects</span><span class="tb-sep">/</span><span class="tb-project">API Costs</span><span class="tb-sep">/</span><span style="font-weight:600;">Data Sources</span></div><div class="topbar-right"><button class="btn btn-secondary" onclick="showScreen(0,document.querySelectorAll('.sw-btn')[0])">← Workspace</button><button class="btn btn-secondary">↻ Sync all</button><button class="btn btn-primary">+ Connect Source</button></div></div>
+    <div class="main-body">
+      <div class="stat-bar">
+        <button class="stat-item active-tile" id="ds-all" onclick="setDsF('all')"><div class="stat-icon si-blue">🗄️</div><div><div class="stat-val">14</div><div class="stat-label">Total</div></div></button>
+        <button class="stat-item" id="ds-db" onclick="setDsF('database')"><div class="stat-icon si-ai">🖥️</div><div><div class="stat-val">0</div><div class="stat-label">Database</div></div></button>
+        <button class="stat-item" id="ds-file" onclick="setDsF('file')"><div class="stat-icon si-green">📄</div><div><div class="stat-val">9</div><div class="stat-label">File</div></div></button>
+        <button class="stat-item" id="ds-saas" onclick="setDsF('saas')"><div class="stat-icon si-warn" style="font-size:9px;font-weight:700;">API</div><div><div class="stat-val">5</div><div class="stat-label">SaaS</div></div></button>
+      </div>
+      <div class="filter-bar">
+        <div class="search-wrap"><span class="search-icon">🔍</span><input class="search-box" placeholder="Search data sources…" /></div>
+        <button class="filter-pill active" id="dp-all" onclick="setDsF('all')">All</button>
+        <button class="filter-pill" id="dp-archive" onclick="setDsF('archive')">Archive</button>
+      </div>
+      <div class="card">
+        <div class="card-header"><span id="ds-title" style="font-size:13px;font-weight:600;">All Data Sources</span><span id="ds-count" style="font-size:12px;color:var(--text-tertiary);">14 total</span></div>
+        <table class="data-table"><thead><tr><th>Name</th><th>Source</th><th>Type</th></tr></thead><tbody id="ds-tbody"></tbody></table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function showScreen(n,btn){
+  document.querySelectorAll('.screen').forEach((s,i)=>s.classList.toggle('active',i===n));
+  document.querySelectorAll('.sw-btn').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  if(n===4)initDs('all');
+}
+
+/* ── Per-card view toggle (Card / Row / Full) ── */
+function setView(cardId, mode) {
+  const card = document.getElementById(cardId);
+  if (!card) return;
+  // update card class
+  card.classList.remove('card-mode');
+  if (mode === 'card') card.classList.add('card-mode');
+  if (mode === 'full') {
+    showScreen(3, document.querySelectorAll('.sw-btn')[3]);
+    return;
+  }
+  // update toggle button active states within this card
+  const btns = card.querySelectorAll('.vt-btn');
+  btns.forEach((btn, i) => {
+    btn.classList.toggle('active',
+      (i === 0 && mode === 'card') ||
+      (i === 1 && mode === 'row') ||
+      (i === 2 && mode === 'full'));
+  });
+}
+
+/* ── Right-panel horizontal resize ── */
+function initRpResize(e, panelId) {
+  e.preventDefault();
+  const panel = document.getElementById(panelId);
+  const handle = panel.querySelector('.rp-resize-handle');
+  handle.classList.add('dragging');
+  const startX = e.clientX;
+  const startW = panel.offsetWidth;
+  function onMove(ev) {
+    const delta = startX - ev.clientX; // dragging left = wider
+    const newW = Math.max(180, Math.min(600, startW + delta));
+    panel.style.width = newW + 'px';
+  }
+  function onUp() {
+    handle.classList.remove('dragging');
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+function tog(btn,id){
+  const tree=document.getElementById(id);
+  const chev=btn.querySelector('.chev');
+  tree.classList.toggle('open');
+  if(chev)chev.classList.toggle('open');
+}
+function togAsset(id){
+  const t=document.getElementById(id);
+  if(t)t.classList.toggle('open');
+}
+
+const dsSources=[
+  {name:'openai_billing.csv',src:'OpenAI_CSV',type:'file'},
+  {name:'gcp_billing.csv',src:'GCP_Billing_CSV',type:'file'},
+  {name:'azure_usage.csv',src:'Azure_CSV',type:'file'},
+  {name:'anthropic_costs.csv',src:'Anthropic_CSV',type:'file'},
+  {name:'decision_log.csv',src:'decision_log_CSV',type:'file'},
+  {name:'it_incidents.csv',src:'it_incidents_CSV',type:'file'},
+  {name:'it_assets.csv',src:'it_assets_CSV',type:'file'},
+  {name:'vendor_register.csv',src:'vendor_CSV',type:'file'},
+  {name:'system_availability.csv',src:'sys_avail_CSV',type:'file'},
+  {name:'ServiceNow Incidents',src:'servicenow_connector',type:'saas'},
+  {name:'Salesforce Opps',src:'salesforce_connector',type:'saas'},
+  {name:'Jira Issues',src:'jira_connector',type:'saas'},
+  {name:'Zendesk Tickets',src:'zendesk_connector',type:'saas'},
+  {name:'HubSpot CRM',src:'hubspot_connector',type:'saas'},
+];
+function setDsF(f){
+  ['all','database','file','saas'].forEach(k=>document.getElementById('ds-'+k)?.classList.toggle('active-tile',k===f));
+  document.getElementById('dp-all')?.classList.toggle('active',f==='all');
+  document.getElementById('dp-archive')?.classList.toggle('active',f==='archive');
+  initDs(f);
+}
+function initDs(f){
+  let rows=dsSources;
+  if(f==='database')rows=dsSources.filter(d=>d.type==='database');
+  else if(f==='file')rows=dsSources.filter(d=>d.type==='file');
+  else if(f==='saas')rows=dsSources.filter(d=>d.type==='saas');
+  else if(f==='archive')rows=[];
+  const titles={all:'All Data Sources',database:'Database Sources',file:'File Sources',saas:'SaaS Sources',archive:'Archived'};
+  document.getElementById('ds-title').textContent=titles[f]||'All';
+  document.getElementById('ds-count').textContent=rows.length+' total';
+  document.getElementById('ds-tbody').innerHTML=rows.length===0
+    ?'<tr><td colspan="3" style="text-align:center;padding:32px;color:var(--text-tertiary);">No sources.</td></tr>'
+    :rows.map(d=>`<tr><td class="primary">${d.name}</td><td>${d.src}</td><td><span style="display:inline-flex;align-items:center;padding:1px 7px;border-radius:99px;font-size:11px;font-weight:600;background:${d.type==='saas'?'var(--color-ai-bg)':'var(--bg-secondary)'};color:${d.type==='saas'?'var(--color-ai)':'var(--text-secondary)'};border:1px solid ${d.type==='saas'?'transparent':'var(--border-secondary)'};">${d.type==='saas'?'SaaS':'File'}</span></td></tr>`).join('');
+}
+initDs('all');
+</script>
+</body>
+</html>

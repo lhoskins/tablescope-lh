@@ -113,6 +113,11 @@ async def submit_turn(
     )
 
 
+class ActiveResourceRef(BaseModel):
+    resource_type: str = Field(..., max_length=32)
+    resource_id: int
+
+
 class SubmitCanonicalTurnRequest(BaseModel):
     surface: str = Field(..., max_length=32)
     project_id: int | None = Field(default=None)
@@ -124,6 +129,9 @@ class SubmitCanonicalTurnRequest(BaseModel):
     # in the workspace tab strip, used to ground the assistant's answer.
     active_resource_type: str | None = Field(default=None, max_length=32)
     active_resource_id: int | None = Field(default=None)
+    # A named workspace pins several cards at once. When present this list
+    # supersedes the single pair above, which stays for existing callers.
+    active_resources: list[ActiveResourceRef] | None = Field(default=None)
 
 
 class SubmitCanonicalTurnResponse(BaseModel):
@@ -164,6 +172,11 @@ async def submit_canonical_turn(
             client_request_id=req.client_request_id,
             active_resource_type=req.active_resource_type,
             active_resource_id=req.active_resource_id,
+            active_resources=(
+                [(r.resource_type, r.resource_id) for r in req.active_resources]
+                if req.active_resources
+                else None
+            ),
         )
     except CanonicalProjectError as exc:
         raise HTTPException(

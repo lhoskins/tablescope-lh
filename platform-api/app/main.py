@@ -118,6 +118,7 @@ from app.routes import upload_versions as upload_versions_routes
 from app.routes import uploads as uploads_routes
 from app.routes import user_preferences as user_preferences_routes
 from app.routes import users as users_routes
+from app.routes import workspaces as workspaces_routes
 from app.services.connection_pool import pool_manager
 from app.services.llm_framework import ensure_primary_runtime_target_registered
 from app.services.project_context import ProjectContextConcurrencyError
@@ -659,6 +660,7 @@ def create_app() -> FastAPI:
     app.include_router(llm_framework_deployments_routes.router, prefix=api_prefix)
     app.include_router(ai_asset_metadata_routes.router, prefix=api_prefix)
     app.include_router(project_assets_routes.router, prefix=api_prefix)
+    app.include_router(workspaces_routes.router, prefix=api_prefix)
     app.include_router(project_context_routes.router, prefix=api_prefix)
     app.include_router(project_graph_routes.router, prefix=api_prefix)
     app.include_router(project_actions_crud_routes.router, prefix=api_prefix)

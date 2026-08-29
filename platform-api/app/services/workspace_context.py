@@ -33,6 +33,32 @@ class ActiveResourceContext:
     summary: str
 
 
+async def resolve_active_resource_contexts(
+    session: AsyncSession,
+    *,
+    project_id: int,
+    resources: list[tuple[str | None, int | None]],
+) -> list[ActiveResourceContext]:
+    """Resolve several active resources at once, skipping unresolvable ones.
+
+    A workspace grounds the assistant on every card pinned to it, so the
+    turn-submission path passes a list. Each pair resolves independently:
+    an unknown type, missing id, or out-of-project resource is dropped
+    rather than failing the whole turn.
+    """
+    resolved: list[ActiveResourceContext] = []
+    for resource_type, resource_id in resources:
+        context = await resolve_active_resource_context(
+            session,
+            project_id=project_id,
+            resource_type=resource_type,
+            resource_id=resource_id,
+        )
+        if context is not None:
+            resolved.append(context)
+    return resolved
+
+
 async def resolve_active_resource_context(
     session: AsyncSession,
     *,
