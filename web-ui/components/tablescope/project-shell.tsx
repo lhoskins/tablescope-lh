@@ -3,7 +3,7 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppShell } from "./app-shell";
-import { ProjectResourceTabs } from "./project/project-resource-tabs";
+import { ProjectNavGrid } from "./project/project-nav-grid";
 import { ProjectHeader } from "./project/overview-screen/project-header";
 import { MembersDialog } from "./project/members-dialog";
 import { WorkspaceTabsBar } from "./project/workspace/workspace-tabs-bar";
@@ -39,8 +39,11 @@ export function ProjectShell({
   /** When false, the main content area does not scroll — the page manages
    *  its own internal scroll region (e.g. a pinned bottom composer). */
   scrollable?: boolean;
-  /** Render the resource tab menu in the sub-header. Pages that render their
-   *  own title/header can set this to false and place the tabs below the title. */
+  /** Render the "recently opened items" MRU strip (`WorkspaceTabsBar`) below
+   *  the project nav grid. The nav grid itself always renders regardless of
+   *  this flag -- it's the project's persistent top-level navigation, not a
+   *  per-page resource strip. Pages that render their own title/header can
+   *  set this to false and place the strip below the title instead. */
   showResourceTabs?: boolean;
   /** Render a project title header and resource tabs above the page content.
    *  Use this on project inventory pages (Data Sources, Tables, Documents)
@@ -75,8 +78,10 @@ export function ProjectShell({
   const renderHeader = showProjectHeader && activeNav !== "overview";
   const resourceTabs = (
     <>
-      <ProjectResourceTabs projectId={projectId} />
-      <WorkspaceTabsBar projectId={projectId} activeItem={workspaceItem} />
+      <ProjectNavGrid projectId={projectId} activeNav={activeNav} />
+      {showResourceTabs && (
+        <WorkspaceTabsBar projectId={projectId} activeItem={workspaceItem} />
+      )}
     </>
   );
 
@@ -91,9 +96,7 @@ export function ProjectShell({
       counts={counts}
       topBarRight={actions}
       subHeader={
-        activeNav === "overview" || !showResourceTabs || renderHeader
-          ? undefined
-          : resourceTabs
+        activeNav === "overview" || renderHeader ? undefined : resourceTabs
       }
       contextPanel={
         <>

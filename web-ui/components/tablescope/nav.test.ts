@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { homeNavGroups, projectNavGroups } from "./nav";
+import { homeNavGroups, projectGridItems, projectNavGroups } from "./nav";
 import type { CurrentUser } from "@/lib/ui/types";
 
 function makeUser(rawRole: string, isSuperAdmin = false): CurrentUser {
@@ -88,5 +88,39 @@ describe("projectNavGroups", () => {
     expect(keys).not.toContain("project-metadata-catalog");
     expect(keys).not.toContain("project-reference-library");
     expect(keys).not.toContain("project-audit-log");
+  });
+});
+
+describe("projectGridItems", () => {
+  it("orders all twelve cards, Chats last, dropping APIs entirely", () => {
+    const items = projectGridItems("7");
+    expect(items.map((i) => i.key)).toEqual([
+      "overview",
+      "workspace",
+      "project-queries",
+      "project-documents",
+      "project-dashboards",
+      "project-data-sources",
+      "project-insights",
+      "project-actions",
+      "project-business-context",
+      "project-scopes",
+      "project-relationship-map",
+      "project-ai-assistant",
+    ]);
+  });
+
+  it("renames Goals to Reference and points every href at the project", () => {
+    const items = projectGridItems("7");
+    const reference = items.find((i) => i.key === "project-business-context");
+    expect(reference?.label).toBe("Reference");
+    expect(reference?.href).toBe("/projects/7/business-context");
+    expect(items.every((i) => i.href.startsWith("/projects/7"))).toBe(true);
+  });
+
+  it("points Chats at the new project-scoped route", () => {
+    const items = projectGridItems("7");
+    const chats = items.find((i) => i.key === "project-ai-assistant");
+    expect(chats?.href).toBe("/projects/7/chats");
   });
 });

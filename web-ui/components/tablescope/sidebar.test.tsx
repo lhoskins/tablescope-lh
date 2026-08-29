@@ -14,6 +14,10 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/",
 }));
 
+vi.mock("@/lib/ui/use-shell-data", () => ({
+  useProjectSummaries: () => ({ data: [] }),
+}));
+
 import { Sidebar } from "./sidebar";
 import type { CurrentUser, TenantSummary } from "@/lib/ui/types";
 
@@ -84,5 +88,42 @@ describe("Sidebar avatar uploader", () => {
 
     await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
     expect(upload).toHaveBeenCalledWith("/api/users/me/avatar", file);
+  });
+});
+
+describe("Sidebar nav", () => {
+  it("renders Projects as a disclosure toggle, not a navigation link", () => {
+    renderSidebar(baseUser());
+    const projectsButton = screen.getByRole("button", { name: /Projects/ });
+    expect(projectsButton.closest("a")).toBeNull();
+  });
+
+  it("keeps the same core items in project mode instead of swapping the link set", () => {
+    const client = new QueryClient();
+    render(
+      <QueryClientProvider client={client}>
+        <Sidebar
+          mode="project"
+          activeNav="overview"
+          tenant={tenant}
+          user={baseUser()}
+          project={{
+            id: "7",
+            name: "Acme Project",
+            visibility: "private",
+            accent: "#111",
+            documentCount: 0,
+            queryCount: 0,
+            dashboardCount: 0,
+            aiStatus: "idle",
+            updatedLabel: "",
+          }}
+        />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByRole("link", { name: /^Home/ })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Business Insight/ })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /AI Assistant/ })).toBeTruthy();
+    expect(screen.queryByText("Other Projects")).toBeNull();
   });
 });
