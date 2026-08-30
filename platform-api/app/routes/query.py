@@ -35,7 +35,10 @@ from app.services.query_executor import (
     TeiidQueryExecutor,
 )
 from app.services.scope_proxy import ScopeProxyService
-from app.services.teiid_sql import project_table_schema
+from app.services.teiid_sql import (
+    project_source_label_map,
+    project_table_schema,
+)
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
 from app.services.vdb_routing import (
     VDBInactiveError,
@@ -66,6 +69,26 @@ router = APIRouter(prefix="/query", tags=["query"])
 # the view "0_revenueTest_CSV"); the name is always emitted inside double quotes
 # in generated SQL, so a leading digit is safe.
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_$.]*$")
+
+# Rewrite user-facing source/display labels (e.g. Google Sheet headers) to the
+# SQL-safe ``field`` names stored alongside them, so saved queries and the
+# query builder can continue to use the original labels while Teiid sees valid
+# identifiers.  Only double-quoted identifiers are rewritten; string literals
+# use single quotes in Teiid and are left untouched.
+_SOURCE_LABEL_RE = re.compile(r'"([^"]+)"')
+
+
+def _replace_source_labels(sql: str, mapping: dict[str, str]) -> str:
+    def _repl(m: re.Match[str]) -> str:
+        label = m.group(1)
+        field = mapping.get(label)
+        if field is None:
+            return m.group(0)
+        escaped = field.replace('"', '""')
+        return f'"{escaped}"'
+
+    return _SOURCE_LABEL_RE.sub(_repl, sql)
+
 
 # Extract table/view names referenced in a SQL statement so we can sample only
 # those tables instead of every datasource in the project.
@@ -201,6 +224,7 @@ async def query_datasource(
     allowed_tables: list[str] = []
     column_types: dict[str, str] = {}
     column_samples: dict[str, str] = {}
+    source_label_map: dict[str, str] = {}
 
     # Resolve VDB/database and project metadata in a short-lived session that
     # is closed before we wait on Teiid, which itself calls back into
@@ -225,6 +249,9 @@ async def query_datasource(
         endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
         if project_id:
             table_schema = await project_table_schema(
+                session, tenant_id=context.tenant_id, project_id=project_id
+            )
+            source_label_map = await project_source_label_map(
                 session, tenant_id=context.tenant_id, project_id=project_id
             )
             allowed_tables = [
@@ -259,8 +286,9 @@ async def query_datasource(
             raise HTTPException(
                 status_code=400, detail="project_id is required when executing SQL"
             )
+        rewritten_sql = _replace_source_labels(payload.sql, source_label_map)
         result, final_sql, _ = await _execute_sql_with_repair(
-            raw_sql=_apply_global_filters(payload.sql, payload.global_filters),
+            raw_sql=_apply_global_filters(rewritten_sql, payload.global_filters),
             tenant_id=context.tenant_id,
             user_id=context.user_id,
             project_id=project_id,

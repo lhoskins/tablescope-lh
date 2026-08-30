@@ -997,9 +997,10 @@ public class VDBManagementServlet extends HttpServlet {
                 }
             }
 
-            String viewStmt = "CREATE VIEW " + viewName + " AS SELECT * FROM "
-                    + modelName + "." + teiidTableName + ";";
-            boolean viewExists = vdbXml.contains("CREATE VIEW " + viewName + " ");
+            String viewStmt = "CREATE VIEW \"" + viewName + "\" AS SELECT * FROM \""
+                    + modelName + "\".\"" + teiidTableName + "\";";
+            boolean viewExists = vdbXml.contains("CREATE VIEW \"" + viewName + "\" ")
+                    || vdbXml.contains("CREATE VIEW " + viewName + " ");
             if (viewExists && force) {
                 log("Force mode: removing existing view " + viewName);
                 vdbXml = VDBXmlBuilder.removeViewStmt(vdbXml, viewName);

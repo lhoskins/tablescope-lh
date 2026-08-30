@@ -357,7 +357,7 @@ async def finalize_tabular_import(
             from app.services.auto_query import ensure_datasource_query
 
             col_names = [
-                c["name"]
+                c.get("field") or c["name"]
                 for c in (column_types or [])
                 if isinstance(c, dict) and c.get("name")
             ]

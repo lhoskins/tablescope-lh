@@ -33,12 +33,50 @@ async def project_table_schema(
     schema: list[dict[str, Any]] = []
     for ds in rows:
         columns = [
-            {"name": str(c.get("name")), "type": str(c.get("type") or "")}
+            {
+                "name": str(c.get("field") or c.get("name")),
+                "type": str(c.get("type") or ""),
+            }
             for c in (ds.column_types or [])
             if isinstance(c, dict) and c.get("name")
         ]
         schema.append({"table": ds.view_name, "columns": columns})
     return schema
+
+
+async def project_source_label_map(
+    session: AsyncSession,
+    *,
+    tenant_id: int,
+    project_id: int,
+) -> dict[str, str]:
+    """Return a mapping from source/display column label to SQL-safe field name.
+
+    For Google Sheets the stored ``column_types`` ``name`` is the raw header
+    (e.g. ``"Tablescope MVP List"``) while ``field`` is the sanitized Teiid
+    identifier (e.g. ``"Tablescope_MVP_List"``).  Rewriting user-facing saved
+    queries with this map lets existing queries continue to work after the view
+    columns are registered with sanitized names.
+    """
+    rows = (
+        await session.scalars(
+            select(FileSourceMeta).where(
+                FileSourceMeta.project_id == project_id,
+                FileSourceMeta.tenant_id == tenant_id,
+                FileSourceMeta.archived.is_(False),
+            )
+        )
+    ).all()
+    mapping: dict[str, str] = {}
+    for ds in rows:
+        for c in (ds.column_types or []):
+            if not isinstance(c, dict):
+                continue
+            label = c.get("name")
+            field = c.get("field") or label
+            if label and field and label != field:
+                mapping[str(label)] = str(field)
+    return mapping
 
 
 def _split_top_level(text: str, delimiter: str = ",") -> list[str]:

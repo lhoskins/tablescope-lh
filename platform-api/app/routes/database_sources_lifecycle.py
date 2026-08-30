@@ -246,7 +246,7 @@ async def create_database_source(
         try:
             from app.services.auto_query import ensure_datasource_query
 
-            col_names = [c["name"] for c in columns if c.get("name")]
+            col_names = [c.get("field") or c["name"] for c in columns if c.get("name")]
             await ensure_datasource_query(
                 session,
                 project_id=ds.project_id,

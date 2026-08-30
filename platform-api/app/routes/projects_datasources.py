@@ -355,7 +355,7 @@ async def add_datasources_to_project(
                 display_name=meta.file_name or view_name,
                 view_name=view_name,
                 columns=[
-                    c["name"]
+                    c.get("field") or c["name"]
                     for c in (meta.column_types or [])
                     if isinstance(c, dict) and c.get("name")
                 ],

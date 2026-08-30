@@ -100,6 +100,21 @@ async def ensure_datasource_query(
         )
     )
     if existing is not None:
+        expected = default_sql(view_name, columns)
+        if (
+            columns
+            and existing.description
+            and existing.description.startswith("Auto-created for data source")
+            and existing.sql_text != expected
+        ):
+            existing.sql_text = expected
+            logger.info(
+                "Updated auto-created saved query %r (id=%s) for view %s in project %s",
+                existing.name,
+                existing.id,
+                view_name,
+                project_id,
+            )
         return existing
 
     base_name = strip_extension(display_name).strip() or view_name

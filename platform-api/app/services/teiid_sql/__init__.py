@@ -12,6 +12,7 @@ from .identifiers import rebuild_group_by_from_select as rebuild_group_by_from_s
 from .string_filters import _fix_string_literal_columns as _fix_string_literal_columns
 from .string_filters import _split_top_level as _split_top_level
 from .string_filters import normalize_teiid_string_filters as normalize_teiid_string_filters
+from .string_filters import project_source_label_map as project_source_label_map
 from .string_filters import project_table_schema as project_table_schema
 from .timestamps import _CAST_COLUMN_RE as _CAST_COLUMN_RE
 from .timestamps import _CAST_LITERAL_RE as _CAST_LITERAL_RE

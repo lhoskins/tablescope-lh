@@ -179,7 +179,7 @@ public class VDBXmlBuilder {
         sb.append("    <source name=\"").append(dsName).append("\" translator-name=\"").append(translatorName).append("\"/>\n");
         sb.append("    <metadata type=\"DDL\">\n");
         sb.append("      <![CDATA[\n");
-        sb.append("CREATE FOREIGN TABLE ").append(teiidTableName).append(" (\n");
+        sb.append("CREATE FOREIGN TABLE \"").append(teiidTableName.replace("\"", "\"\"")).append("\" (\n");
         sb.append(cols);
         sb.append(") OPTIONS (NAMEINSOURCE '").append(tableName.replace("'", "''")).append("');\n");
         sb.append("]]>\n");
@@ -232,7 +232,7 @@ public class VDBXmlBuilder {
         sb.append("    <source name=\"").append(dsName).append("\" translator-name=\"").append(translatorName).append("\"/>\n");
         sb.append("    <metadata type=\"DDL\">\n");
         sb.append("      <![CDATA[\n");
-        sb.append("CREATE FOREIGN TABLE ").append(teiidTableName).append(" (\n");
+        sb.append("CREATE FOREIGN TABLE \"").append(teiidTableName.replace("\"", "\"\"")).append("\" (\n");
         sb.append(cols);
         sb.append(") OPTIONS (NAMEINSOURCE '").append(tableName.replace("'", "''")).append("');\n");
         sb.append("]]>\n");
@@ -282,7 +282,7 @@ public class VDBXmlBuilder {
           .append("\" connection-jndi-name=\"").append(jndiName).append("\"/>\n");
         sb.append("    <metadata type=\"DDL\">\n");
         sb.append("      <![CDATA[\n");
-        sb.append("CREATE FOREIGN TABLE ").append(teiidTableName).append(" (\n");
+        sb.append("CREATE FOREIGN TABLE \"").append(teiidTableName.replace("\"", "\"\"")).append("\" (\n");
         sb.append(cols);
         sb.append(") OPTIONS (NAMEINSOURCE '").append(tableName.replace("'", "''")).append("');\n");
         sb.append("]]>\n");
@@ -334,7 +334,7 @@ public class VDBXmlBuilder {
           .append("\" connection-jndi-name=\"").append(jndiName).append("\"/>\n");
         sb.append("    <metadata type=\"DDL\">\n");
         sb.append("      <![CDATA[\n");
-        sb.append("CREATE FOREIGN TABLE ").append(teiidTableName).append(" (\n");
+        sb.append("CREATE FOREIGN TABLE \"").append(teiidTableName.replace("\"", "\"\"")).append("\" (\n");
         sb.append(cols);
         sb.append(") OPTIONS (NAMEINSOURCE '").append(nameInSource).append("');\n");
         sb.append("]]>\n");
@@ -401,8 +401,12 @@ public class VDBXmlBuilder {
 
     /** Remove a CREATE VIEW ... ; statement from the virtual model DDL. */
     public static String removeViewStmt(String content, String viewName) {
-        String prefix = "CREATE VIEW " + viewName + " AS SELECT * FROM ";
-        int s = content.indexOf(prefix);
+        String quotedPrefix = "CREATE VIEW \"" + viewName + "\" AS SELECT * FROM ";
+        String unquotedPrefix = "CREATE VIEW " + viewName + " AS SELECT * FROM ";
+        int s = content.indexOf(quotedPrefix);
+        if (s < 0) {
+            s = content.indexOf(unquotedPrefix);
+        }
         if (s < 0) return content;
         int e = content.indexOf(";", s);
         if (e < 0) return content;
