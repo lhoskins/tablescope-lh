@@ -63,12 +63,18 @@ class VDBRoutingService:
     ) -> tuple[UserVDB | SharedVDB, VdbType]:
         """Return the VDB to use for a query along with its type.
 
-        The decision tree mirrors the original redash service:
+        The decision tree mirrors the original redash service, adapted for a
+        per-project (not per-tenant) SharedVDB:
 
         - If `is_shared_override` is provided (e.g. derived from a query row's
           `is_shared` flag), use it.
         - Otherwise, fall back to the project's `is_shared` flag, but
           auto-correct it based on the project's member count when it drifts.
+        - A shared project routes to *its own* SharedVDB (by project_id), not
+          the owner's personal UserVDB and not a tenant-wide shared VDB --
+          this is the one place that decision is made; `query_sql_helpers.py`'s
+          `_resolve_vdb_database` delegates here rather than deciding on its
+          own, so the two can't disagree about which VDB a project's query hits.
         """
         project = await self._session.get(Project, project_id)
         if project is None:
@@ -89,12 +95,25 @@ class VDBRoutingService:
         )
 
         if is_shared:
+            # Scoped to this project, not the tenant: each shared project has
+            # its own SharedVDB, so two shared projects in the same tenant
+            # never resolve to the same VDB (see migration 0087). A project
+            # that is (or drifted to) is_shared with no SharedVDB row yet --
+            # e.g. it was never explicitly shared via ProjectSharingService --
+            # fails loudly here rather than silently falling back to the
+            # owner's private UserVDB, which would expose that owner's other,
+            # unrelated data to every project member.
             shared_vdb = await self._session.scalar(
-                select(SharedVDB).where(SharedVDB.tenant_id == context.tenant_id)
+                select(SharedVDB).where(
+                    SharedVDB.tenant_id == context.tenant_id,
+                    SharedVDB.project_id == project_id,
+                )
             )
             if shared_vdb is None:
                 raise VDBNotConfiguredError(
-                    f"No shared VDB configured for tenant {context.tenant_id}"
+                    f"No shared VDB configured for project {project_id} in "
+                    f"tenant {context.tenant_id}. Share the project to "
+                    "provision one."
                 )
             return shared_vdb, "shared"
 

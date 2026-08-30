@@ -180,8 +180,8 @@ async def query_datasource(
     """Query a datasource (view) from the appropriate VDB.
 
     When project_id is provided and the project is shared, the query runs
-    against the project owner's VDB (where the views live). Otherwise it
-    queries the current user's personal VDB.
+    against that project's own SharedVDB (see VDBRoutingService). Otherwise
+    it queries the current user's personal VDB.
 
     Generated SQL is normalized against the project schema and, if it still
     fails, repaired through the SQL self-repair agent (``repair-sql-step``)
@@ -208,11 +208,10 @@ async def query_datasource(
     project_id = payload.project_id
     async with SessionLocal() as session:
         if project_id is not None:
-            # Authorize BEFORE any VDB routing decision: a shared project
-            # routes queries to the OWNER's VDB, so without this check any
-            # same-tenant VIEWER could supply another user's shared
-            # project_id and have their SQL executed against that VDB with
-            # no membership check at all (TS-ISO-002).
+            # Authorize BEFORE any VDB routing decision: without this check
+            # any same-tenant VIEWER could supply another shared project's
+            # project_id and have their SQL executed against that project's
+            # VDB with no membership check at all (TS-ISO-002).
             await _authorize_project_access(
                 session,
                 tenant_id=context.tenant_id,

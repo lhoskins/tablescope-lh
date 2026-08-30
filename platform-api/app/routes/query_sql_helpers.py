@@ -38,32 +38,41 @@ async def _resolve_vdb_database(
 ) -> str:
     """Resolve the Teiid database name (``<vdb_id>.1``) for a request.
 
-    When ``project_id`` is provided and the project is shared, the query runs
-    against the project owner's VDB (where the views live). Otherwise it
-    targets the current user's personal VDB.
+    With a ``project_id``, the actual user-vs-shared-VDB decision is
+    delegated to ``VDBRoutingService`` -- the single place that decision is
+    made, so this and the ``/fetch`` route's ``get_connection_info`` call can
+    never resolve one project's query to two different VDBs. With no
+    ``project_id``, this targets the caller's own personal VDB directly.
     """
-    from app.models.project import Project
-
-    target_user_id = context.user_id
-    if project_id is not None:
-        project = await session.get(Project, project_id)
-        if project is not None and project.is_shared and project.owner_id:
-            target_user_id = project.owner_id
-
-    user_vdb = await session.scalar(
-        select(UserVDB).where(
-            UserVDB.tenant_id == context.tenant_id,
-            UserVDB.user_id == target_user_id,
-        )
+    from app.services.vdb_routing import (
+        VDBNotConfiguredError,
+        VDBNotFoundError,
+        VDBRoutingService,
     )
-    if user_vdb is None:
-        raise HTTPException(
-            status_code=404,
-            detail="No VDB configured. Upload a file first.",
+
+    if project_id is not None:
+        try:
+            vdb, _vdb_type = await VDBRoutingService(session).get_vdb_for_query(
+                context=context, project_id=project_id
+            )
+        except (VDBNotFoundError, VDBNotConfiguredError) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    else:
+        vdb = await session.scalar(
+            select(UserVDB).where(
+                UserVDB.tenant_id == context.tenant_id,
+                UserVDB.user_id == context.user_id,
+            )
         )
-    if not user_vdb.is_active:
+        if vdb is None:
+            raise HTTPException(
+                status_code=404,
+                detail="No VDB configured. Upload a file first.",
+            )
+
+    if not vdb.is_active:
         raise HTTPException(status_code=503, detail="VDB is not active.")
-    return f"{user_vdb.vdb_id}.1"
+    return f"{vdb.vdb_id}.1"
 
 
 async def _sample_project_columns(

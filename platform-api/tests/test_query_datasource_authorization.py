@@ -3,9 +3,10 @@
 
 Live finding: this endpoint accepted a project_id from any authenticated
 same-tenant VIEWER with no check that they actually belonged to that
-project. Because a shared project's query routes to the OWNER's VDB, that
-meant an unrelated same-tenant user could supply another user's shared
-project_id and have arbitrary SQL executed against that VDB.
+project. A shared project's query routes to *that project's own* SharedVDB
+(see migration 0087 and VDBRoutingService.get_vdb_for_query), so an
+unrelated same-tenant user supplying another project's shared project_id
+would otherwise get arbitrary SQL executed against that project's VDB.
 
 Run from ``platform-api``: ``pytest -q tests/test_query_datasource_authorization.py``.
 """
@@ -16,6 +17,7 @@ import pytest
 
 from app.auth.jwt import create_access_token
 from app.models.project import Project, ProjectMember
+from app.models.shared_vdb import SharedVDB
 from app.models.user_vdb import UserVDB
 
 pytestmark = pytest.mark.anyio
@@ -111,17 +113,33 @@ async def test_active_member_of_shared_project_passes_authorization(
 
     project = Project(tenant_id=tenant_id, owner_id=owner_id, name="Shared", is_shared=True)
     db_session.add(project)
-    db_session.add(
-        UserVDB(tenant_id=tenant_id, user_id=owner_id, vdb_id="owner-vdb", vdb_username="u", encrypted_password="p", is_active=True)
-    )
     await db_session.commit()
     await db_session.refresh(project)
+    # VDBRoutingService._reconcile_is_shared derives is_shared from member
+    # count (>1), so the owner needs a ProjectMember row too -- otherwise
+    # this project would silently reconcile back to is_shared=False.
+    db_session.add(
+        ProjectMember(project_id=project.id, user_id=owner_id, role="owner", is_active=True)
+    )
     db_session.add(
         ProjectMember(project_id=project.id, user_id=member_id, role="viewer", is_active=True)
+    )
+    # The project's own SharedVDB (not the owner's UserVDB) is what a shared
+    # project's queries route to -- see VDBRoutingService.get_vdb_for_query.
+    db_session.add(
+        SharedVDB(
+            tenant_id=tenant_id,
+            project_id=project.id,
+            vdb_id="shared-vdb",
+            vdb_username="u",
+            encrypted_password="p",
+            is_active=True,
+        )
     )
     await db_session.commit()
 
     import app.routes.query as query_module
+    import app.routes.query_sql_helpers as query_sql_helpers_module
 
     async def fake_run_sql(**kwargs):
         return {"columns": ["x"], "rows": [], "rowCount": 0}
@@ -137,7 +155,12 @@ async def test_active_member_of_shared_project_passes_authorization(
         async def resolve_for_org(self, tenant_id):
             return _FakeEndpoint()
 
+    # payload.sql (below) goes through _execute_sql_with_repair, which
+    # resolves _run_sql from query_sql_helpers's own module namespace, not
+    # query.py's -- both must be patched or the repair path falls through to
+    # a real Teiid connection attempt.
     monkeypatch.setattr(query_module, "_run_sql", fake_run_sql)
+    monkeypatch.setattr(query_sql_helpers_module, "_run_sql", fake_run_sql)
     monkeypatch.setattr(query_module, "TenantTeiidResolver", _FakeResolver)
 
     r = await client.post(
@@ -145,9 +168,9 @@ async def test_active_member_of_shared_project_passes_authorization(
         json={"project_id": project.id, "sql": 'SELECT * FROM "t"'},
         headers=_headers(tenant_id, member_id),
     )
-    # Authorization passed (no 403); whatever happens downstream against the
-    # mocked Teiid path is not this test's concern.
-    assert r.status_code != 403
+    # Authorization passed and the route resolved + queried the project's
+    # own SharedVDB (mocked Teiid execution below it) -- not merely "not 403".
+    assert r.status_code == 200, r.text
 
 
 async def test_inactive_member_cannot_query_a_shared_project(
