@@ -67,10 +67,10 @@ Already validated when `UX-design-02` was reviewed; unchanged here, listed for c
 | `web-ui` `vitest run` | **558 / 558 passed** (92 files) |
 | `platform-api` `ruff check app tests` | clean |
 | `platform-api` `mypy app` | clean, 528 source files |
-| `platform-api` `pytest -q` (full suite) | see below — running at doc time, final count to be posted |
+| `platform-api` `pytest -q` (full suite) | **1638 passed, 3 failed, 4 skipped** (16m51s) |
 
-The last full run against this exact tree (before the §5 revert, same file otherwise untouched by it except `vdb_routing.py`) was **1638 passed, 3 failed, 4 skipped**:
-- The 3 failures (`test_snapshot_fresh_when_no_kg_build_postdates_it`, `test_snapshot_stale_after_kg_rebuild`, `test_snapshot_null_without_run`, all in `test_business_insight_phase1.py`) are **pre-existing and unrelated** — they fail with `redis.exceptions.ConnectionError: Error 111 connecting to localhost:6379` because no Redis instance is reachable in this sandbox, not because of anything in this branch.
+Run against `910e0ba3` (post-revert; `7dd8f70a` only adds this doc, no code change):
+- The 3 failures (`test_snapshot_fresh_when_no_kg_build_postdates_it`, `test_snapshot_stale_after_kg_rebuild`, `test_snapshot_null_without_run`, all in `test_business_insight_phase1.py`) are **pre-existing and unrelated** — they fail with `redis.exceptions.ConnectionError: Error 111 connecting to localhost:6379` because no Redis instance is reachable in this sandbox, not because of anything in this branch. Confirm these pass wherever Redis is actually reachable.
 - The 4 skips are the VPN/SMB E2E tests, skipped because `VPN_SMB_E2E_API_URL` is unset — expected in any environment without that live endpoint.
 
 ```bash
@@ -143,4 +143,4 @@ docker compose up -d platform-api platform-api-worker web-ui wildfly
 
 ## 8. Report back
 
-CI totals per suite (§4, with the full `pytest` final numbers once the run in progress completes); confirmation the WAR redeploy and heap bump took effect; screenshot of the new top bar/action center on at least two project screens; and explicit confirmation of which side of the §5 gap is currently true in the deployed environment (i.e., whether `fix-shared-vdb-per-project` has landed yet or not) so the accepted-gap note above can be closed out.
+CI totals per suite in your own environment (§4 has this session's numbers for reference); confirmation the WAR redeploy and heap bump took effect; screenshot of the new top bar/action center on at least two project screens; and explicit confirmation of which side of the §5 gap is currently true in the deployed environment (i.e., whether `fix-shared-vdb-per-project` has landed yet or not) so the accepted-gap note above can be closed out.
