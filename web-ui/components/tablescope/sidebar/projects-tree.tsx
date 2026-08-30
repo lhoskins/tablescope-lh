@@ -15,6 +15,7 @@ import { cn } from "@/lib/cn";
 import { accentFor } from "@/lib/ui/color";
 import { useProjectSummaries } from "@/lib/ui/use-shell-data";
 import {
+  useProjectArchivedQueries,
   useProjectDataSources,
   useProjectDocuments,
   useProjectQueries,
@@ -159,6 +160,7 @@ function ProjectVisibilityGroup({
 
 function ProjectAssetTree({ projectId }: { projectId: string }) {
   const { data: queries } = useProjectQueries(projectId);
+  const { data: archivedQueries } = useProjectArchivedQueries(projectId);
   const { data: documents } = useProjectDocuments(projectId);
   const { data: dataSources } = useProjectDataSources(projectId);
   const [openTabKeys, setOpenTabKeys] = useState<Set<string>>(new Set());
@@ -170,17 +172,39 @@ function ProjectAssetTree({ projectId }: { projectId: string }) {
 
   const addHref = `/projects/${projectId}/data-source-builder`;
 
+  // Tables open on the hand-built ones only. A project with dozens of
+  // AI-generated tables would otherwise bury them, so those and the archive
+  // sit one level deeper, behind "More".
+  const tableItem = (q: { id: number; name: string }) => ({
+    key: `table:${q.id}`,
+    label: q.name,
+    href: `/projects/${projectId}/queries?q=${q.id}`,
+  });
+  const tables = queries ?? [];
+  const manualTables = tables.filter((q) => !q.ai_generated);
+  const aiTables = tables.filter((q) => q.ai_generated);
+  const archivedTables = archivedQueries ?? [];
+
   return (
     <div className="ml-1.5 space-y-1 border-l border-line-tertiary pb-1 pl-2.5">
       <AssetGroup
         label="Tables"
         icon={IconTable}
         addHref={addHref}
-        items={(queries ?? []).map((q) => ({
-          key: `table:${q.id}`,
-          label: q.name,
-          href: `/projects/${projectId}/queries?q=${q.id}`,
-        }))}
+        items={manualTables.map(tableItem)}
+        count={tables.length + archivedTables.length}
+        more={[
+          {
+            key: "ai",
+            label: "AI-generated",
+            items: aiTables.map(tableItem),
+          },
+          {
+            key: "archive",
+            label: "Archived",
+            items: archivedTables.map(tableItem),
+          },
+        ]}
         openTabKeys={openTabKeys}
       />
       <AssetGroup
@@ -209,20 +233,30 @@ function ProjectAssetTree({ projectId }: { projectId: string }) {
   );
 }
 
+type AssetItem = { key: string; label: string; href: string };
+
 function AssetGroup({
   label,
   icon: Icon,
   addHref,
   items,
+  count,
+  more,
   openTabKeys,
 }: {
   label: string;
   icon: typeof IconTable;
   addHref: string;
-  items: { key: string; label: string; href: string }[];
+  items: AssetItem[];
+  /** Badge override for groups whose list is only part of the whole (Tables
+   *  shows every table it holds, including the ones parked under "More"). */
+  count?: number;
+  /** Secondary sub-groups, collapsed behind a "More" node below `items`. */
+  more?: { key: string; label: string; items: AssetItem[] }[];
   openTabKeys: Set<string>;
 }) {
   const [open, setOpen] = useState(false);
+  const badge = count ?? items.length;
   return (
     <div>
       <div className="group flex items-center rounded-md pr-1 text-ink-tertiary hover:bg-bg-secondary hover:text-ink-secondary">
@@ -235,7 +269,7 @@ function AssetGroup({
           {open ? <IconChevronDown size={11} /> : <IconChevronRight size={11} />}
           <Icon size={13} stroke={1.8} />
           <span className="flex-1 truncate">{label}</span>
-          {items.length > 0 && <span className="text-[11px]">{items.length}</span>}
+          {badge > 0 && <span className="text-[11px]">{badge}</span>}
         </button>
         <Link
           href={addHref}
@@ -252,18 +286,98 @@ function AssetGroup({
             <p className="px-1.5 py-0.5 text-[11px] text-ink-tertiary">None yet.</p>
           )}
           {items.map((item) => (
-            <Link
-              key={item.key}
-              href={item.href}
-              className={cn(
-                "block truncate rounded px-1.5 py-1 text-[12px]",
-                openTabKeys.has(item.key)
-                  ? "font-medium text-brand-500"
-                  : "text-ink-secondary hover:bg-bg-secondary hover:text-ink-primary",
-              )}
-            >
-              {item.label}
-            </Link>
+            <AssetLink key={item.key} item={item} openTabKeys={openTabKeys} />
+          ))}
+          {more && more.some((group) => group.items.length > 0) && (
+            <MoreGroups groups={more} openTabKeys={openTabKeys} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AssetLink({
+  item,
+  openTabKeys,
+}: {
+  item: AssetItem;
+  openTabKeys: Set<string>;
+}) {
+  return (
+    <Link
+      href={item.href}
+      className={cn(
+        "block truncate rounded px-1.5 py-1 text-[12px]",
+        openTabKeys.has(item.key)
+          ? "font-medium text-brand-500"
+          : "text-ink-secondary hover:bg-bg-secondary hover:text-ink-primary",
+      )}
+    >
+      {item.label}
+    </Link>
+  );
+}
+
+/** The "More" node: one collapsed level holding the sub-groups that would
+ *  otherwise dominate the tree (AI-generated tables, the archive). Each
+ *  sub-group expands on its own. */
+function MoreGroups({
+  groups,
+  openTabKeys,
+}: {
+  groups: { key: string; label: string; items: AssetItem[] }[];
+  openTabKeys: Set<string>;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-[12px] text-ink-tertiary hover:bg-bg-secondary hover:text-ink-secondary"
+      >
+        {open ? <IconChevronDown size={11} /> : <IconChevronRight size={11} />}
+        <span className="flex-1 truncate">More</span>
+      </button>
+      {open && (
+        <div className="space-y-0.5 pl-3">
+          {groups
+            .filter((group) => group.items.length > 0)
+            .map((group) => (
+              <MoreGroup key={group.key} group={group} openTabKeys={openTabKeys} />
+            ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MoreGroup({
+  group,
+  openTabKeys,
+}: {
+  group: { key: string; label: string; items: AssetItem[] };
+  openTabKeys: Set<string>;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-[12px] text-ink-tertiary hover:bg-bg-secondary hover:text-ink-secondary"
+      >
+        {open ? <IconChevronDown size={11} /> : <IconChevronRight size={11} />}
+        <span className="flex-1 truncate">{group.label}</span>
+        <span className="text-[11px]">{group.items.length}</span>
+      </button>
+      {open && (
+        <div className="space-y-0.5 pl-3">
+          {group.items.map((item) => (
+            <AssetLink key={item.key} item={item} openTabKeys={openTabKeys} />
           ))}
         </div>
       )}

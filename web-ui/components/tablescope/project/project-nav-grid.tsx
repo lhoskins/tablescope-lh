@@ -26,7 +26,7 @@ export function ProjectNavGrid({
   return (
     <nav
       aria-label="Project sections"
-      className="flex items-center gap-1 overflow-x-auto px-5 py-2"
+      className="flex flex-wrap items-stretch gap-[7px] px-5 py-2.5"
     >
       {items.map((item) => {
         const Icon = item.icon;
@@ -37,13 +37,17 @@ export function ProjectNavGrid({
             href={item.href}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-medium transition-colors",
+              "flex min-w-[68px] shrink-0 flex-col items-center justify-center gap-[3px] rounded-lg border px-2.5 py-2 text-center text-[11px] font-medium transition-colors",
               active
-                ? "bg-brand-50 text-brand-700"
-                : "text-ink-secondary hover:bg-bg-secondary hover:text-ink-primary",
+                ? "border-brand-500 bg-brand-50 font-semibold text-brand-500"
+                : "border-line-secondary bg-bg-primary text-ink-secondary hover:bg-bg-secondary hover:text-ink-primary",
             )}
           >
-            <Icon size={14} stroke={1.8} className="shrink-0" />
+            <Icon
+              size={16}
+              stroke={1.8}
+              className={cn("shrink-0", active ? "opacity-100" : "opacity-70")}
+            />
             {item.label}
           </Link>
         );

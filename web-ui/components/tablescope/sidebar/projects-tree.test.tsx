@@ -14,7 +14,15 @@ vi.mock("@/lib/ui/use-shell-data", () => ({
 }));
 
 vi.mock("@/lib/ui/use-project-data", () => ({
-  useProjectQueries: () => ({ data: [{ id: 5, name: "Orders" }] }),
+  useProjectQueries: () => ({
+    data: [
+      { id: 5, name: "Orders" },
+      { id: 6, name: "AI - Spend by Category", ai_generated: true },
+    ],
+  }),
+  useProjectArchivedQueries: () => ({
+    data: [{ id: 7, name: "Old Rollup", is_archived: true }],
+  }),
   useProjectDocuments: () => ({ data: [{ id: 9, title: "Spec.pdf" }] }),
   useProjectDataSources: () => ({ data: [{ id: 11, fileName: "Salesforce", lifecycleId: "11" }] }),
 }));
@@ -61,5 +69,26 @@ describe("ProjectsTree", () => {
   it("only renders an asset subtree for the current project, not the other two", () => {
     renderTree("2");
     expect(screen.getAllByRole("button", { name: /^Documents/ })).toHaveLength(1);
+  });
+
+  it("lists only manual tables, hiding AI-generated and archived ones behind More", async () => {
+    renderTree("2");
+    fireEvent.click(screen.getByRole("button", { name: /^Tables/ }));
+
+    await waitFor(() => expect(screen.getByText("Orders")).toBeTruthy());
+    expect(screen.queryByText("AI - Spend by Category")).toBeNull();
+    expect(screen.queryByText("Old Rollup")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /^More/ }));
+    expect(screen.getByRole("button", { name: /^AI-generated/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Archived/ })).toBeTruthy();
+    // Still collapsed until the user opens the one they want.
+    expect(screen.queryByText("AI - Spend by Category")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /^AI-generated/ }));
+    expect(screen.getByText("AI - Spend by Category")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Archived/ }));
+    expect(screen.getByText("Old Rollup")).toBeTruthy();
   });
 });

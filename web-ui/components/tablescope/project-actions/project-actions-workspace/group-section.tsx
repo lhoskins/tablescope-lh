@@ -39,7 +39,6 @@ import {
   IconCalendar,
   IconTrash,
 } from "@tabler/icons-react";import { groupTone } from "./group-tone";
-import { groupBorderClass } from "./group-border-class";
 import { groupTextClass } from "./group-text-class";
 import { ColumnHeader } from "./column-header";
 import { ActionRow } from "./action-row";
@@ -110,13 +109,11 @@ export function GroupSection({
   onCancelAdd: () => void;
 }) {
   const tone = groupTone(group.group);
+  // Plain border on every group card: the thick status-coloured left edge
+  // (green when completed, blue otherwise) read as a stray highlight. The
+  // group's own label still carries the status colour.
   return (
-    <div
-      className={cn(
-        "rounded-lg border border-line-tertiary bg-bg-primary overflow-hidden border-l-4",
-        groupBorderClass(tone),
-      )}
-    >
+    <div className="overflow-hidden rounded-lg border border-line-tertiary bg-bg-primary">
       <button
         type="button"
         onClick={onToggle}

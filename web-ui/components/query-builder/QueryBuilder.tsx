@@ -984,11 +984,11 @@ export function QueryBuilder({ projectId, datasources, onCancel, onSave, isSavin
             onChange={(e) => setSqlText(e.target.value)}
             onBlur={handleSqlBlur}
             readOnly={!sqlEditing}
-            rows={3}
-            className={`w-full rounded-lg border px-3 py-2 text-xs font-mono transition-colors ${
+            rows={16}
+            className={`w-full min-h-[40vh] rounded-lg border px-3 py-2 text-xs font-mono transition-colors ${
               sqlEditing
                 ? "border-blue-400 bg-white text-slate-900 focus:ring-1 focus:ring-blue-300"
-                : "border-slate-200 bg-slate-800 text-slate-300 cursor-default"
+                : "border-slate-200 bg-slate-100 text-slate-600 cursor-default"
             }`}
             placeholder="SQL will be generated from your selections above..."
           />
