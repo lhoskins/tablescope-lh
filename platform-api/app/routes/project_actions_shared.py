@@ -144,8 +144,13 @@ async def _require_project_access(
     project = await session.get(Project, project_id)
     if project is None or project.tenant_id != context.tenant_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    if project.owner_id == context.user_id or project.is_shared:
+    if project.owner_id == context.user_id:
         return project
+    # TS-ISO-003: `is_shared` used to short-circuit here and grant any
+    # same-tenant user access without checking membership at all -- it
+    # controls discoverability, not automatic authorization (see
+    # app.services.project_access, the single canonical policy). A shared
+    # project still requires ACTIVE membership for non-owners.
     member = await session.scalar(
         select(ProjectMember).where(
             ProjectMember.project_id == project.id,
