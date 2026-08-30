@@ -847,7 +847,7 @@ async def _forward_prose_answer(
     project_id: int,
     question: str,
     history: list[dict[str, str]] | None = None,
-    scope: str = "project",
+    scope: str = "authorized_project",
     include_query_history: bool = True,
     include_dashboard_context: bool = True,
     grounding_evidence: dict[str, Any] | None = None,

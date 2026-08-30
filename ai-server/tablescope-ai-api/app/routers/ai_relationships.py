@@ -34,7 +34,7 @@ async def generate_relationships(req: GenerateRelationshipsRequest) -> GenerateR
             tenant_id=req.tenant_id,
             user_id=req.user_id,
             project_id=req.project_id,
-            scope="project",
+            scope="authorized_project",
             question="",
             feature="relationships",
         )

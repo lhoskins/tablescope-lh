@@ -27,7 +27,7 @@ import httpx
 
 from app.core.config import settings
 from app.core.security import sign_request
-from app.models.schemas import ContextPackage, GroundingEvidence
+from app.models.schemas import ContextPackage, GroundingEvidence, VectorAccessClaims
 from app.services import llm_client, vector_store
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,6 @@ async def _verify_permissions(
     tenant_id: int,
     user_id: int,
     project_id: int,
-    scope: str,
 ) -> dict[str, Any]:
     """Verify user has access to the requested scope by calling the app server.
 
@@ -102,11 +101,52 @@ async def _verify_permissions(
         "is_member": True,
         "is_owner": True,
         "project_visibility": "shared",
+        "vector_access": {
+            "version": 1,
+            "tenant_id": tenant_id,
+            "project_id": project_id,
+            "principal_user_id": user_id,
+            "project_access": "owner",
+            "project_visibility": "shared",
+            "can_read_shared_documents": True,
+            "private_document_owner_user_id": user_id,
+        },
         "datasources": [],
         "saved_queries": [],
         "dashboards": [],
         "query_scopes": [],
     }
+
+
+def resolve_vector_access(
+    permissions: dict[str, Any],
+    *,
+    tenant_id: int,
+    user_id: int,
+    project_id: int,
+) -> VectorAccessClaims:
+    """Validate and bind platform-minted claims to the signed AI request.
+
+    A missing, malformed, or mismatched claim is an authorization failure, not
+    a reason to fall back to a broader project search.
+    """
+    try:
+        access = VectorAccessClaims.model_validate(permissions.get("vector_access"))
+    except Exception as exc:
+        raise ContextBuildError(
+            reason="Permission service returned invalid vector access claims",
+            denied_type="invalid_vector_access_claims",
+        ) from exc
+    if (
+        access.tenant_id != tenant_id
+        or access.project_id != project_id
+        or access.principal_user_id != user_id
+    ):
+        raise ContextBuildError(
+            reason="Vector access claims do not match the signed request",
+            denied_type="mismatched_vector_access_claims",
+        )
+    return access
 
 
 async def build_context(
@@ -129,31 +169,22 @@ async def build_context(
     # Cross-tenant: NEVER allowed
     # (structurally impossible — collection is derived from tenant_id)
 
+    if scope != "authorized_project":
+        raise ContextBuildError(
+            reason="Unknown or caller-selected vector scope",
+            denied_type="invalid_vector_scope",
+        )
+
     # Cross-project: disabled by default
     if not settings.cross_project_enabled:
         # scope is always bound to a single project
         pass
 
     # Verify permissions
-    perms = await _verify_permissions(tenant_id, user_id, project_id, scope)
-
-    if scope == "private_project" and not perms.get("is_owner", False):
-        raise ContextBuildError(
-            reason="User is not the owner of this private project",
-            denied_type="private_project_not_owner",
-        )
-
-    if scope == "shared_project" and not perms.get("is_member", False):
-        raise ContextBuildError(
-            reason="User is not a member of this shared project",
-            denied_type="shared_project_not_member",
-        )
-
-    if scope == "tenant" and not settings.tenant_scope_enabled:
-        raise ContextBuildError(
-            reason="Tenant-wide AI scope is disabled",
-            denied_type="tenant_scope_disabled",
-        )
+    perms = await _verify_permissions(tenant_id, user_id, project_id)
+    vector_access = resolve_vector_access(
+        perms, tenant_id=tenant_id, user_id=user_id, project_id=project_id
+    )
 
     # --- Retrieve allowed context ---
 
@@ -175,12 +206,8 @@ async def build_context(
         if query_embedding is not None:
             try:
                 documents = await vector_store.search_vectors(
-                    tenant_id=tenant_id,
-                    project_id=project_id,
-                    user_id=user_id,
+                    access=vector_access,
                     query_vector=query_embedding,
-                    scope=scope,
-                    is_project_member=perms.get("is_member", False),
                     limit=10,
                 )
             except Exception as e:
@@ -191,8 +218,7 @@ async def build_context(
             # across projects. Merge any matches into the document context.
             try:
                 reference_docs = await vector_store.search_reference_vectors(
-                    tenant_id=tenant_id,
-                    project_id=project_id,
+                    access=vector_access,
                     query_vector=query_embedding,
                     limit=5,
                 )

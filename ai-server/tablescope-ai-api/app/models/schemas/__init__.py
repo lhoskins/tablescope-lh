@@ -37,6 +37,7 @@ from .common import (
 )
 from .context import (
     ContextPackage,
+    VectorAccessClaims,
     VectorPayload,
 )
 from .conversation import (
@@ -63,6 +64,10 @@ from .family import (
     FamilySummarizeRequest,
     FamilySummarizeResponse,
 )
+from .file_analysis import (
+    AnalyzeFileRequest,
+    AnalyzeFileResponse,
+)
 from .grounding import (
     GroundingEvidence,
     GroundingKGNode,
@@ -70,10 +75,6 @@ from .grounding import (
     GroundingPassage,
     GroundingSearchRequest,
     GroundingSearchResponse,
-)
-from .file_analysis import (
-    AnalyzeFileRequest,
-    AnalyzeFileResponse,
 )
 from .indexing import (
     IndexDocumentRequest,
@@ -195,6 +196,7 @@ __all__ = [
     "SuggestDashboardResponse",
     "SuggestDashboardsMultiRequest",
     "SuggestDashboardsMultiResponse",
+    "VectorAccessClaims",
     "VectorPayload",
     "WidgetReferenceLine",
     "WidgetValidationExpectations",

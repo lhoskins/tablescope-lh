@@ -467,7 +467,7 @@ async def search_grounding_vectors(
     user_id: int,
     project_id: int,
     question: str,
-    scope: str = "project",
+    scope: str = "authorized_project",
     limit: int = 12,
 ) -> dict[str, Any] | None:
     """Query the AI server for vector-grounded passages (project + reference)."""
@@ -491,7 +491,7 @@ async def ask(
     user_id: int,
     project_id: int,
     question: str,
-    scope: str = "project",
+    scope: str = "authorized_project",
     include_query_history: bool = True,
     include_dashboard_context: bool = True,
     history: list[dict[str, Any]] | None = None,

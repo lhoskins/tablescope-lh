@@ -248,7 +248,7 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
             tenant_id=req.tenant_id,
             user_id=req.user_id,
             project_id=req.project_id,
-            scope="project",
+            scope="authorized_project",
             question=req.prompt,
             feature="generate_sql",
             grounding_evidence=req.grounding_evidence,

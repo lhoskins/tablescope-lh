@@ -1,6 +1,6 @@
 """Schemas for the ``/ai/ask`` endpoint."""
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -10,7 +10,7 @@ from .grounding import GroundingEvidence
 
 class AskRequest(AIBaseRequest):
     question: str
-    scope: str = "project"  # project | personal | shared_project
+    scope: Literal["authorized_project"] = "authorized_project"
     include_query_history: bool = True
     include_dashboard_context: bool = True
     # Prior turns of the same conversation (oldest→newest), each

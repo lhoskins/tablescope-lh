@@ -19,6 +19,7 @@ import time
 import pytest
 
 from app.models.project import Project, ProjectMember
+from app.models.project_asset import ProjectAsset
 from app.services.internal_ai_auth import sign_internal_payload
 
 pytestmark = pytest.mark.anyio
@@ -181,6 +182,82 @@ async def test_owner_gets_full_context(client, db_session, service_headers):
     data = r.json()
     assert data["is_owner"] is True
     assert data["is_member"] is True
+    assert data["vector_access"] == {
+        "version": 1,
+        "tenant_id": tenant_id,
+        "project_id": project.id,
+        "principal_user_id": owner_id,
+        "project_access": "owner",
+        "project_visibility": "private",
+        "can_read_shared_documents": True,
+        "private_document_owner_user_id": owner_id,
+    }
+
+
+async def test_permission_context_excludes_other_users_private_documents(
+    client, db_session, service_headers
+):
+    tenant_id = await _tenant(client, service_headers, "perm-private-doc")
+    owner_id = await _user(client, service_headers, tenant_id, "owner@private-doc.com")
+    member_id = await _user(client, service_headers, tenant_id, "member@private-doc.com")
+
+    project = Project(
+        tenant_id=tenant_id, owner_id=owner_id, name="Document Project", is_shared=True
+    )
+    db_session.add(project)
+    await db_session.commit()
+    await db_session.refresh(project)
+    db_session.add(
+        ProjectMember(project_id=project.id, user_id=member_id, role="viewer", is_active=True)
+    )
+    db_session.add_all(
+        [
+            ProjectAsset(
+                tenant_id=tenant_id,
+                project_id=project.id,
+                owner_user_id=owner_id,
+                asset_type="document",
+                source_type="uploaded_file",
+                title="Shared",
+                filename="shared.txt",
+                storage_location="/tmp/shared.txt",
+                visibility="shared_project",
+                status="uploaded",
+            ),
+            ProjectAsset(
+                tenant_id=tenant_id,
+                project_id=project.id,
+                owner_user_id=owner_id,
+                asset_type="document",
+                source_type="uploaded_file",
+                title="Owner private",
+                filename="owner-private.txt",
+                storage_location="/tmp/owner-private.txt",
+                visibility="private",
+                status="uploaded",
+            ),
+            ProjectAsset(
+                tenant_id=tenant_id,
+                project_id=project.id,
+                owner_user_id=member_id,
+                asset_type="document",
+                source_type="uploaded_file",
+                title="Member private",
+                filename="member-private.txt",
+                storage_location="/tmp/member-private.txt",
+                visibility="private",
+                status="uploaded",
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    r = await client.post(
+        "/api/ai/permissions",
+        json=_signed_body(tenant_id=tenant_id, user_id=member_id, project_id=project.id),
+    )
+    assert r.status_code == 200, r.text
+    assert {doc["title"] for doc in r.json()["documents"]} == {"Shared", "Member private"}
 
 
 async def test_shared_project_denies_unrelated_same_tenant_user(

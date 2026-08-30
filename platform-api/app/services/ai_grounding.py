@@ -816,7 +816,7 @@ async def gather_grounding_evidence(
     project_id: int,
     question: str,
     relevant_columns: list[str] | None = None,
-    scope: str = "project",
+    scope: str = "authorized_project",
 ) -> GroundingEvidence | None:
     """Retrieve and merge all authorized grounding evidence for a question.
 
