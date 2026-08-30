@@ -158,6 +158,10 @@ public class VDBManagementServlet extends HttpServlet {
         // Read VDB type (optional, defaults to org-level for backward compatibility)
         String vdbType = requestBody.optString("vdb_type", "org");
         Integer userId = requestBody.has("user_id") ? requestBody.getInt("user_id") : null;
+        // Scopes a "shared" VDB to one project instead of the whole org, so
+        // two shared projects never resolve to the same VDB/folder. Absent
+        // for backward compatibility with the legacy org-wide shared VDB.
+        Integer projectId = requestBody.has("project_id") ? requestBody.getInt("project_id") : null;
 
         // Validate vdb_type and user_id combination
         if ("user".equals(vdbType) && userId == null) {
@@ -196,11 +200,17 @@ public class VDBManagementServlet extends HttpServlet {
                 uploadsFolder = customerFolder + "/uploads";
                 log("Using user VDB path for user " + userId);
             } else if ("shared".equals(vdbType)) {
-                // Shared VDB: /Customer/{org_id}/shared/vdb/
-                customerFolder = vdbBasePath + "/customers/" + orgId + "/shared";
+                // Shared VDB, scoped per project when project_id is given:
+                // /Customer/{org_id}/shared/{project_id}/vdb/. Falls back to
+                // the legacy org-wide /Customer/{org_id}/shared/vdb/ when
+                // absent, for backward compatibility.
+                customerFolder = projectId != null
+                    ? vdbBasePath + "/customers/" + orgId + "/shared/" + projectId
+                    : vdbBasePath + "/customers/" + orgId + "/shared";
                 vdbFolder = customerFolder + "/vdb";
                 uploadsFolder = customerFolder + "/uploads";
-                log("Using shared VDB path for organization " + orgId);
+                log("Using shared VDB path for organization " + orgId
+                    + (projectId != null ? ", project " + projectId : " (org-wide, legacy)"));
             } else {
                 // Legacy org-level VDB: /Customer/{org_id}/vdb/
                 customerFolder = vdbBasePath + "/customers/" + orgId;

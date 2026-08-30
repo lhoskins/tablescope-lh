@@ -243,10 +243,25 @@ public class VDBFileLocator {
     }
 
     /**
-     * Find VDB file for shared project within an organization.
+     * Find VDB file for shared project within an organization (legacy,
+     * org-wide shared VDB -- one VDB shared by every project in the org).
      */
     public String findVDBFileForShared(int orgId) {
-        String vdbFolder = vdbBasePath + "/customers/" + orgId + "/shared/vdb/";
+        return findVDBFileForShared(orgId, null);
+    }
+
+    /**
+     * Find VDB file for a shared project. When {@code projectId} is
+     * provided, each project gets its own shared VDB at
+     * {@code /customers/{orgId}/shared/{projectId}/vdb/} so two shared
+     * projects in the same org never resolve to the same VDB. When it is
+     * null, falls back to the legacy org-wide shared path for backward
+     * compatibility with VDBs provisioned before per-project scoping.
+     */
+    public String findVDBFileForShared(int orgId, Integer projectId) {
+        String vdbFolder = projectId != null
+            ? vdbBasePath + "/customers/" + orgId + "/shared/" + projectId + "/vdb/"
+            : vdbBasePath + "/customers/" + orgId + "/shared/vdb/";
         File folder = new File(vdbFolder);
 
         LOGGER.info("Searching for shared VDB in: " + vdbFolder);

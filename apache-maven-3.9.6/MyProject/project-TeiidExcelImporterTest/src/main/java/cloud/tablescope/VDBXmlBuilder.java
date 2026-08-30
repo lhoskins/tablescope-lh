@@ -29,10 +29,16 @@ public class VDBXmlBuilder {
             String updatedXml = vdbXml;
 
             Pattern userPattern = Pattern.compile("/customers/(\\d+)/(\\d+)/uploads");
+            // Project-scoped shared path must be checked before the org-wide
+            // sharedPattern below, since /shared/{projectId}/uploads would
+            // otherwise fail to match sharedPattern's exact "/shared/uploads"
+            // and fall through to the absolute-path fallback.
+            Pattern sharedProjectPattern = Pattern.compile("/customers/(\\d+)/shared/(\\d+)/uploads");
             Pattern sharedPattern = Pattern.compile("/customers/(\\d+)/shared/uploads");
             Pattern orgPattern = Pattern.compile("/customers/(\\d+)/uploads");
 
             Matcher userMatcher = userPattern.matcher(uploadsFolder);
+            Matcher sharedProjectMatcher = sharedProjectPattern.matcher(uploadsFolder);
             Matcher sharedMatcher = sharedPattern.matcher(uploadsFolder);
             Matcher orgMatcher = orgPattern.matcher(uploadsFolder);
 
@@ -43,6 +49,11 @@ public class VDBXmlBuilder {
                 String userId = userMatcher.group(2);
                 relativePathPrefix = orgId + "/" + userId + "/uploads";
                 LOGGER.info("Using user-level relative path prefix: " + relativePathPrefix + "/");
+            } else if (sharedProjectMatcher.find()) {
+                String orgId = sharedProjectMatcher.group(1);
+                String projectId = sharedProjectMatcher.group(2);
+                relativePathPrefix = orgId + "/shared/" + projectId + "/uploads";
+                LOGGER.info("Using project-scoped shared relative path prefix: " + relativePathPrefix + "/");
             } else if (sharedMatcher.find()) {
                 String orgId = sharedMatcher.group(1);
                 relativePathPrefix = orgId + "/shared/uploads";

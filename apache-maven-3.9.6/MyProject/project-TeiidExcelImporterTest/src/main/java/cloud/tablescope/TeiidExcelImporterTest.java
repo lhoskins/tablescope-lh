@@ -44,6 +44,13 @@ public class TeiidExcelImporterTest extends HttpServlet {
         String userIdParam = request.getParameter("user_id");
         int userId = (userIdParam != null && !userIdParam.isEmpty()) ? Integer.parseInt(userIdParam) : 0;
 
+        // Scopes a "shared" VDB to one project instead of the whole org, so
+        // two shared projects never resolve to the same VDB/folder. Null
+        // (absent) falls back to the legacy org-wide shared VDB.
+        String projectIdParam = request.getParameter("project_id");
+        Integer projectId = (projectIdParam != null && !projectIdParam.isEmpty())
+            ? Integer.valueOf(projectIdParam) : null;
+
         // Get VDB type parameter (determines which VDB to update)
         String vdbType = request.getParameter("vdb_type");
         if (vdbType == null || vdbType.isEmpty()) {
@@ -64,15 +71,19 @@ public class TeiidExcelImporterTest extends HttpServlet {
             String customerBase;
 
             if ("shared".equals(vdbType)) {
-                // Shared VDB: use shared folders
-                customerBase = "/opt/wildfly/teiidfiles/customers/" + orgId + "/shared";
+                // Shared VDB, scoped per project when project_id is given
+                // (falls back to the legacy org-wide shared folder otherwise).
+                customerBase = projectId != null
+                    ? "/opt/wildfly/teiidfiles/customers/" + orgId + "/shared/" + projectId
+                    : "/opt/wildfly/teiidfiles/customers/" + orgId + "/shared";
                 uploadPath = customerBase + "/uploads";
                 archivePath = customerBase + "/uploads/archive";
 
-                System.out.println("[TeiidExcelImporterTest] Using SHARED VDB for org " + orgId);
+                System.out.println("[TeiidExcelImporterTest] Using SHARED VDB for org " + orgId
+                    + (projectId != null ? ", project " + projectId : " (org-wide, legacy)"));
 
                 // Find shared VDB
-                vdbFilePath = vdbFileLocator.findVDBFileForShared(orgId);
+                vdbFilePath = vdbFileLocator.findVDBFileForShared(orgId, projectId);
 
                 if (vdbFilePath == null) {
                     System.out.println("[TeiidExcelImporterTest] Shared VDB not found for org " + orgId);
@@ -191,13 +202,13 @@ public class TeiidExcelImporterTest extends HttpServlet {
         try {
             String lowerFileName = fileName.toLowerCase();
             if (lowerFileName.endsWith(".txt") || lowerFileName.endsWith(".csv") || lowerFileName.endsWith(".tsv")) {
-                processTxtFile(filePath, fileName, vdbFilePath, vdbDeploymentName, jsonResponse, shouldReplace, response, orgId, userId, vdbType);
+                processTxtFile(filePath, fileName, vdbFilePath, vdbDeploymentName, jsonResponse, shouldReplace, response, orgId, userId, vdbType, projectId);
             } else {
                 // If file already exists, read from disk instead of upload stream
                 if (targetFile.exists() && !shouldReplace) {
-                    processExcelFileFromDisk(filePath, fileName, vdbFilePath, vdbDeploymentName, jsonResponse, shouldReplace, response, orgId, userId, vdbType);
+                    processExcelFileFromDisk(filePath, fileName, vdbFilePath, vdbDeploymentName, jsonResponse, shouldReplace, response, orgId, userId, vdbType, projectId);
                 } else {
-                    processExcelFile(filePart, fileName, vdbFilePath, vdbDeploymentName, jsonResponse, shouldReplace, response, orgId, userId, vdbType);
+                    processExcelFile(filePart, fileName, vdbFilePath, vdbDeploymentName, jsonResponse, shouldReplace, response, orgId, userId, vdbType, projectId);
                 }
             }
         } catch (IOException e) {
@@ -211,7 +222,7 @@ public class TeiidExcelImporterTest extends HttpServlet {
         out.println(jsonResponse.toString());
     }
 
-    private void processTxtFile(String filePath, String fileName, String vdbFilePath, String vdbDeploymentName, StringBuilder jsonResponse, boolean shouldReplace, HttpServletResponse response, int orgId, int userId, String vdbType) throws IOException {
+    private void processTxtFile(String filePath, String fileName, String vdbFilePath, String vdbDeploymentName, StringBuilder jsonResponse, boolean shouldReplace, HttpServletResponse response, int orgId, int userId, String vdbType, Integer projectId) throws IOException {
         System.out.println("[TeiidExcelImporterTest] Processing TXT/CSV file: " + filePath);
         System.out.println("[TeiidExcelImporterTest] VDB file path: " + vdbFilePath);
         System.out.println("[TeiidExcelImporterTest] VDB type: " + vdbType + ", orgId: " + orgId + ", userId: " + userId);
@@ -237,7 +248,7 @@ public class TeiidExcelImporterTest extends HttpServlet {
             return;
         }
         try {
-            processTxtFileInternal(filePath, fileName, vdbFilePath, vdbDeploymentName, jsonResponse, shouldReplace, response, orgId, userId, vdbType);
+            processTxtFileInternal(filePath, fileName, vdbFilePath, vdbDeploymentName, jsonResponse, shouldReplace, response, orgId, userId, vdbType, projectId);
         } catch (Exception e) {
             System.err.println("[TeiidExcelImporterTest] ERROR in processTxtFileInternal: " + e.getMessage());
             e.printStackTrace();
@@ -247,7 +258,7 @@ public class TeiidExcelImporterTest extends HttpServlet {
         }
     }
 
-    private void processTxtFileInternal(String filePath, String fileName, String vdbFilePath, String vdbDeploymentName, StringBuilder jsonResponse, boolean shouldReplace, HttpServletResponse response, int orgId, int userId, String vdbType) throws IOException {
+    private void processTxtFileInternal(String filePath, String fileName, String vdbFilePath, String vdbDeploymentName, StringBuilder jsonResponse, boolean shouldReplace, HttpServletResponse response, int orgId, int userId, String vdbType, Integer projectId) throws IOException {
         System.out.println("[TeiidExcelImporterTest] processTxtFileInternal starting for: " + filePath);
         List<String> columnNames = txtFileProcessor.getColumnNames(filePath);
         if (columnNames == null) {
@@ -261,8 +272,11 @@ public class TeiidExcelImporterTest extends HttpServlet {
         String relativeFilePath;
         if (orgId > 0) {
             if ("shared".equals(vdbType)) {
-                // Shared VDB: use {org_id}/shared/uploads/filename.csv
-                relativeFilePath = orgId + "/shared/uploads/" + fileName.replaceAll("\\s+", "_");
+                // Shared VDB, scoped per project when project_id is given:
+                // {org_id}/shared/{project_id}/uploads/filename.csv.
+                relativeFilePath = projectId != null
+                    ? orgId + "/shared/" + projectId + "/uploads/" + fileName.replaceAll("\\s+", "_")
+                    : orgId + "/shared/uploads/" + fileName.replaceAll("\\s+", "_");
             } else if (userId > 0) {
                 // User-level VDB: use {org_id}/{user_id}/uploads/filename.csv
                 relativeFilePath = orgId + "/" + userId + "/uploads/" + fileName.replaceAll("\\s+", "_");
@@ -356,7 +370,7 @@ public class TeiidExcelImporterTest extends HttpServlet {
         jsonResponse.append("\"data\": {\"fileName\": \"").append(fileName).append("\"}}");
     }
 
-    private void processExcelFileFromDisk(String filePath, String fileName, String vdbFilePath, String vdbDeploymentName, StringBuilder jsonResponse, boolean shouldReplace, HttpServletResponse response, int orgId, int userId, String vdbType) throws IOException {
+    private void processExcelFileFromDisk(String filePath, String fileName, String vdbFilePath, String vdbDeploymentName, StringBuilder jsonResponse, boolean shouldReplace, HttpServletResponse response, int orgId, int userId, String vdbType, Integer projectId) throws IOException {
         System.out.println("[TeiidExcelImporterTest] Processing Excel file from disk: " + filePath);
         System.out.println("[TeiidExcelImporterTest] VDB file path: " + vdbFilePath);
         System.out.println("[TeiidExcelImporterTest] VDB type: " + vdbType + ", orgId: " + orgId + ", userId: " + userId);
@@ -382,7 +396,7 @@ public class TeiidExcelImporterTest extends HttpServlet {
             return;
         }
         try {
-            processExcelFileFromDiskInternal(filePath, fileName, vdbFilePath, vdbDeploymentName, jsonResponse, shouldReplace, response, orgId, userId, vdbType);
+            processExcelFileFromDiskInternal(filePath, fileName, vdbFilePath, vdbDeploymentName, jsonResponse, shouldReplace, response, orgId, userId, vdbType, projectId);
         } catch (Exception e) {
             System.err.println("[TeiidExcelImporterTest] ERROR in processExcelFileFromDiskInternal: " + e.getMessage());
             e.printStackTrace();
@@ -392,7 +406,7 @@ public class TeiidExcelImporterTest extends HttpServlet {
         }
     }
 
-    private void processExcelFileFromDiskInternal(String filePath, String fileName, String vdbFilePath, String vdbDeploymentName, StringBuilder jsonResponse, boolean shouldReplace, HttpServletResponse response, int orgId, int userId, String vdbType) throws IOException {
+    private void processExcelFileFromDiskInternal(String filePath, String fileName, String vdbFilePath, String vdbDeploymentName, StringBuilder jsonResponse, boolean shouldReplace, HttpServletResponse response, int orgId, int userId, String vdbType, Integer projectId) throws IOException {
         System.out.println("[TeiidExcelImporterTest] processExcelFileFromDiskInternal starting for: " + filePath);
         try (FileInputStream fis = new FileInputStream(filePath)) {
             System.out.println("[TeiidExcelImporterTest] File opened successfully, reading column names...");
@@ -433,8 +447,11 @@ public class TeiidExcelImporterTest extends HttpServlet {
                 String relativeFilePath;
                 if (orgId > 0) {
                     if ("shared".equals(vdbType)) {
-                        // Shared VDB: use {org_id}/shared/uploads/filename.xlsx
-                        relativeFilePath = orgId + "/shared/uploads/" + fileName.replaceAll("\\s+", "_");
+                        // Shared VDB, scoped per project when project_id is
+                        // given: {org_id}/shared/{project_id}/uploads/filename.xlsx.
+                        relativeFilePath = projectId != null
+                            ? orgId + "/shared/" + projectId + "/uploads/" + fileName.replaceAll("\\s+", "_")
+                            : orgId + "/shared/uploads/" + fileName.replaceAll("\\s+", "_");
                     } else if (userId > 0) {
                         // User-level VDB: use {org_id}/{user_id}/uploads/filename.xlsx
                         relativeFilePath = orgId + "/" + userId + "/uploads/" + fileName.replaceAll("\\s+", "_");
@@ -536,7 +553,7 @@ public class TeiidExcelImporterTest extends HttpServlet {
         }
     }
 
-    private void processExcelFile(Part filePart, String fileName, String vdbFilePath, String vdbDeploymentName, StringBuilder jsonResponse, boolean shouldReplace, HttpServletResponse response, int orgId, int userId, String vdbType) throws IOException {
+    private void processExcelFile(Part filePart, String fileName, String vdbFilePath, String vdbDeploymentName, StringBuilder jsonResponse, boolean shouldReplace, HttpServletResponse response, int orgId, int userId, String vdbType, Integer projectId) throws IOException {
         List<String> columnNames = ExcelColumnReader.getColumnNames(filePart);
         if (columnNames == null) {
             jsonResponse.append("\"error\": \"Invalid column names in file.\"}");
@@ -571,8 +588,11 @@ public class TeiidExcelImporterTest extends HttpServlet {
         String relativeFilePath;
         if (orgId > 0) {
             if ("shared".equals(vdbType)) {
-                // Shared VDB: use {org_id}/shared/uploads/filename.xlsx
-                relativeFilePath = orgId + "/shared/uploads/" + fileName.replaceAll("\\s+", "_");
+                // Shared VDB, scoped per project when project_id is given:
+                // {org_id}/shared/{project_id}/uploads/filename.xlsx.
+                relativeFilePath = projectId != null
+                    ? orgId + "/shared/" + projectId + "/uploads/" + fileName.replaceAll("\\s+", "_")
+                    : orgId + "/shared/uploads/" + fileName.replaceAll("\\s+", "_");
             } else if (userId > 0) {
                 // User-level VDB: use {org_id}/{user_id}/uploads/filename.xlsx
                 relativeFilePath = orgId + "/" + userId + "/uploads/" + fileName.replaceAll("\\s+", "_");

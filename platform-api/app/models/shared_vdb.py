@@ -1,26 +1,44 @@
-"""SharedVDB model: per-tenant shared Virtual Database mapping.
+"""SharedVDB model: per-(tenant, project) shared Virtual Database mapping.
 
-Ported from `redash/models/shared_vdb.py` to SQLAlchemy 2.0 async.
+Loosely modeled on `redash/models/shared_vdb.py` (which was itself
+per-organization, not per-project -- see migration 0087's docstring for why
+this diverges from that legacy shape).
 """
 
 from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
 
 
 class SharedVDB(TimestampMixin, Base):
+    """One shared VDB per (tenant, project) -- scoped per project, not per
+    tenant. A tenant with several shared projects gets a separate row (and a
+    separate physical VDB/folder) for each; two shared projects never land
+    in the same VDB. ``project_id`` is nullable only so the pre-migration
+    per-tenant rows (from before this scoping existed) are not backfilled or
+    deleted -- see migration 0087."""
+
     __tablename__ = "shared_vdbs"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "project_id", name="uq_shared_vdbs_tenant_project"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[int] = mapped_column(
         ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False,
-        unique=True,
+        index=True,
+    )
+    project_id: Mapped[int | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=True,
         index=True,
     )
 
