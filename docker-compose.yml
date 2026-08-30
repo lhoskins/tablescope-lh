@@ -21,6 +21,9 @@ services:
       # user queries and remote-file fetches.
       TEIID_POOL_HEALTH_INTERVAL: "300"
       TEIID_VDB_RECONCILE_INTERVAL: "1800"
+      # Teiid loads metadata for many VDBs/translators and needs more than the
+      # default 2 GB heap to avoid GC-pause timeouts on the PG wire.
+      TEIID_MAX_HEAP: "4096m"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:9990/health"]
       interval: 30s
