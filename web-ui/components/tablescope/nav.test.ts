@@ -96,11 +96,11 @@ describe("projectGridItems", () => {
     const items = projectGridItems("7");
     expect(items.map((i) => i.key)).toEqual([
       "overview",
+      "project-data-sources",
       "workspace",
       "project-queries",
       "project-documents",
       "project-dashboards",
-      "project-data-sources",
       "project-insights",
       "project-actions",
       "project-business-context",
