@@ -6,14 +6,10 @@ import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { IconLoader2 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
-import { MembersDialog } from "@/components/tablescope/project/members-dialog";
-import { ToastViewport, useToasts } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { AskAnythingComposer } from "@/components/ai/ask-anything-composer";
 import { TurnBubble } from "@/components/tablescope/conversation/conversation-turn";
-import { ProjectNavGrid } from "@/components/tablescope/project/project-nav-grid";
-import { WorkspaceTabsBar } from "@/components/tablescope/project/workspace/workspace-tabs-bar";
 import { recentConversationsKey } from "@/components/tablescope/project/ai-conversations-card";
 import {
   createConversation,
@@ -30,16 +26,12 @@ import {
   useProjectQueries,
   useProjectDataSources,
   useProjectDashboards,
-  useProjectMembers,
-  useProjectActivity,
   useProjectGraph,
 } from "@/lib/ui/use-project-data";
 import { PROJECT_INSIGHTS_TITLE } from "./overview-screen/project-insights-title";
 import { PROJECT_INSIGHTS_SURFACE } from "./overview-screen/project-insights-surface";
 import { pollConversation } from "./overview-screen/poll-conversation";
-import { ProjectHeader } from "./overview-screen/project-header";
 import { RecentActivityFeed } from "./overview-screen/recent-activity-feed";
-import { StatBar } from "./overview-screen/stat-bar";
 
 
 
@@ -50,12 +42,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
   const { data: queries } = useProjectQueries(projectId);
   const { data: sources } = useProjectDataSources(projectId);
   const { data: dashboards } = useProjectDashboards(projectId);
-  const { data: members } = useProjectMembers(projectId);
-  const { data: activity } = useProjectActivity(projectId);
   const { data: graph } = useProjectGraph(projectId);
-
-  const [showMembers, setShowMembers] = useState(false);
-  const { toasts, push, dismiss } = useToasts();
 
   // ── Ask Anything: one shared Project Insights conversation per project.
   const [chatTurns, setChatTurns] = useState<ConversationTurn[]>([]);
@@ -175,9 +162,6 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
   }, [projectInsight]);
 
   // ── Derived counts
-  const dashboardRows = useMemo(() => dashboards ?? [], [dashboards]);
-  const memberCount = (members ?? []).filter((m) => m.is_active).length;
-  const aiActions = (activity?.events ?? []).filter((e) => e.category === "ai");
   const tableNodes = useMemo(
     () =>
       (graph?.nodes ?? []).filter((n) =>
@@ -196,30 +180,8 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
       scrollable={false}
     >
       <div className="flex min-h-0 flex-1 flex-col gap-4">
-        <ProjectHeader
-          project={project}
-          memberCount={memberCount}
-          aiStatus={project?.aiStatus ?? "idle"}
-          onMembers={() => setShowMembers(true)}
-          onToast={push}
-        />
-
-        <div className="-mx-5">
-          <ProjectNavGrid projectId={projectId} activeNav="overview" />
-          <WorkspaceTabsBar projectId={projectId} activeItem={null} />
-        </div>
-
         {/* Scrollable content — the composer below never moves with it. */}
         <div ref={scrollAreaRef} className="min-h-0 flex-1 space-y-5 overflow-y-auto pb-4">
-          <StatBar
-            projectId={projectId}
-            dataSources={sourceRows.length}
-            tables={project?.queryCount ?? queryRows.length}
-            documents={project?.documentCount ?? 0}
-            dashboards={project?.dashboardCount ?? dashboardRows.length}
-            aiActions={activity?.stats?.ai_actions ?? aiActions.length}
-          />
-
           <RecentActivityFeed
             projectId={projectId}
             insights={recentInsights}
@@ -272,13 +234,6 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
           />
         </div>
       </div>
-
-      <MembersDialog
-        open={showMembers}
-        projectId={projectId}
-        onClose={() => setShowMembers(false)}
-      />
-      <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </ProjectShell>
   );
 }

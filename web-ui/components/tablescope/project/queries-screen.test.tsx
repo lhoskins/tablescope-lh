@@ -4,10 +4,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 /**
- * "Create Query with AI" must open the parameterized AI Query Designer
- * dialog -- the same "describe -> preview -> save" pattern the AI Dashboard
- * Designer uses, not a single-line prompt bar -- and the manual SQL Query
- * Builder must remain reachable as a clearly secondary/legacy action.
+ * "Query Wizard" must open the parameterized AI Query Designer dialog -- the
+ * same "describe -> preview -> save" pattern the AI Dashboard Designer uses,
+ * not a single-line prompt bar -- and the manual SQL query builder must
+ * remain reachable from the action center as "Create Query".
  */
 
 const router = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
@@ -34,13 +34,13 @@ vi.mock("@/lib/ui/use-project-data", async (importOriginal) => {
 vi.mock("@/components/tablescope/project-shell", () => ({
   ProjectShell: ({
     children,
-    headerActions,
+    actions,
   }: {
     children?: ReactNode;
-    headerActions?: ReactNode;
+    actions?: ReactNode;
   }) => (
     <div data-testid="project-shell">
-      <div data-testid="header-actions">{headerActions}</div>
+      <div data-testid="header-actions">{actions}</div>
       {children}
     </div>
   ),
@@ -122,22 +122,18 @@ describe("QueriesScreen", () => {
       screen.queryByPlaceholderText("Describe the query you want to generate…"),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /create query with ai/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /query wizard/i }));
 
     expect(screen.getByTestId("ai-query-designer")).toBeInTheDocument();
     expect(aiQueryDesignerProps.current).toMatchObject({ open: true });
   });
 
-  it("keeps the manual Query Builder reachable as a secondary, legacy action", () => {
+  it("keeps the manual query builder reachable from the action center", () => {
     renderScreen();
 
     expect(screen.queryByTestId("query-builder-create")).not.toBeInTheDocument();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /query builder \(legacy\)/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /create query/i }));
 
     expect(screen.getByTestId("query-builder-create")).toBeInTheDocument();
   });

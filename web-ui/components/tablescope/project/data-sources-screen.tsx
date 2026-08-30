@@ -3,18 +3,9 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import {
-  IconRefresh,
-  IconSearch,
-  IconDatabase,
-  IconDatabasePlus,
-  IconServer,
-  IconFileText,
-  IconApi,
-} from "@tabler/icons-react";
+import { IconSearch } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/cn";
 import { DataSourceUpdateDialog } from "@/components/tablescope/project/data-source-update-dialog";
@@ -31,7 +22,7 @@ import {
   type DataSource,
 } from "@/lib/ui/use-project-data";
 import { DataSourceResultView } from "@/components/tablescope/project/detail-views";
-import { StatBar, type StatItem } from "./overview-screen/stat-bar";
+import { ActionCard, ActionCenter } from "./action-center";
 import { isDatabase } from "./data-sources-screen/is-database";
 import { isSaas } from "./data-sources-screen/is-saas";
 import { SourceIcon } from "./data-sources-screen/source-icon";
@@ -241,49 +232,11 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
     });
   }, [rows, archivedRows, filter, search]);
 
-  const dbCount = rows.filter(isDatabase).length;
-  const fileCount = rows.filter((s) => !isDatabase(s) && !isSaas(s)).length;
-  const saasCount = rows.filter(isSaas).length;
-
-  const statItems: StatItem[] = [
-    {
-      key: "total",
-      icon: IconDatabase,
-      iconClass: "bg-brand-50 text-brand-700",
-      value: rows.length,
-      label: "Total sources",
-    },
-    {
-      key: "database",
-      icon: IconServer,
-      iconClass: "bg-ai-bg text-ai",
-      value: dbCount,
-      label: "Database sources",
-    },
-    {
-      key: "file",
-      icon: IconFileText,
-      iconClass: "bg-success-bg text-success",
-      value: fileCount,
-      label: "File sources",
-    },
-    {
-      key: "saas",
-      icon: IconApi,
-      iconClass: "bg-warning-bg text-warning",
-      value: saasCount,
-      label: "SaaS sources",
-    },
-  ];
-
-  const inDetail = Boolean(detail);
-
   return (
     <ProjectShell
       projectId={projectId}
       activeNav="project-data-sources"
       breadcrumbLabel="Data Sources"
-      showProjectHeader={!inDetail}
       workspaceItem={
         detail
           ? {
@@ -295,24 +248,60 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
             }
           : null
       }
-      headerActions={
-        !inDetail ? (
-          <>
-            <Button variant="secondary">
-              <IconRefresh size={14} />
-              Sync all
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => router.push(`/projects/${projectId}/data-source-builder`)}
-            >
-              <IconDatabasePlus size={14} />
-              Data Source Builder
-            </Button>
-          </>
-        ) : undefined
-      }
     >
+      {/* Outside the view switch below, so it stays put when you open a single
+          data source -- same as the nav grid above it. */}
+      <ActionCenter label="Data source actions">
+        <div className="flex items-stretch gap-2">
+          <ActionCard
+            lines={["All", "Sources"]}
+            active={filter === "all"}
+            onClick={() => {
+              setFilter("all");
+              setDetailKey(null);
+            }}
+          />
+          <ActionCard lines={["Sync", "All"]} onClick={() => undefined} />
+          <ActionCard
+            lines={["Data Source", "Builder"]}
+            onClick={() => router.push(`/projects/${projectId}/data-source-builder`)}
+          />
+        </div>
+
+        <div className="relative min-w-[220px] flex-1">
+          <IconSearch
+            size={15}
+            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-tertiary"
+          />
+          <input
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setDetailKey(null);
+            }}
+            placeholder="Search data sources…"
+            className="h-[38px] w-full rounded-lg border border-line-secondary bg-bg-primary pl-8 pr-3 text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+          />
+        </div>
+        {FILTERS.filter((f) => f.key !== "all").map((f) => (
+          <button
+            key={f.key}
+            type="button"
+            onClick={() => {
+              setFilter(f.key);
+              setDetailKey(null);
+            }}
+            className={cn(
+              "h-[38px] min-w-[52px] rounded-lg border px-3 text-[12px] font-medium",
+              filter === f.key
+                ? "border-brand-500 bg-brand-50 text-brand-700"
+                : "border-line-secondary bg-bg-primary text-ink-secondary hover:bg-bg-secondary",
+            )}
+          >
+            {f.label}
+          </button>
+        ))}
+      </ActionCenter>
       {detail ? (
         <DataSourceResultView
           projectId={projectId}
@@ -325,38 +314,6 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
         />
       ) : (
         <div className="space-y-4">
-          {filter !== "archive" && <StatBar items={statItems} />}
-
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative min-w-[220px] flex-1">
-              <IconSearch
-                size={15}
-                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-tertiary"
-              />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search data sources…"
-                className="h-8 w-full rounded-md border border-line-secondary bg-bg-primary pl-8 pr-3 text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
-              />
-            </div>
-            {FILTERS.map((f) => (
-              <button
-                key={f.key}
-                type="button"
-                onClick={() => setFilter(f.key)}
-                className={cn(
-                  "h-8 rounded-md border px-3 text-[12px] font-medium",
-                  filter === f.key
-                    ? "border-brand-500 bg-brand-50 text-brand-700"
-                    : "border-line-secondary bg-bg-primary text-ink-secondary hover:bg-bg-secondary",
-                )}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-
           {isLoading ? (
             <div className="py-16 text-center text-small text-ink-tertiary">
               Loading data sources…

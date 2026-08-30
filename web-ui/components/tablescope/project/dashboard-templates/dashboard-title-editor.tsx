@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 /** Inline dashboard-name editor: clicking the title itself starts editing --
  * no separate pencil icon, matching the project name's own rename pattern
- * (see overview-screen/project-header.tsx). */
+ * (see project/project-topbar.tsx). */
 export function DashboardTitleEditor({
   name,
   onSave,

@@ -42,7 +42,9 @@ export function QueryBuilderCreate({
 }: {
   projectId: string;
   datasources: DataSource[];
-  backLabel: string;
+  /** Omit to hide the back link -- screens whose own chrome (nav grid, action
+   *  center) stays visible behind this view don't need a second way back. */
+  backLabel?: string;
   onBack: () => void;
   onSaved: () => void;
 }) {
@@ -78,7 +80,7 @@ export function QueryBuilderCreate({
 
   return (
     <div className="space-y-4">
-      <DetailBackBar label={backLabel} onBack={onBack} />
+      {backLabel && <DetailBackBar label={backLabel} onBack={onBack} />}
       <QueryBuilder
         projectId={Number(projectId)}
         datasources={datasources.map((d) => ({

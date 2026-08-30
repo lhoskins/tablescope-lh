@@ -4,26 +4,29 @@ import { type ReactNode, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppShell } from "./app-shell";
 import { ProjectNavGrid } from "./project/project-nav-grid";
-import { ProjectHeader } from "./project/overview-screen/project-header";
+import {
+  ProjectTitleBreadcrumb,
+  ProjectTopBarControls,
+} from "./project/project-topbar";
 import { MembersDialog } from "./project/members-dialog";
 import { WorkspaceTabsBar } from "./project/workspace/workspace-tabs-bar";
 import { WorkspaceAssistantPanel } from "./project/workspace/workspace-assistant-panel";
+import { projectGridItems } from "./nav";
 import type { WorkspaceTab } from "./project/workspace/workspace-tabs-storage";
 import type { WorkspaceCard } from "@/lib/api/workspaces";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
 import { getUserMeta } from "@/lib/auth";
-import { useProjectShell, useProjectMembers } from "@/lib/ui/use-project-data";
-import type { NavKey, ProjectSummary } from "@/lib/ui/types";
+import { useProjectShell } from "@/lib/ui/use-project-data";
+import type { NavKey } from "@/lib/ui/types";
 
 export function ProjectShell({
   projectId,
   activeNav,
+  breadcrumbLabel,
   actions,
   contextPanel,
   scrollable,
   showResourceTabs = true,
-  showProjectHeader = false,
-  headerActions,
   workspaceItem = null,
   assistantSurface = "project_workspace",
   assistantContextLabel,
@@ -33,7 +36,11 @@ export function ProjectShell({
 }: {
   projectId: string;
   activeNav: NavKey;
+  /** Screen segment of the top bar title (`API Costs › Documents`). Falls
+   *  back to the matching nav card's label. */
   breadcrumbLabel?: string;
+  /** Page-specific buttons. They sit in the top bar, left of the project's
+   *  Private/Shared switch and Members button. */
   actions?: ReactNode;
   contextPanel?: ReactNode;
   /** When false, the main content area does not scroll — the page manages
@@ -42,15 +49,8 @@ export function ProjectShell({
   /** Render the "recently opened items" MRU strip (`WorkspaceTabsBar`) below
    *  the project nav grid. The nav grid itself always renders regardless of
    *  this flag -- it's the project's persistent top-level navigation, not a
-   *  per-page resource strip. Pages that render their own title/header can
-   *  set this to false and place the strip below the title instead. */
+   *  per-page resource strip. */
   showResourceTabs?: boolean;
-  /** Render a project title header and resource tabs above the page content.
-   *  Use this on project inventory pages (Data Sources, Tables, Documents)
-   *  to match the Project Overview layout. */
-  showProjectHeader?: boolean;
-  /** Actions placed in the right side of the project title header. */
-  headerActions?: ReactNode;
   /** The specific table/dashboard/document/data source this page currently
    *  has open, if any. Feeds the project workspace tab strip and grounds the
    *  docked AI Assistant. */
@@ -75,15 +75,12 @@ export function ProjectShell({
     if (!getUserMeta()) router.replace("/login");
   }, [router]);
 
-  const renderHeader = showProjectHeader && activeNav !== "overview";
-  const resourceTabs = (
-    <>
-      <ProjectNavGrid projectId={projectId} activeNav={activeNav} />
-      {showResourceTabs && (
-        <WorkspaceTabsBar projectId={projectId} activeItem={workspaceItem} />
-      )}
-    </>
-  );
+  const [showMembers, setShowMembers] = useState(false);
+  const { toasts, push, dismiss } = useToasts();
+
+  const screenLabel =
+    breadcrumbLabel ??
+    projectGridItems(projectId).find((item) => item.key === activeNav)?.label;
 
   return (
     <AppShell
@@ -94,9 +91,29 @@ export function ProjectShell({
       project={project}
       otherProjects={otherProjects}
       counts={counts}
-      topBarRight={actions}
+      topBarLeft={
+        <ProjectTitleBreadcrumb
+          project={project}
+          screenLabel={screenLabel}
+          aiStatus={project?.aiStatus ?? "idle"}
+          onToast={push}
+        />
+      }
+      topBarControls={
+        <ProjectTopBarControls
+          project={project}
+          actions={actions}
+          onMembers={() => setShowMembers(true)}
+          onToast={push}
+        />
+      }
       subHeader={
-        activeNav === "overview" || renderHeader ? undefined : resourceTabs
+        <>
+          <ProjectNavGrid projectId={projectId} activeNav={activeNav} />
+          {showResourceTabs && (
+            <WorkspaceTabsBar projectId={projectId} activeItem={workspaceItem} />
+          )}
+        </>
       }
       contextPanel={
         <>
@@ -113,51 +130,6 @@ export function ProjectShell({
       }
       scrollable={scrollable}
     >
-      {renderHeader ? (
-        <ProjectPageHeader
-          projectId={projectId}
-          project={project}
-          headerActions={headerActions}
-          resourceTabs={resourceTabs}
-        >
-          {children}
-        </ProjectPageHeader>
-      ) : (
-        children
-      )}
-    </AppShell>
-  );
-}
-
-function ProjectPageHeader({
-  projectId,
-  project,
-  headerActions,
-  resourceTabs,
-  children,
-}: {
-  projectId: string;
-  project: ProjectSummary | null;
-  headerActions?: ReactNode;
-  resourceTabs: ReactNode;
-  children: ReactNode;
-}) {
-  const { data: members } = useProjectMembers(projectId);
-  const memberCount = (members ?? []).filter((m) => m.is_active).length;
-  const [showMembers, setShowMembers] = useState(false);
-  const { toasts, push, dismiss } = useToasts();
-
-  return (
-    <div className="flex flex-col gap-4">
-      <ProjectHeader
-        project={project}
-        memberCount={memberCount}
-        aiStatus={project?.aiStatus ?? "idle"}
-        onMembers={() => setShowMembers(true)}
-        onToast={push}
-        actions={headerActions}
-      />
-      <div className="-mx-5">{resourceTabs}</div>
       {children}
       <MembersDialog
         open={showMembers}
@@ -165,6 +137,6 @@ function ProjectPageHeader({
         onClose={() => setShowMembers(false)}
       />
       <ToastViewport toasts={toasts} onDismiss={dismiss} />
-    </div>
+    </AppShell>
   );
 }
