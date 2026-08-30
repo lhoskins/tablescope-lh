@@ -52,7 +52,18 @@ class TeiidConnectionPoolManager:
         self._max_size = max_size
         self._max_inactive_connection_lifetime = max_inactive_connection_lifetime
         self._pools: dict[PoolKey, asyncpg.Pool] = {}
-        self._lock = asyncio.Lock()
+        # Per-key locks serialize pool creation/eviction for a single VDB.
+        # _locks_lock protects the _key_locks map itself.
+        self._key_locks: dict[PoolKey, asyncio.Lock] = {}
+        self._locks_lock = asyncio.Lock()
+
+    def _key_lock(self, key: PoolKey) -> asyncio.Lock:
+        """Return (and lazily create) the lock for a specific pool key."""
+        lock = self._key_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._key_locks[key] = lock
+        return lock
 
     async def get_pool(
         self,
@@ -67,7 +78,16 @@ class TeiidConnectionPoolManager:
         pool = self._pools.get(key)
         if pool is not None and not pool._closed:
             return pool
-        async with self._lock:
+
+        # Serialize on the VDB key so a slow/defunct VDB creation does not
+        # block pools for other VDBs.
+        async with self._locks_lock:
+            pool = self._pools.get(key)
+            if pool is not None and not pool._closed:
+                return pool
+            key_lock = self._key_lock(key)
+
+        async with key_lock:
             pool = self._pools.get(key)
             if pool is not None and not pool._closed:
                 return pool
@@ -100,32 +120,62 @@ class TeiidConnectionPoolManager:
     ) -> None:
         """Close and remove a specific pool (e.g. after a stale-session error)."""
         key = PoolKey(host=host, port=port, database=database, username=username)
-        async with self._lock:
+        async with self._locks_lock:
+            key_lock = self._key_lock(key)
+
+        async with key_lock:
             pool = self._pools.pop(key, None)
-            if pool is not None:
-                logger.info("Evicting stale Teiid pool %s", key)
-                await pool.close()
+
+        if pool is not None:
+            logger.info("Evicting stale Teiid pool %s", key)
+            try:
+                await asyncio.wait_for(pool.close(), timeout=5.0)
+            except TimeoutError:
+                logger.warning("Timed out closing evicted Teiid pool %s", key)
+            except Exception as exc:
+                logger.warning("Could not close evicted Teiid pool %s: %s", key, exc)
 
     async def evict_by_vdb_id(self, vdb_id: str) -> None:
         """Close all cached pools for a VDB (e.g. after a VDB redeploy)."""
         database = f"{vdb_id}.1"
-        async with self._lock:
-            for key in list(self._pools.keys()):
-                if key.database == database:
-                    pool = self._pools.pop(key)
-                    logger.info("Evicting stale Teiid pool %s", key)
-                    await pool.close()
+        keys = [k for k in list(self._pools.keys()) if k.database == database]
+        for key in keys:
+            async with self._locks_lock:
+                key_lock = self._key_lock(key)
+
+            async with key_lock:
+                pool = self._pools.pop(key, None)
+
+            if pool is not None:
+                logger.info("Evicting stale Teiid pool %s", key)
+                try:
+                    await asyncio.wait_for(pool.close(), timeout=5.0)
+                except TimeoutError:
+                    logger.warning("Timed out closing evicted Teiid pool %s", key)
+                except Exception as exc:
+                    logger.warning("Could not close evicted Teiid pool %s: %s", key, exc)
 
     @property
     def max_size(self) -> int:
         return self._max_size
 
     async def close_all(self) -> None:
-        async with self._lock:
-            for key, pool in list(self._pools.items()):
-                logger.info("Closing Teiid pool %s", key)
-                await pool.close()
+        async with self._locks_lock:
+            pools = list(self._pools.items())
             self._pools.clear()
+
+        for key, pool in pools:
+            key_lock = self._key_locks.get(key)
+            if key_lock is not None:
+                async with key_lock:
+                    pass  # ensure no creation is in flight for this key
+            logger.info("Closing Teiid pool %s", key)
+            try:
+                await asyncio.wait_for(pool.close(), timeout=5.0)
+            except TimeoutError:
+                logger.warning("Timed out closing Teiid pool %s", key)
+            except Exception as exc:
+                logger.warning("Could not close Teiid pool %s: %s", key, exc)
 
 
 _settings = get_settings()
