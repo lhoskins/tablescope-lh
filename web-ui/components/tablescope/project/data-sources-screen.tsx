@@ -35,7 +35,7 @@ import { FILTERS } from "./data-sources-screen/filters";
 import { ArchiveCard } from "./data-sources-screen/archive-card";
 import { DeleteSourceDialog } from "./data-sources-screen/delete-source-dialog";
 import { useCurrentUser } from "@/lib/ui/use-shell-data";
-import { DataSourceBuilderWorkspace } from "../data-source-builder/workspace";
+import { QuickAddDataSourceWorkspace } from "../data-source-builder/quick-add-workspace";
 import { ConnectedSourcesSection } from "../data-source-builder/connected-sources-section";
 import { DataSourceSelectionSection } from "../data-source-builder/data-source-selection-section";
 import {
@@ -269,11 +269,9 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
       <DataSourcesWorkspaceTabs projectId={projectId} active={tab} />
 
       {tab === "builder" && (
-        <DataSourceBuilderWorkspace
+        <QuickAddDataSourceWorkspace
           tenantName={tenantName}
-          initialProjectId={projectId}
-          showConnectedSources={false}
-          showDataSourceSelection={false}
+          projectId={projectId}
         />
       )}
 

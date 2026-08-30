@@ -109,27 +109,12 @@ export function DataSourceBuilderWorkspace({
   tenantName,
   initialProjectId,
   initialSourceTab,
-  showConnectedSources = true,
-  showDataSourceSelection = true,
 }: {
   tenantName: string;
   /** Pre-select this project in Step 2 (arrived from a project-scoped entry point). */
   initialProjectId?: string;
   /** Initial Step 1 tab from ?sourceTab= or legacy ?intent=. */
   initialSourceTab?: SourceTab;
-  /**
-   * Render the "Connected Sources" section inline in Step 1. Default true
-   * (the builder's own standalone/sidebar entry points). Set false when the
-   * caller already shows Connected Sources as its own tab right next to
-   * this one -- otherwise it renders twice.
-   */
-  showConnectedSources?: boolean;
-  /**
-   * Render the "Active Data Sources in this Session / All Data Sources"
-   * panel inline in Step 1. Default true. Set false when the caller already
-   * shows it elsewhere.
-   */
-  showDataSourceSelection?: boolean;
 }) {
   const queryClient = useQueryClient();
   const ensureTenant = useBuilderStore((s) => s.ensureTenant);
@@ -242,11 +227,9 @@ export function DataSourceBuilderWorkspace({
             )}
             {sourceTab === "network" && <NetworkFileConnectionsPanel />}
 
-            {showConnectedSources && <ConnectedSourcesSection />}
+            <ConnectedSourcesSection />
 
-            {showDataSourceSelection && (
-              <DataSourceSelectionSection projectId={initialProjectId} />
-            )}
+            <DataSourceSelectionSection projectId={initialProjectId} />
           </div>
 
           <div className="flex shrink-0 items-center justify-end border-t border-line-tertiary pt-3">
