@@ -38,7 +38,8 @@ services:
     environment: &platform_api_env
       ENVIRONMENT: ${ENVIRONMENT:-production}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      DATABASE_URL: postgresql+asyncpg://tablescope:${POSTGRES_PASSWORD:-tablescope}@db:5432/tablescope
+      DATABASE_URL: ${PLATFORM_DATABASE_URL:-postgresql+asyncpg://tablescope:${POSTGRES_PASSWORD:-tablescope}@db:5432/tablescope}
+      POSTGRES_RLS_CONTEXT_ENABLED: ${POSTGRES_RLS_CONTEXT_ENABLED:-false}
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
       JWT_ISSUER: ${JWT_ISSUER:-tablescope-platform-api}
@@ -217,7 +218,7 @@ services:
     restart: "no"
     command: alembic upgrade head
     environment:
-      DATABASE_URL: postgresql+psycopg2://tablescope:${POSTGRES_PASSWORD:-tablescope}@db:5432/tablescope
+      DATABASE_URL: ${MIGRATION_DATABASE_URL:-postgresql+psycopg2://tablescope:${POSTGRES_PASSWORD:-tablescope}@db:5432/tablescope}
     depends_on:
       db:
         condition: service_healthy
