@@ -9,6 +9,7 @@ Every mutation beyond creation is owner-only, matching publish/unpublish.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -29,7 +30,7 @@ VIEW_MODES = frozenset({"card", "row", "full"})
 
 #: Where a card's display name comes from, per resource type — the same
 #: per-type mapping ``workspace_context`` grounds the assistant with.
-_LABEL_SOURCES = {
+_LABEL_SOURCES: dict[str, tuple[type[Any], Any]] = {
     "table": (SavedQuery, SavedQuery.name),
     "dashboard": (Dashboard, Dashboard.name),
     "document": (ProjectAsset, ProjectAsset.title),
