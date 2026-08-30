@@ -35,6 +35,16 @@ describe("ProjectNavGrid", () => {
     expect(screen.getByRole("link", { name: /Overview/ }).getAttribute("aria-current")).toBeNull();
   });
 
+  it("gives every card a border and rounded corners at rest, not just the active one", () => {
+    render(<ProjectNavGrid projectId="7" activeNav="project-queries" />);
+    const idle = screen.getByRole("link", { name: /Overview/ });
+    expect(idle.className).toContain("rounded-lg");
+    expect(idle.className).toContain("border-line-secondary");
+    const active = screen.getByRole("link", { name: /Tables/ });
+    expect(active.className).toContain("rounded-lg");
+    expect(active.className).toContain("border-brand-500");
+  });
+
   it("does not render an APIs card", () => {
     render(<ProjectNavGrid projectId="7" activeNav="overview" />);
     expect(screen.queryByRole("link", { name: /APIs/ })).toBeNull();

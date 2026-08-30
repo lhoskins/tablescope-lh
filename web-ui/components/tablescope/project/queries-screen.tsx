@@ -12,9 +12,6 @@ import {
   IconArchive,
   IconArrowBackUp,
   IconTrash,
-  IconTable,
-  IconShare,
-  IconClock,
   IconCode,
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
@@ -38,10 +35,9 @@ import {
   QueryBuilderEdit,
   QueryBuilderCreate,
 } from "@/components/tablescope/project/detail-views";
-import { StatBar, type StatItem } from "./overview-screen/stat-bar";
+import { ActionCard, ActionCenter } from "./action-center";
 import { Filter } from "./queries-screen/filter";
 import { FILTERS } from "./queries-screen/filters";
-import { avgRuntime } from "./queries-screen/avg-runtime";
 import { ArchiveCard } from "./queries-screen/archive-card";
 
 
@@ -186,49 +182,21 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
   const selected =
     rows.find((q) => q.id === selectedId) ?? filtered[0] ?? rows[0] ?? null;
   const detailQuery = rows.find((q) => q.id === detailId) ?? null;
-  const listMode = !creating && !editing && !detailQuery;
 
-  const aiCount = rows.filter((q) => q.ai_generated).length;
-  const sharedCount = rows.filter((q) => q.is_shared).length;
-  const aiPct = rows.length ? Math.round((aiCount / rows.length) * 100) : 0;
-
-  const statItems: StatItem[] = [
-    {
-      key: "total",
-      icon: IconTable,
-      iconClass: "bg-brand-50 text-brand-700",
-      value: rows.length,
-      label: "Total tables",
-    },
-    {
-      key: "ai",
-      icon: IconSparkles,
-      iconClass: "bg-ai-bg text-ai",
-      value: aiCount,
-      label: "AI-generated",
-    },
-    {
-      key: "shared",
-      icon: IconShare,
-      iconClass: "bg-success-bg text-success",
-      value: sharedCount,
-      label: "Shared",
-    },
-    {
-      key: "runtime",
-      icon: IconClock,
-      iconClass: "bg-warning-bg text-warning",
-      value: avgRuntime(rows),
-      label: "Avg run time",
-    },
-  ];
+  // The action center stays put over the builder and result views, so its
+  // search box and filters have to bring the list back -- otherwise they'd
+  // silently filter a list you can't see.
+  const backToList = useCallback(() => {
+    setCreating(false);
+    setEditing(false);
+    setDetailId(null);
+  }, []);
 
   return (
     <ProjectShell
       projectId={projectId}
       activeNav="project-queries"
       breadcrumbLabel="Tables"
-      showProjectHeader={listMode}
       workspaceItem={
         detailQuery
           ? {
@@ -239,24 +207,6 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
               href: `/projects/${projectId}/queries?q=${detailQuery.id}`,
             }
           : null
-      }
-      headerActions={
-        listMode ? (
-          <>
-            <Button variant="secondary" size="md" onClick={() => setCreating(true)}>
-              <IconCode size={15} />
-              Query Builder (legacy)
-            </Button>
-            <Button variant="primary" size="md" onClick={() => setAiDesignerOpen(true)}>
-              <IconSparkles size={15} />
-              Create Query with AI
-            </Button>
-            <Button variant="primary" size="md" onClick={() => setShowAddTable(true)}>
-              <IconPlus size={15} />
-              New Table
-            </Button>
-          </>
-        ) : undefined
       }
     >
       {showAddTable && (
@@ -270,11 +220,63 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
           }
         />
       )}
+      {/* The action center sits outside the view switch below, so it stays put
+          when you open a query -- the same way the nav grid above it does. */}
+      <ActionCenter label="Table actions">
+        <div className="flex items-stretch gap-2">
+          {/* "All Tables" leads the row: with the detail views' back link gone,
+              this is the way back to the unfiltered list. */}
+          <ActionCard
+            lines={["All", "Tables"]}
+            active={filter === "all"}
+            onClick={() => {
+              setFilter("all");
+              backToList();
+            }}
+          />
+          <ActionCard lines={["New", "Table"]} onClick={() => setShowAddTable(true)} />
+          <ActionCard lines={["Create", "Query"]} onClick={() => setCreating(true)} />
+          <ActionCard lines={["Query", "Wizard"]} onClick={() => setAiDesignerOpen(true)} />
+        </div>
+
+        <div className="relative min-w-[220px] flex-1">
+          <IconSearch
+            size={15}
+            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-tertiary"
+          />
+          <input
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              backToList();
+            }}
+            placeholder="Search tables…"
+            className="h-[38px] w-full rounded-lg border border-line-secondary bg-bg-primary pl-8 pr-3 text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+          />
+        </div>
+        {FILTERS.filter((f) => f.key !== "all").map((f) => (
+          <button
+            key={f.key}
+            type="button"
+            onClick={() => {
+              setFilter(f.key);
+              backToList();
+            }}
+            className={cn(
+              "h-[38px] min-w-[52px] rounded-lg border px-3 text-[12px] font-medium",
+              filter === f.key
+                ? "border-brand-500 bg-brand-50 text-brand-700"
+                : "border-line-secondary bg-bg-primary text-ink-secondary hover:bg-bg-secondary",
+            )}
+          >
+            {f.label}
+          </button>
+        ))}
+      </ActionCenter>
       {creating ? (
         <QueryBuilderCreate
           projectId={projectId}
           datasources={dataSources ?? []}
-          backLabel="Tables"
           onBack={() => setCreating(false)}
           onSaved={() => setCreating(false)}
         />
@@ -297,38 +299,6 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
         />
       ) : (
       <div className="space-y-4">
-        {filter !== "archive" && <StatBar items={statItems} />}
-
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative min-w-[220px] flex-1">
-            <IconSearch
-              size={15}
-              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-tertiary"
-            />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search tables…"
-              className="h-8 w-full rounded-md border border-line-secondary bg-bg-primary pl-8 pr-3 text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
-            />
-          </div>
-          {FILTERS.map((f) => (
-            <button
-              key={f.key}
-              type="button"
-              onClick={() => setFilter(f.key)}
-              className={cn(
-                "h-8 rounded-md border px-3 text-[12px] font-medium",
-                filter === f.key
-                  ? "border-brand-500 bg-brand-50 text-brand-700"
-                  : "border-line-secondary bg-bg-primary text-ink-secondary hover:bg-bg-secondary",
-              )}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-
         {filter === "archive" ? (
           <ArchiveCard
             rows={filteredArchived}

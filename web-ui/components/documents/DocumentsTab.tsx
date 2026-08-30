@@ -6,9 +6,12 @@ import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
+import {
+  ActionCard,
+  ActionCenter,
+} from "@/components/tablescope/project/action-center";
 import { UnifiedUploadDialog } from "@/components/uploads/unified-upload-dialog";
 import { DocumentViewerDialog } from "./document-viewer-dialog";
-import { KnowledgeGraphScreen } from "./DocumentsTab/knowledge-graph-screen";
 import { FamilyDetailDrawer } from "./DocumentsTab/family-detail-drawer";
 import { ProjectDocument } from "./DocumentsTab/project-document";
 import { AITag } from "./DocumentsTab/aitag";
@@ -37,7 +40,6 @@ export function DocumentsTab({
   const queryClient = useQueryClient();
   const { toasts, push, dismiss } = useToasts();
 
-  const [subTab, setSubTab] = useState<"documents" | "graph">("documents");
   const [forceReprocess, setForceReprocess] = useState(true);
   const [expandedId, setExpandedId] = useState<number | null>(
     initialExpandedId ?? null,
@@ -198,76 +200,37 @@ export function DocumentsTab({
   // ── Render ─────────────────────────────────────────────────────
   return (
     <div>
-      {/* Sub-tabs: Documents | Knowledge Graph */}
-      <div className="mb-4 flex gap-1 rounded-lg bg-slate-100 p-1 w-fit">
-        <button
-          type="button"
-          onClick={() => setSubTab("documents")}
-          className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-            subTab === "documents"
-              ? "bg-white text-slate-900 shadow-sm"
-              : "text-slate-500 hover:text-slate-700"
-          }`}
-        >
-          Documents
-        </button>
-        <button
-          type="button"
-          onClick={() => setSubTab("graph")}
-          className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-            subTab === "graph"
-              ? "bg-white text-slate-900 shadow-sm"
-              : "text-slate-500 hover:text-slate-700"
-          }`}
-        >
-          Knowledge Graph
-        </button>
-      </div>
-
-      {/* Knowledge Graph view */}
-      {subTab === "graph" && (
-        <Suspense fallback={<div className="text-sm text-slate-400 py-4">Loading graph...</div>}>
-          <KnowledgeGraphScreen projectId={projectId} />
-        </Suspense>
-      )}
-
-      {/* Documents list view */}
-      {subTab === "documents" && (
-      <div>
-      {/* Upload / bulk reprocess controls */}
+      {/* The Documents | Knowledge Graph sub-tabs are gone: Knowledge Graph is
+          its own nav card now, so this screen is documents only. */}
       {canEdit && (
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          <button
-            type="button"
+        <ActionCenter label="Document actions">
+          <ActionCard
+            lines={["Upload", "Documents"]}
             onClick={() => setUploadOpen(true)}
-            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90 disabled:opacity-50"
-          >
-            + Upload Documents
-          </button>
-          <span className="text-xs text-slate-400">
-            Opens AI-Assisted Upload — spreadsheets become data sources
-          </span>
-          <div className="ml-auto flex items-center gap-3">
-            <label className="flex items-center gap-1.5 text-xs text-slate-600">
-              <input
-                type="checkbox"
-                checked={forceReprocess}
-                onChange={(e) => setForceReprocess(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-slate-300 text-brand focus:ring-brand"
-              />
-              Force reprocess unchanged files
-            </label>
-            <button
-              type="button"
-              onClick={() => reprocessAllMutation.mutate(forceReprocess)}
-              disabled={reprocessAllMutation.isPending}
-              className="rounded-md bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50"
-            >
-              {reprocessAllMutation.isPending ? "Queueing..." : "Reprocess all documents"}
-            </button>
-          </div>
-        </div>
+            title="Opens AI-Assisted Upload — spreadsheets become data sources"
+          />
+          <ActionCard
+            lines={["Reprocess All", "Documents"]}
+            onClick={() => reprocessAllMutation.mutate(forceReprocess)}
+            disabled={reprocessAllMutation.isPending}
+          />
+          <label className="flex items-center gap-1.5 text-[11px] leading-tight text-ink-secondary">
+            <input
+              type="checkbox"
+              checked={forceReprocess}
+              onChange={(e) => setForceReprocess(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-slate-300 text-brand focus:ring-brand"
+            />
+            Force reprocess
+            <br />
+            unchanged files
+          </label>
+          {reprocessAllMutation.isPending && (
+            <span className="text-[11px] text-ink-tertiary">Queueing…</span>
+          )}
+        </ActionCenter>
       )}
+      <div>
 
       {/* Documents list */}
       {docsQuery.isLoading ? (
@@ -612,7 +575,6 @@ export function DocumentsTab({
         </div>
       )}
       </div>
-      )}
 
       {openFamilyId !== null && (
         <Suspense fallback={null}>

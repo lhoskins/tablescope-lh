@@ -396,7 +396,14 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
       activeNav="project-actions"
       breadcrumbLabel="Project Actions"
     >
-      <div className="flex flex-col gap-5 p-4" aria-label="Project actions board">
+      {/* Same wrapper as Project Insights (`business-intelligence-workspace`):
+          capped at the shared content width and centred, so both screens sit
+          the same distance from the sidebar instead of this one running the
+          full width. Its own `p-4` is gone -- the shell already pads. */}
+      <div
+        className="mx-auto flex w-full max-w-content flex-col gap-5"
+        aria-label="Project actions board"
+      >
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-1">
             <h1 className="text-2xl font-semibold text-ink-primary">Project Actions</h1>

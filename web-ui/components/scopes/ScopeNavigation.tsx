@@ -6,6 +6,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { IconPlus, IconSparkles, IconTrash } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  ActionCard,
+  ActionCenter,
+} from "@/components/tablescope/project/action-center";
 import { cn } from "@/lib/cn";
 import { formatDateTime } from "@/lib/format-datetime";
 import { scopesApi, type ScopeSet } from "@/lib/api/scopes";
@@ -83,38 +87,36 @@ export function ScopeNavigation({ projectId }: { projectId: number }) {
     router.push(`/projects/${projectId}/scopes/${id}/map`);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-[15px] font-semibold text-ink-primary">
-            Query Scopes
-          </h2>
-          <p className="mt-1 max-w-2xl text-[12.5px] text-ink-secondary">
-            Drill-down relationships between saved queries. Each scope can be
-            enabled or disabled independently. Click a scoped cell in a query
-            result to drill into the target query filtered by that value.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="secondary"
-            onClick={() => generate.mutate()}
-            disabled={generate.isPending}
-          >
-            <IconSparkles size={14} />
-            {generate.isPending ? "Generating…" : "Generate AI Scopes"}
-          </Button>
-          <Button
-            variant="primary"
-            onClick={() => router.push(`/projects/${projectId}/scopes/new`)}
-          >
-            <IconPlus size={14} />
-            Create Scope
-          </Button>
-        </div>
+    <div>
+      <ActionCenter label="Scope actions">
+        <ActionCard
+          lines={["Create", "Scope"]}
+          onClick={() => router.push(`/projects/${projectId}/scopes/new`)}
+        />
+        <ActionCard
+          lines={["AI", "Scopes"]}
+          onClick={() => generate.mutate()}
+          disabled={generate.isPending}
+          title="Generate scopes from this project's saved queries"
+        />
+        {generate.isPending && (
+          <span className="text-[11px] text-ink-tertiary">Generating…</span>
+        )}
+      </ActionCenter>
+
+      <div className="space-y-4">
+      <div>
+        <h2 className="text-[15px] font-semibold text-ink-primary">
+          Query Scopes
+        </h2>
+        <p className="mt-1 max-w-2xl text-[12.5px] text-ink-secondary">
+          Drill-down relationships between saved queries. Each scope can be
+          enabled or disabled independently. Click a scoped cell in a query
+          result to drill into the target query filtered by that value.
+        </p>
       </div>
 
-      {generateError && (
+        {generateError && (
         <div
           role="alert"
           className="rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-[12.5px] text-danger"
@@ -310,6 +312,7 @@ export function ScopeNavigation({ projectId }: { projectId: number }) {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

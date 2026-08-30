@@ -3,21 +3,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  IconChartBar,
-  IconLayoutDashboard,
-  IconPlus,
-  IconSparkles,
-} from "@tabler/icons-react";
+import { IconPlus } from "@tabler/icons-react";
 import { apiClient } from "@/lib/api-client";
 import { ProjectShell } from "@/components/tablescope/project-shell";
-import { Button } from "@/components/ui/button";
-import { StatBar } from "@/components/tablescope/project/overview-screen/stat-bar";
+import {
+  ActionCard,
+  ActionCenter,
+} from "@/components/tablescope/project/action-center";
 import {
   useProjectDashboards,
   useProjectQueries,
   useProjectDataSources,
-  widgetCount,
   type Dashboard,
 } from "@/lib/ui/use-project-data";
 import { useCurrentUser } from "@/lib/ui/use-shell-data";
@@ -217,39 +213,11 @@ export function DashboardsScreen({
     () => new Set(groups.map((group) => group.templateId).filter((id): id is string => Boolean(id))),
     [groups],
   );
-  const statItems = useMemo(
-    () => [
-      {
-        key: "dashboards",
-        icon: IconLayoutDashboard,
-        iconClass: "bg-brand-50 text-brand-700",
-        value: rows.length,
-        label: "Total dashboards",
-      },
-      {
-        key: "ai-generated",
-        icon: IconSparkles,
-        iconClass: "bg-warning-bg text-warning",
-        value: rows.filter((dashboard) => dashboard.ai_generated).length,
-        label: "AI-generated",
-      },
-      {
-        key: "widgets",
-        icon: IconChartBar,
-        iconClass: "bg-success-bg text-success",
-        value: rows.reduce((total, dashboard) => total + widgetCount(dashboard.config), 0),
-        label: "Widgets",
-      },
-    ],
-    [rows],
-  );
-
   return (
     <ProjectShell
       projectId={projectId}
       activeNav="project-dashboards"
       breadcrumbLabel="Dashboards"
-      showProjectHeader={!viewing}
       workspaceItem={
         viewing && viewing.id > 0
           ? {
@@ -261,21 +229,17 @@ export function DashboardsScreen({
             }
           : null
       }
-      headerActions={
-        !viewing ? (
-          <>
-            <Button variant="secondary" onClick={() => setDesigner({ open: true })}>
-              <IconSparkles size={14} />
-              Create with AI
-            </Button>
-            <Button variant="primary" onClick={() => setTemplateOpen(true)}>
-              <IconPlus size={14} />
-              Add dashboard template
-            </Button>
-          </>
-        ) : null
-      }
     >
+      <ActionCenter label="Dashboard actions">
+        <ActionCard
+          lines={["Create", "with AI"]}
+          onClick={() => setDesigner({ open: true })}
+        />
+        <ActionCard
+          lines={["Dashboard", "Template"]}
+          onClick={() => setTemplateOpen(true)}
+        />
+      </ActionCenter>
       {viewing ? (
         <DashboardDetailView
           projectId={projectId}
@@ -291,7 +255,6 @@ export function DashboardsScreen({
         />
       ) : (
         <>
-          <StatBar items={statItems} />
           <DashboardOverview
             groups={groups}
             loading={isLoading}

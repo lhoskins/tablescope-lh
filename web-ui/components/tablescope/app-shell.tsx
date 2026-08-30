@@ -22,6 +22,10 @@ export interface AppShellProps {
   /** Top bar content (left/right). Falls back to a bare bar when omitted. */
   topBarLeft?: ReactNode;
   topBarRight?: ReactNode;
+  /** Controls pinned to the right of the top bar itself, left of the tenant
+   *  logo (project pages put their Private/Shared switch, Members button and
+   *  page actions here so the chrome is identical on every screen). */
+  topBarControls?: ReactNode;
   /** Optional sub-header rendered below the top bar (e.g. project resource tabs). */
   subHeader?: ReactNode;
   /** Optional right-side context panel (project-context pages). */
@@ -43,6 +47,7 @@ export function AppShell({
   counts,
   topBarLeft,
   topBarRight,
+  topBarControls,
   subHeader,
   contextPanel,
   centered = false,
@@ -64,9 +69,6 @@ export function AppShell({
         />
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* The company logo stays alone in the header — page/workspace action
-            buttons render in the page toolbar below (see topBarRight), so they
-            no longer share space with the branding. */}
         <TopBar
           left={
             <>
@@ -82,7 +84,12 @@ export function AppShell({
               {topBarLeft}
             </>
           }
-          right={<CompanyLogo url={tenant.logoUrl} name={tenant.name} />}
+          right={
+            <>
+              {topBarControls}
+              <CompanyLogo url={tenant.logoUrl} name={tenant.name} />
+            </>
+          }
         />
         {subHeader && (
           <div className="shrink-0 border-b border-line-tertiary bg-bg-primary">
