@@ -63,12 +63,10 @@ class VDBRoutingService:
     ) -> tuple[UserVDB | SharedVDB, VdbType]:
         """Return the VDB to use for a query along with its type.
 
-        The decision tree mirrors the original redash service:
-
-        - If `is_shared_override` is provided (e.g. derived from a query row's
-          `is_shared` flag), use it.
-        - Otherwise, fall back to the project's `is_shared` flag, but
-          auto-correct it based on the project's member count when it drifts.
+        Project queries always run against the project owner's personal VDB,
+        because that is where uploaded/connected datasources are deployed.
+        Shared projects simply share the owner's VDB; the legacy tenant-level
+        SharedVDB is not used for per-project table/query access.
         """
         project = await self._session.get(Project, project_id)
         if project is None:
@@ -81,32 +79,28 @@ class VDBRoutingService:
         else:
             is_shared = await self._reconcile_is_shared(project)
 
+        # Project data lives in the owner's VDB; members query the same VDB.
+        target_user_id = context.user_id
+        if is_shared and project.owner_id:
+            target_user_id = project.owner_id
+
         logger.info(
-            "VDB routing decision: tenant_id=%s project_id=%s is_shared=%s",
+            "VDB routing decision: tenant_id=%s project_id=%s is_shared=%s target_user_id=%s",
             context.tenant_id,
             project_id,
             is_shared,
+            target_user_id,
         )
-
-        if is_shared:
-            shared_vdb = await self._session.scalar(
-                select(SharedVDB).where(SharedVDB.tenant_id == context.tenant_id)
-            )
-            if shared_vdb is None:
-                raise VDBNotConfiguredError(
-                    f"No shared VDB configured for tenant {context.tenant_id}"
-                )
-            return shared_vdb, "shared"
 
         user_vdb = await self._session.scalar(
             select(UserVDB).where(
                 UserVDB.tenant_id == context.tenant_id,
-                UserVDB.user_id == context.user_id,
+                UserVDB.user_id == target_user_id,
             )
         )
         if user_vdb is None:
             raise VDBNotConfiguredError(
-                f"No user VDB configured for user {context.user_id} "
+                f"No user VDB configured for user {target_user_id} "
                 f"in tenant {context.tenant_id}"
             )
         return user_vdb, "user"
