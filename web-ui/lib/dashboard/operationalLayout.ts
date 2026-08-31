@@ -1,7 +1,18 @@
 import type { LayoutItem } from "react-grid-layout";
+import { noCompactor, type Compactor } from "react-grid-layout/core";
 import type { WidgetConfig } from "@/components/dashboard/types";
 
 export const OPERATIONAL_IMPROVEMENTS_LAYOUT_ID = "operational:improvement-opportunities";
+
+/**
+ * Operational dashboards are intentionally free-positioned. No compaction
+ * preserves empty rows and columns; collision prevention blocks a dragged or
+ * resized widget instead of pushing its neighbours out of place.
+ */
+export const OPERATIONAL_FREE_POSITION_COMPACTOR: Compactor = {
+  ...noCompactor,
+  preventCollision: true,
+};
 
 export function isHorizontalBar(widget: WidgetConfig): boolean {
   return widget.type === "bar" && (
