@@ -108,6 +108,18 @@ It masks the root cause (SharedVDB provisioning is broken) and is architecturall
 
 **No database migration required** (§4 — no new alembic revision in this diff).
 
+**Run the credential-repair scripts before validating table loads.** Deploying this branch surfaced (not caused — see below) two VDBs failing every query with `TEIID50072 ... could not be authenticated by security domain teiid-security`: `vdb_user_6426044` and `vdb_user_933455`. These rows predate `1b319879` ("fix: use test/test credentials for Teiid PG wire authentication") — every VDB since then is provisioned with fixed `test`/`test` credentials matching WildFly's `application-users.properties` (which has only ever had that one user), so any row still carrying the old per-VDB username can never authenticate. This is unrelated to the TS-ISO-008 security fix (`e189ec9e`) also in this branch — that commit only changed how the password is *encoded at rest* (plaintext → Fernet), not how usernames/passwords are *generated*; verified directly against the diff, `vdb_management.py` is untouched by it.
+
+Run both from `platform-api`, against the actual deployed database (dry run first for each):
+```bash
+python -m scripts.fix_legacy_vdb_test_credentials            # dry run: lists any vdb_username != "test"
+python -m scripts.fix_legacy_vdb_test_credentials --apply    # rewrites them to test/test
+
+python -m scripts.backfill_vdb_password_encryption            # dry run: lists any still-plaintext password
+python -m scripts.backfill_vdb_password_encryption --apply    # re-encrypts them (TS-ISO-008 cleanup)
+```
+Order between the two doesn't matter; both are idempotent and safe to re-run. If tables still don't load for a project after this, the failure is something else — check `docker compose logs platform-api` for the actual exception before assuming it's credentials again.
+
 **The Teiid WAR must be redeployed** — `47b3ecbe` changed `wildfly/standalone/deployments/TeiidExcelImporterTest.war` (quoted-identifier fix for Google Sheets VDB DDL from `48acd492`). Skipping this leaves the old WAR serving mixed-case Google Sheets view names incorrectly.
 
 **Teiid heap must be picked up** — `131aea7e` raised `TEIID_MAX_HEAP` to `4096m` in `docker-compose.yml`. Recreate (not just restart) the Teiid/WildFly container so it launches with the new `-Xmx`.
