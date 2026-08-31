@@ -166,9 +166,8 @@ export function IntelligenceCard({
           ? "flex h-full flex-col p-3"
           : cn(
               executive
-                ? "overflow-hidden rounded-xl border border-line-tertiary border-l-4 bg-bg-primary p-5 shadow-sm"
+                ? "overflow-hidden rounded-xl border border-line-tertiary bg-bg-primary p-5 shadow-sm"
                 : "rounded-lg border border-line-tertiary bg-white p-4",
-              executive && sev.accent,
             )
       }
     >
