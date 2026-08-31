@@ -81,18 +81,18 @@ describe("PercentChangeSummaryTable", () => {
     const rows = [row("r1", "Revenue", [0.05, -0.03, 0.0, null])];
     renderTable(rows, vi.fn(), "executive");
 
-    const positiveCell = screen.getByLabelText("Positive +5.0%").closest("td");
+    const positiveCell = screen.getByLabelText("Positive +5.00%").closest("td");
     expect(positiveCell?.classList.contains("bg-[#74C990]")).toBe(true);
     expect(positiveCell?.classList.contains("text-white")).toBe(true);
 
-    const negativeCell = screen.getByLabelText("Negative -3.0%").closest("td");
+    const negativeCell = screen.getByLabelText("Negative -3.00%").closest("td");
     expect(negativeCell?.classList.contains("bg-[#EA7975]")).toBe(true);
     expect(negativeCell?.classList.contains("text-white")).toBe(true);
 
-    // The blank (null) cell is also treated as 0.0% in executive
+    // The blank (null) cell is also treated as 0.00% in executive
     // presentation (see the dedicated test below), so both it and the real
-    // 0.0% cell share this label/styling here.
-    const zeroCells = screen.getAllByLabelText("No change, +0.0%");
+    // 0.00% cell share this label/styling here.
+    const zeroCells = screen.getAllByLabelText("No change, +0.00%");
     expect(zeroCells.length).toBe(2);
     zeroCells.forEach((cell) => {
       const td = cell.closest("td");
@@ -117,34 +117,34 @@ describe("PercentChangeSummaryTable", () => {
     const rows = [row("r1", "Revenue", [0.05, -0.03, 0.0, null])];
     renderTable(rows, vi.fn(), "default");
 
-    const positiveCell = screen.getByLabelText("Positive +5.0%").closest("td");
+    const positiveCell = screen.getByLabelText("Positive +5.00%").closest("td");
     expect(positiveCell?.classList.contains("bg-success-bg")).toBe(true);
     expect(positiveCell?.classList.contains("text-success")).toBe(true);
     expect(positiveCell?.classList.contains("bg-[#74C990]")).toBe(false);
 
-    const negativeCell = screen.getByLabelText("Negative -3.0%").closest("td");
+    const negativeCell = screen.getByLabelText("Negative -3.00%").closest("td");
     expect(negativeCell?.classList.contains("bg-danger-bg")).toBe(true);
     expect(negativeCell?.classList.contains("text-danger")).toBe(true);
     expect(negativeCell?.classList.contains("bg-[#EA7975]")).toBe(false);
 
-    const zeroCell = screen.getByLabelText("No change, +0.0%").closest("td");
+    const zeroCell = screen.getByLabelText("No change, +0.00%").closest("td");
     expect(zeroCell?.classList.contains("text-ink-secondary")).toBe(true);
     expect(zeroCell?.classList.contains("bg-[#626365]")).toBe(false);
   });
 
-  it("shows blank (no comparable prior period) cells as 0.0% in #626365 under executive presentation", () => {
+  it("shows blank (no comparable prior period) cells as 0.00% in #626365 under executive presentation", () => {
     const rows = [row("r1", "Revenue", [0.05, null, 0.0, null])];
     renderTable(rows, vi.fn(), "executive");
 
-    const blankCells = screen.getAllByLabelText("No change, +0.0%");
-    // The real 0.0% cell plus the two null (blank) cells all announce and
+    const blankCells = screen.getAllByLabelText("No change, +0.00%");
+    // The real 0.00% cell plus the two null (blank) cells all announce and
     // render identically in executive presentation.
     expect(blankCells.length).toBe(3);
     blankCells.forEach((cell) => {
       const td = cell.closest("td");
       expect(td?.classList.contains("bg-[#626365]")).toBe(true);
       expect(td?.classList.contains("text-white")).toBe(true);
-      expect(td?.textContent).toBe("+0.0%");
+      expect(td?.textContent).toBe("+0.00%");
     });
   });
 

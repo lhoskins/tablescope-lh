@@ -58,7 +58,7 @@ const SIZE_CYCLE: ItsmCardSize[] = ["compact", "standard", "wide"];
 
 function formatPrevious(metric: ItsmMetricValue): string {
   if (metric.previousValue === null || metric.previousValue === undefined) return "—";
-  if (metric.unit === "percent") return `${metric.previousValue.toFixed(1)}%`;
+  if (metric.unit === "percent") return `${metric.previousValue.toFixed(2)}%`;
   if (metric.unit === "hours") return `${metric.previousValue.toFixed(1)} hr`;
   if (metric.unit === "days") return `${metric.previousValue.toFixed(1)} days`;
   if (metric.unit === "count") return Math.round(metric.previousValue).toLocaleString();
@@ -450,7 +450,7 @@ function InsightDrawer({
                 <div>
                   <div className="mb-3">
                     <h3 className="font-semibold text-ink-primary">{data?.contributors_label ?? "Supporting breakdown"}</h3>
-                    <p className="text-xs text-ink-tertiary">{data?.majority_share_percent ? `Top three account for ${data.majority_share_percent.toFixed(1)}% of measured records` : "Largest contributors to this KPI"}</p>
+                    <p className="text-xs text-ink-tertiary">{data?.majority_share_percent ? `Top three account for ${data.majority_share_percent.toFixed(2)}% of measured records` : "Largest contributors to this KPI"}</p>
                   </div>
                   {loading && <div className="py-6 text-xs text-ink-tertiary">Loading supporting data…</div>}
                   {!loading && data?.contributors.length === 0 && <div className="rounded-md bg-bg-secondary px-3 py-4 text-xs text-ink-tertiary">No contributor rows were available for this period.</div>}

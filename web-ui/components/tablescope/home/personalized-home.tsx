@@ -16,6 +16,7 @@ import {
   IconTargetArrow,
 } from "@tabler/icons-react";
 import { buildMultiDimWidget } from "@/components/tablescope/home/intelligence-card/build-multi-dim-widget";
+import { autoValueScale } from "@/components/dashboard/EChartsWidget/format-number";
 import { Button } from "@/components/ui/button";
 import {
   OperationalChart,
@@ -74,6 +75,11 @@ function toItsmPerformanceChart(chart: InsightChart): OperationalChartData | nul
     aggregation: "sum",
     sortBy: "x_asc",
     filters: [],
+    // Without this, ItsmChart deliberately renders unformatted (see its own
+    // comment) -- that's meant for ITSM presets, not this AI-ranked chart,
+    // so give it the same shared K/M axis unit buildMultiDimWidget's rows
+    // path already gets.
+    visualizationOptions: { valueScale: autoValueScale(series.map((item) => item.value)) },
     colSpan: 1,
     position: 0,
   };

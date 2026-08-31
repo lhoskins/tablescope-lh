@@ -53,7 +53,7 @@ export function fmtNumber(value: number | null | undefined, format?: string | nu
   if (value == null) return "—";
   let text: string;
   if (format === "percent") {
-    text = `${(value * 100).toFixed(1)}%`;
+    text = `${(value * 100).toFixed(2)}%`;
   } else if (format === "currency") {
     text = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value);
   } else {
