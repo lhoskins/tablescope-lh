@@ -31,7 +31,7 @@ export function MessageTimestamp({
       aria-label={`${label} ${timestamp.full}`}
       data-testid="message-timestamp"
       className={cn(
-        "pointer-events-none mt-1 block select-none text-[11px] leading-4 text-ink-tertiary opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100",
+        "pointer-events-none mt-1 block select-none text-[11px] leading-4 text-ink-tertiary opacity-0 transition-opacity duration-150 group-hover:opacity-100",
         align === "right" ? "text-right" : "text-left",
       )}
     >
