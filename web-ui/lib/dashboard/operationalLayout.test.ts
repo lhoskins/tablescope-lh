@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { operationalLayout, OPERATIONAL_IMPROVEMENTS_LAYOUT_ID } from "./operationalLayout";
+import {
+  operationalLayout,
+  OPERATIONAL_FREE_POSITION_COMPACTOR,
+  OPERATIONAL_IMPROVEMENTS_LAYOUT_ID,
+} from "./operationalLayout";
 import type { WidgetConfig } from "@/components/dashboard/types";
 
 function widget(id: string, type: WidgetConfig["type"], chartSubtype?: string): WidgetConfig {
@@ -32,4 +36,31 @@ describe("operationalLayout", () => {
     ranking.gridW = 12;
     expect(operationalLayout([ranking])[0]).toMatchObject({ w: 6, maxW: 6 });
   });
+  it("preserves exact saved coordinates and intentional empty space", () => {
+    const rightCorner = widget("right-corner", "line");
+    rightCorner.gridX = 9;
+    rightCorner.gridY = 7;
+    rightCorner.gridW = 3;
+    rightCorner.gridH = 4;
+
+    expect(operationalLayout([rightCorner], undefined, true)[0]).toMatchObject({
+      x: 9,
+      y: 7,
+      w: 3,
+      h: 4,
+    });
+  });
+
+  it("disables compaction and prevents collisions from moving neighbours", () => {
+    const layout = [
+      { i: "left", x: 0, y: 6, w: 3, h: 2 },
+      { i: "right", x: 9, y: 0, w: 3, h: 2 },
+    ];
+
+    expect(OPERATIONAL_FREE_POSITION_COMPACTOR.type).toBeNull();
+    expect(OPERATIONAL_FREE_POSITION_COMPACTOR.allowOverlap).toBe(false);
+    expect(OPERATIONAL_FREE_POSITION_COMPACTOR.preventCollision).toBe(true);
+    expect(OPERATIONAL_FREE_POSITION_COMPACTOR.compact(layout, 12)).toEqual(layout);
+  });
+
 });
