@@ -19,7 +19,7 @@ export function TurnBubbles({ turn }: { turn: ConversationTurn }) {
   return (
     <>
       <UserBubble content={turn.user_message} timestamp={turn.created_at} />
-      <div className="group flex items-start gap-3" tabIndex={0}>
+      <div className="group flex items-start gap-3">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-500">
           <IconSparkles size={16} />
         </div>
