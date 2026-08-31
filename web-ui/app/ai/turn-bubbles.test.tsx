@@ -33,7 +33,7 @@ function turn(overrides: Partial<ConversationTurn> = {}): ConversationTurn {
 }
 
 describe("AI Assistant dialogue timestamps", () => {
-  it("renders stored user and AI timestamps hidden until message hover or focus", async () => {
+  it("renders stored user and AI timestamps hidden until message hover", async () => {
     render(<TurnBubbles turn={turn()} />);
 
     const timestamps = await screen.findAllByTestId("message-timestamp");
@@ -42,7 +42,7 @@ describe("AI Assistant dialogue timestamps", () => {
     for (const timestamp of timestamps) {
       expect(timestamp).toHaveClass("opacity-0");
       expect(timestamp).toHaveClass("group-hover:opacity-100");
-      expect(timestamp).toHaveClass("group-focus-within:opacity-100");
+      expect(timestamp).not.toHaveClass("group-focus-within:opacity-100");
     }
 
     expect(timestamps[0]).toHaveAccessibleName(/Sent .*2026/i);
