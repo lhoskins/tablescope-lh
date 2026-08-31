@@ -153,6 +153,12 @@ export function projectGridItems(projectId: string): NavItem[] {
   return [
     { key: "overview", label: "Overview", href: base, icon: IconHome },
     {
+      key: "project-data-sources",
+      label: "Data Sources",
+      href: `${base}/data-sources`,
+      icon: IconDatabase,
+    },
+    {
       key: "workspace",
       label: "Workspace",
       href: `${base}/workspace`,
@@ -175,12 +181,6 @@ export function projectGridItems(projectId: string): NavItem[] {
       label: "Dashboards",
       href: `${base}/dashboards`,
       icon: IconLayoutDashboard,
-    },
-    {
-      key: "project-data-sources",
-      label: "Data Sources",
-      href: `${base}/data-sources`,
-      icon: IconDatabase,
     },
     {
       key: "project-insights",
@@ -224,9 +224,7 @@ export function projectGridItems(projectId: string): NavItem[] {
   ];
 }
 
-export const projectIntelligenceNavItems = (
-  projectId: string,
-): NavItem[] => [
+export const projectIntelligenceNavItems = (projectId: string): NavItem[] => [
   {
     key: "project-knowledge-graph",
     label: "Graph Lifecycle",
