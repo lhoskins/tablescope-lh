@@ -307,6 +307,25 @@ def _auto_cast_aggregates(sql: str) -> str:
     return _cast_timestampdiff(_AGG_CAST_RE.sub(_replacer, sql))
 
 
+# Live finding: the SQL-generation/repair model occasionally emits a CASE
+# expression's closing END glued directly onto the next clause keyword with
+# no whitespace -- e.g. "...AS double) ENDORDER BY JobMonth" -- which Teiid's
+# tokenizer reads as one unrecognized identifier ("ENDORDER") instead of two
+# valid keywords (TEIID31100 "Encountered ... ENDORDER ..."). Nothing else in
+# this normalization pipeline removes whitespace (_cast_timestampdiff and
+# _auto_cast_aggregates only ever insert characters around an existing span),
+# so this is the model's own raw formatting, not something introduced here --
+# but it must still be corrected before the SQL ever reaches Teiid, on every
+# repair round as well as the first attempt (both flow through _prepare_sql).
+_GLUED_KEYWORD_RE = re.compile(
+    r"\bEND(ORDER\s+BY|GROUP\s+BY|WHERE|HAVING|LIMIT)\b", re.IGNORECASE
+)
+
+
+def _fix_glued_keywords(sql: str) -> str:
+    return _GLUED_KEYWORD_RE.sub(lambda m: f"END {m.group(1)}", sql)
+
+
 async def _prepare_sql(
     sql: str,
     *,
@@ -315,6 +334,7 @@ async def _prepare_sql(
     column_samples: dict[str, str],
 ) -> str:
     """Normalize and repair common AI SQL mistakes before execution."""
+    sql = _fix_glued_keywords(sql)
     if table_schema:
         sql = normalize_teiid_identifiers(sql, table_schema)
     sql = normalize_teiid_timestamps(
