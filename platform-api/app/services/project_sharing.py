@@ -1,28 +1,32 @@
 """Project sharing service.
 
-Async port of `redash/services/project_sharing.py`. Handles the workflow when
-a project is shared inside a tenant:
+Handles the workflow when a project is shared inside a tenant:
 
-1. Mark the project as shared.
-2. Ensure a SharedVDB exists for the tenant (provision via Teiid servlet).
-3. Copy data files from the user folder to the shared folder.
-4. Trigger a redeploy of the shared VDB so Teiid picks up the new sources.
+1. Look up (or provision) the project's own SharedVDB -- one per
+   ``(tenant_id, project_id)``, not one per tenant (migration 0087).
+2. Upload each shared file straight from the owner's private uploads folder
+   into that SharedVDB via the Teiid ``/upload`` servlet, the same
+   real view-building mechanism already used for private uploads
+   (``finalize_tabular.py``) -- this is what actually creates queryable
+   views for the shared data, not just a file copy.
+3. Mark the project as shared. ``project.owner_id`` is never touched --
+   sharing does not transfer ownership.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
+from app.config import get_settings
 from app.models.project import Project
 from app.models.shared_vdb import SharedVDB
-from app.models.user import User
 from app.services.crypto import encrypt_secret
-from app.services.customer_folders import CustomerFolderError, CustomerFolderService
 from app.services.vdb_management import (
     VDBManagementService,
     VDBProvisioningError,
@@ -43,6 +47,23 @@ class ShareProjectResult:
     copied_files: list[str]
 
 
+def _safe_upload_filename(filename: str) -> str:
+    """Return ``filename`` stripped of any path components.
+
+    Mirrors ``customer_folders._safe_filename``: a caller-supplied name is
+    used to build a filesystem path, so it must not carry directory
+    components that could escape the owner's uploads folder.
+    """
+    if not filename:
+        raise ProjectSharingError("Filename is required")
+    if "\x00" in filename:
+        raise ProjectSharingError("Filename contains NUL byte")
+    name = PureWindowsPath(PurePosixPath(filename).name).name
+    if name in ("", ".", ".."):
+        raise ProjectSharingError(f"Invalid filename: {filename!r}")
+    return name
+
+
 class ProjectSharingService:
     """Async, tenant-aware project sharing workflow."""
 
@@ -50,11 +71,9 @@ class ProjectSharingService:
         self,
         session: AsyncSession,
         *,
-        folder_service: CustomerFolderService | None = None,
         vdb_service: VDBManagementService | None = None,
     ) -> None:
         self._session = session
-        self._folders = folder_service or CustomerFolderService()
         self._vdb = vdb_service or VDBManagementService()
 
     async def aclose(self) -> None:
@@ -74,29 +93,23 @@ class ProjectSharingService:
         if project.owner_id != context.user_id:
             raise ProjectSharingError("Only the project owner can share it")
 
-        owner = await self._session.get(User, project.owner_id) if project.owner_id else None
-        owner_external = owner.external_id if owner and owner.external_id else str(project.owner_id)
-
-        from app.models.tenant import Tenant
-
-        tenant = await self._session.get(Tenant, project.tenant_id)
-        if tenant is None:
-            raise ProjectSharingError(f"Tenant {project.tenant_id} missing")
-        tenant_slug = tenant.slug
-
         shared_vdb = await self._session.scalar(
-            select(SharedVDB).where(SharedVDB.tenant_id == project.tenant_id)
+            select(SharedVDB).where(
+                SharedVDB.tenant_id == project.tenant_id,
+                SharedVDB.project_id == project.id,
+            )
         )
         if shared_vdb is None:
             try:
-                provision: VDBProvisionResult = await self._vdb.provision_shared_vdb(
-                    tenant_external_id=tenant.external_id or tenant.slug
+                provision: VDBProvisionResult = await self._vdb.create_shared_vdb(
+                    org_id=project.tenant_id, project_id=project.id
                 )
             except VDBProvisioningError as exc:
                 raise ProjectSharingError(str(exc)) from exc
 
             shared_vdb = SharedVDB(
                 tenant_id=project.tenant_id,
+                project_id=project.id,
                 vdb_id=provision.vdb_id,
                 vdb_username=provision.vdb_username,
                 encrypted_password=encrypt_secret(provision.vdb_password),
@@ -107,20 +120,35 @@ class ProjectSharingService:
             self._session.add(shared_vdb)
             await self._session.flush()
 
-        try:
-            copied = self._folders.copy_user_data_to_shared(
-                tenant_slug=tenant_slug,
-                user_external_id=owner_external,
-                filenames=filenames,
-            )
-        except CustomerFolderError as exc:
-            raise ProjectSharingError(str(exc)) from exc
+        uploads_dir = (
+            Path(get_settings().customer_base_path)
+            / str(project.tenant_id)
+            / str(project.owner_id)
+            / "uploads"
+        ).resolve(strict=False)
 
-        try:
-            await self._vdb.redeploy_vdb(shared_vdb.vdb_id)
-        except VDBProvisioningError as exc:
-            logger.error("Shared VDB redeploy failed: %s", exc)
-            raise ProjectSharingError(str(exc)) from exc
+        copied: list[str] = []
+        for filename in filenames:
+            safe_name = _safe_upload_filename(filename)
+            src = (uploads_dir / safe_name).resolve(strict=False)
+            if not src.is_relative_to(uploads_dir) or not src.is_file():
+                raise ProjectSharingError(f"Missing source file: {filename!r}")
+
+            content = src.read_bytes()
+            try:
+                await self._vdb.upload_shared_file(
+                    org_id=project.tenant_id,
+                    project_id=project.id,
+                    filename=safe_name,
+                    content=content,
+                )
+            except VDBProvisioningError as exc:
+                logger.error(
+                    "Shared upload failed: project_id=%s filename=%s: %s",
+                    project.id, safe_name, exc,
+                )
+                raise ProjectSharingError(str(exc)) from exc
+            copied.append(safe_name)
 
         project.is_shared = True
         self._session.add(project)
@@ -129,5 +157,5 @@ class ProjectSharingService:
         return ShareProjectResult(
             project_id=project.id,
             shared_vdb_id=shared_vdb.vdb_id,
-            copied_files=[p.name for p in copied],
+            copied_files=copied,
         )

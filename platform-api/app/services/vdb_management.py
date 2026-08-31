@@ -163,8 +163,16 @@ class VDBManagementService:
             vdb_port=self._pg_port,
         )
 
-    async def create_shared_vdb(self, *, org_id: int) -> VDBProvisionResult:
-        """Create and deploy a shared (tenant-level) VDB via the servlet."""
+    async def create_shared_vdb(
+        self, *, org_id: int, project_id: int | None = None
+    ) -> VDBProvisionResult:
+        """Create and deploy a shared VDB via the servlet.
+
+        ``project_id`` scopes the VDB to one project's shared folder
+        (``/customers/{org_id}/shared/{project_id}/...``) rather than the
+        legacy tenant-wide shared folder -- see migration 0087 and
+        ``VDBManagementServlet.createVDB``'s ``project_id`` handling.
+        """
         vdb_id = _generate_vdb_id()
         username = "test"
         password = "test"
@@ -178,8 +186,13 @@ class VDBManagementService:
             "teiid_port": 9990,
             "vdb_type": "shared",
         }
+        if project_id is not None:
+            payload["project_id"] = project_id
 
-        logger.info("Creating shared VDB: org_id=%s vdb_id=%s", org_id, vdb_id)
+        logger.info(
+            "Creating shared VDB: org_id=%s project_id=%s vdb_id=%s",
+            org_id, project_id, vdb_id,
+        )
 
         try:
             response = await self._client.post(
@@ -220,6 +233,61 @@ class VDBManagementService:
             vdb_host=self._pg_host,
             vdb_port=self._pg_port,
         )
+
+    async def upload_shared_file(
+        self,
+        *,
+        org_id: int,
+        project_id: int,
+        filename: str,
+        content: bytes,
+    ) -> dict:
+        """Upload one file into a project's shared VDB via the servlet.
+
+        Unlike ``create_shared_vdb``/``redeploy_vdb`` (template-based: they
+        rewrite path prefixes but never read a file's actual content), this
+        calls ``POST /TeiidExcelImporterTest/upload`` -- the same endpoint
+        and mechanism ``finalize_tabular.py`` already uses for private
+        uploads, which reads the real file bytes and builds a genuine
+        ``CREATE FOREIGN TABLE``/view for it in the VDB XML. ``vdb_type=shared``
+        plus ``project_id`` route it into this project's shared folder
+        rather than a user's private one (see ``TeiidExcelImporterTest.java``
+        and ``VDBXmlBuilder.updateFilePaths``'s project-scoped shared regex).
+        """
+        try:
+            response = await self._client.post(
+                "/TeiidExcelImporterTest/upload",
+                data={
+                    "org_id": str(org_id),
+                    "project_id": str(project_id),
+                    "vdb_type": "shared",
+                    "replace": "true",
+                },
+                files={"file": (filename, content, "application/octet-stream")},
+            )
+        except httpx.RequestError as exc:
+            raise VDBProvisioningError(
+                f"Failed to contact Teiid servlet for shared upload: {exc}"
+            ) from exc
+
+        if response.status_code >= 400:
+            raise VDBProvisioningError(
+                f"Teiid servlet rejected shared file upload: {response.status_code} {response.text}"
+            )
+
+        result = (
+            response.json()
+            if response.headers.get("content-type", "").startswith("application/json")
+            else {"raw": response.text}
+        )
+        if "error" in result:
+            raise VDBProvisioningError(str(result["error"]))
+
+        logger.info(
+            "Shared file uploaded: org_id=%s project_id=%s filename=%s",
+            org_id, project_id, filename,
+        )
+        return result
 
     def _sync_vdb_to_s3(self, org_id: int, vdb_id: str, *, vdb_type: str, user_id: int | None = None) -> None:
         """Sync VDB XML file to S3 after creation/modification."""
