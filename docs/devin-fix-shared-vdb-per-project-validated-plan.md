@@ -125,11 +125,15 @@ Then rebuild the WAR and confirm it's the one that ends up in `wildfly/standalon
 |---|---|
 | `platform-api` `ruff check app tests` | clean |
 | `platform-api` `mypy app` | clean |
-| Targeted VDB/routing regression (7 files, incl. new `test_vdb_routing.py`, `test_project_sharing.py`, `test_vdb_management_shared_upload.py`) | 62 / 62 passed |
-| `platform-api` `pytest -q` (full suite) | **pending — see note below** |
+| Targeted VDB/sharing regression (10 files, incl. new `test_vdb_routing.py`, `test_project_sharing.py`, `test_vdb_management_shared_upload.py`) | **57 / 57 passed** |
+| `platform-api` `pytest -q` (full suite) | **1649 passed, 7 failed, 4 skipped** (12m41s) — see below |
 | Java `mvn compile` | **not run — blocked, see §6** |
 
 New test files: `test_vdb_routing.py` (per-project `SharedVDB` routing, tenant isolation between two shared projects, no-VDB failure mode, private-project routing), `test_vdb_management_shared_upload.py` (`create_shared_vdb`'s `project_id` payload field, `upload_shared_file`'s multipart request shape and error handling), `test_project_sharing.py` (provisioning, `SharedVDB` reuse across re-shares, non-owner rejection, missing-file and path-traversal-filename rejection, and that `project.owner_id` is never touched by sharing).
+
+All 7 full-suite failures are pre-existing and unrelated to this branch:
+- **3** in `test_business_insight_phase1.py` — `redis.exceptions.ConnectionError: Error 111 connecting to localhost:6379`; no Redis reachable in this sandbox.
+- **4** in `test_percent_change_summary.py` — a self-documented, pre-existing gap in that file's own `_fixed_today` fixture: it patches `date.today()` to `2026-06-30` but not `datetime.now(timezone.utc)`, which `build_percent_change_summary` uses directly for its `as_of` window. As real time drifts past the pinned date (now ~2 months, since this session's clock reads 2026-08-31), the "trailing 12 months" period-window math goes off by one. Confirmed unrelated: nothing on this branch touches `percent_change_summary.py`, date handling, or that module at all. Worth a follow-up (patch `datetime.now` in that fixture too, the way one test in that file already does locally), but out of scope here.
 
 ```bash
 cd platform-api && pytest -q && ruff check app tests && mypy app
