@@ -9,7 +9,6 @@ import {
   type EventCallback,
   type Layout,
   type LayoutItem,
-  type ResponsiveLayouts,
 } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import {
@@ -59,8 +58,6 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { IconChartBar, IconCheck, IconLayoutGrid, IconRefresh, IconSparkles } from "@tabler/icons-react";
 import { DashboardTitleEditor } from "@/components/tablescope/project/dashboard-templates/dashboard-title-editor";
-// The brief strip itself is rendered by OperationalInsightGrid (the CSS-grid
-// operational renderer), so only the header shell is needed here.
 import {
   OperationalBriefStrip,
   OperationalDashboardHeader,
@@ -126,7 +123,6 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   const widgets = useMemo(() => dashboard.config?.widgets ?? [], [dashboard.config?.widgets]);
   const globalFilters = useMemo(() => dashboard.config?.globalFilters ?? [], [dashboard.config?.globalFilters]);
   const operational = dashboard.config?.presentation === "operational_insight";
-  const operationalWidgets = dashboard.config?.operationalWidgets ?? [];
   // AI-Designer-created dashboards always carry a decorative "manual"
   // dimension template with zero bound values (nothing for the picker to
   // filter by) — hide it rather than show a dropdown that only ever reads
@@ -1016,7 +1012,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
                   <div className={operational ? "overflow-hidden px-3 pb-3 pt-1" : "overflow-hidden p-3"} style={{ height: operational ? "calc(100% - 38px)" : "calc(100% - 52px)" }}>
                     {operational && w.type !== "kpi" ? (
                       // Render through the same ITSM-styled chart the
-                      // non-editing view uses (OperationalInsightGrid), not
+                      // operational dashboard uses, not
                       // the generic WidgetRenderer -- entering Edit Layout
                       // must only add drag/resize, not change how the chart
                       // itself looks.
