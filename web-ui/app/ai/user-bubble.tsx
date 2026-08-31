@@ -10,7 +10,7 @@ export function UserBubble({
   timestamp?: string | null;
 }) {
   return (
-    <div className="group flex flex-col items-end" tabIndex={0}>
+    <div className="group flex flex-col items-end">
       <div className="max-w-[75%] rounded-xl bg-brand px-4 py-3 text-[13px] leading-relaxed text-brand-fg">
         <span className="whitespace-pre-wrap break-words">{content}</span>
       </div>
