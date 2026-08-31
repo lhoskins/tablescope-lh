@@ -36,10 +36,7 @@ import type {
 } from "./types";
 import type { QueryScope, QueryScopeFilterResponse } from "@/types/query-scope";
 import { WidgetRenderer } from "./WidgetRenderer";
-import {
-  OperationalInsightGrid,
-  OperationalWidgetChart,
-} from "./OperationalInsightGrid";
+import { OperationalWidgetChart } from "./OperationalInsightGrid";
 import { WidgetChartOptionsDialog } from "./WidgetChartOptionsDialog";
 import { FilterBar } from "./FilterBar";
 import { DateRangeControl } from "./DateRangeControl";
@@ -60,16 +57,19 @@ import {
 import { ToastViewport, useToasts } from "@/components/ui/toast";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Button } from "@/components/ui/button";
-import { IconCheck, IconLayoutGrid, IconRefresh, IconSparkles } from "@tabler/icons-react";
+import { IconChartBar, IconCheck, IconLayoutGrid, IconRefresh, IconSparkles } from "@tabler/icons-react";
 import { DashboardTitleEditor } from "@/components/tablescope/project/dashboard-templates/dashboard-title-editor";
 // The brief strip itself is rendered by OperationalInsightGrid (the CSS-grid
 // operational renderer), so only the header shell is needed here.
 import {
+  OperationalBriefStrip,
   OperationalDashboardHeader,
+  toOperationalStories,
   type OperationalNarrativeItem,
 } from "@/components/tablescope/project/operational-dashboard-shell";
 import {
   operationalLayout,
+  OPERATIONAL_FREE_POSITION_COMPACTOR,
   OPERATIONAL_IMPROVEMENTS_LAYOUT_ID,
 } from "@/lib/dashboard/operationalLayout";
 
@@ -628,16 +628,12 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   }, [addCrossFilter, openDrilldown]);
 
   const narratives = useMemo(() => operationalNarratives(dashboard), [dashboard]);
+  const brief = narratives.find((item) => item.type === "operational_brief");
   const improvements = narratives.find((item) => item.type === "improvement_opportunities");
   const headerDashboards = dashboardOptions?.length ? dashboardOptions : [{ id: dashboard.id, name: dashboard.name }];
-  // Every operational dashboard can enter layout-editing mode: the
-  // react-grid-layout path (below) already renders the improvement-
-  // opportunities panel and gates drag/resize on `editingLayout` for
-  // exactly this case. While editing, it's used instead of
-  // OperationalInsightGrid's curated CSS-grid rendering even when
-  // `operationalWidgets` are present (see the render branch below) --
-  // the "Operational brief" strip is intentionally not draggable and is
-  // hidden only for the duration of the edit.
+  // Operational dashboards keep their ITSM presentation while using one
+  // React Grid Layout in both view and edit modes. Editing only unlocks the
+  // drag and resize controls; the rendered cards and charts do not switch.
   const gridLayoutEditable = operational;
 
   // ── react-grid-layout ────────────────────────────────────────────
@@ -688,17 +684,6 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   const handleResizeStop: EventCallback = useCallback(
     (layout) => persistLayout(layout as unknown as Layout),
     [persistLayout],
-  );
-
-  // OperationalInsightGrid's own position/visualizationOptions model
-  // (see its doc comment) replaces gridX/Y/W/H for operational dashboards --
-  // it already returns the full widget list with those fields updated, so
-  // this just needs to save it.
-  const persistOperationalLayout = useCallback(
-    (updatedWidgets: WidgetConfig[]) => {
-      updateMutation.mutate({ config: { ...dashboard.config, widgets: updatedWidgets, globalFilters } });
-    },
-    [dashboard.config, globalFilters, updateMutation],
   );
 
   // Cross-filter chips + "Clear all", shared by both header styles below.
@@ -924,6 +909,17 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
 
       {/* ── Widget Grid ──────────────────────────────────────────── */}
       <div className={operational ? "py-3" : "px-4 py-4"}>
+        {operational && brief && (
+          <OperationalBriefStrip
+            stories={toOperationalStories(brief.items, brief.summary)}
+            subtitle={brief.summary || "The story behind the selected period"}
+          />
+        )}
+        {operational && editingLayout && (
+          <div className="mb-3 mt-3 rounded-md border border-dashed border-brand-200 bg-brand-50/40 px-3 py-2 text-xs text-ink-secondary">
+            Drag a widget by its header and resize it from any edge or corner. Empty grid space is preserved, and other widgets will not move.
+          </div>
+        )}
         {widgets.length === 0 ? (
           <div className={operational ? "flex flex-col items-center justify-center rounded-xl border border-dashed border-line-secondary bg-bg-primary py-20" : "flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-white py-20"}>
             <svg className="mb-3 h-12 w-12 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
@@ -931,23 +927,6 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
             <p className="mt-1 text-xs text-slate-400">{operational ? "AI will select, validate and wire the appropriate KPI cards and charts." : "Click + Add Widget to start building your dashboard"}</p>
             {operational && <button type="button" onClick={() => setDesignerMode("edit_dashboard")} className="mt-3 rounded-md bg-brand-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-brand-700">Design with AI</button>}
           </div>
-        ) : operational ? (
-          // OperationalInsightGrid is the ONE renderer for an operational
-          // dashboard in both viewing and Edit Layout mode -- see its own
-          // doc comment for why a separate react-grid-layout x/y/w/h model
-          // (used below for non-operational dashboards) made editing and
-          // viewing visibly disagree with each other.
-          <OperationalInsightGrid
-            widgets={widgets}
-            widgetData={widgetData}
-            operationalWidgets={operationalWidgets}
-            editingLayout={editingLayout}
-            onEditWidget={handleEditWidget}
-            onElementClick={handleElementClick}
-            onChartOptions={setChartOptionsWidget}
-            onDeleteWidget={setWidgetPendingDelete}
-            onLayoutChange={persistOperationalLayout}
-          />
         ) : widgets.length > 0 ? (
           <div ref={containerRef} className="w-full">
             {mounted && (
@@ -959,6 +938,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
                 rowHeight={GRID_ROW_HEIGHT}
                 margin={GRID_MARGIN}
                 containerPadding={GRID_CONTAINER_PADDING}
+                compactor={operational ? OPERATIONAL_FREE_POSITION_COMPACTOR : undefined}
                 onDragStop={handleDragStop}
                 onResizeStop={handleResizeStop}
                 dragConfig={{ ...GRID_DRAG_CONFIG, enabled: !operational || editingLayout }}
@@ -1012,6 +992,16 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
                           className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
                         >
                           <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" /></svg>
+                        </button>
+                      )}
+                      {operational && w.type !== "kpi" && (
+                        <button
+                          type="button"
+                          onClick={() => setChartOptionsWidget(w)}
+                          title="Chart options"
+                          className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                        >
+                          <IconChartBar size={14} />
                         </button>
                       )}
                       <button onClick={() => handleEditWidget(w)} title={operational ? "Modify with AI" : "Edit"} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors">
