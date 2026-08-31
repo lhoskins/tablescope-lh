@@ -49,7 +49,7 @@ const SIZE_CYCLE: ItsmCardSize[] = ["compact", "standard", "wide"];
 
 function formatPrevious(metric: ItsmMetricValue): string {
   if (metric.previousValue === null || metric.previousValue === undefined) return "—";
-  if (metric.unit === "percent") return `${metric.previousValue.toFixed(1)}%`;
+  if (metric.unit === "percent") return `${metric.previousValue.toFixed(2)}%`;
   if (metric.unit === "hours") return `${metric.previousValue.toFixed(1)} hr`;
   if (metric.unit === "minutes") return `${metric.previousValue.toFixed(1)} min`;
   if (metric.unit === "days") return `${metric.previousValue.toFixed(1)} days`;
@@ -481,7 +481,7 @@ function ItsmKpiDashboardContent({ projectId, preset, onBack }: ItsmDashboardCon
                       </h3>
                       <p className="text-xs text-ink-tertiary">
                         {drilldownData?.majority_share_percent
-                          ? `Top three account for ${drilldownData.majority_share_percent.toFixed(1)}% of measured records`
+                          ? `Top three account for ${drilldownData.majority_share_percent.toFixed(2)}% of measured records`
                           : "Largest contributors to this KPI"}
                       </p>
                     </div>

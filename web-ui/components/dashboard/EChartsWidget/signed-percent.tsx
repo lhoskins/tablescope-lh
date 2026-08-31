@@ -67,5 +67,5 @@ export function signedPercent(v: number): string {
   if (!Number.isFinite(v)) return "—";
   const pct = v * 100;
   const sign = pct > 0 ? "+" : "";
-  return `${sign}${pct.toFixed(1)}%`;
+  return `${sign}${pct.toFixed(2)}%`;
 }

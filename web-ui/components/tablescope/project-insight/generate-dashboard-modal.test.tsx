@@ -103,7 +103,7 @@ describe("GenerateDashboardModal readability layer", () => {
 
     await waitFor(() => expect(screen.getByText(/Show data/i)).toBeTruthy());
     fireEvent.click(screen.getByText(/Show data/i));
-    expect(screen.getByText("4.2%")).toBeTruthy();
-    expect(screen.getByText("3.1%")).toBeTruthy();
+    expect(screen.getByText("4.20%")).toBeTruthy();
+    expect(screen.getByText("3.10%")).toBeTruthy();
   });
 });

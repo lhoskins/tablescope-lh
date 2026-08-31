@@ -72,5 +72,5 @@ export function clampInterval(
 export function formatPercentChange(ratio: number | null | undefined): string {
   if (ratio === null || ratio === undefined) return "N/A";
   const pct = ratio * 100;
-  return `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
+  return `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
 }

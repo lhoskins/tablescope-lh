@@ -63,7 +63,7 @@ export function DashboardWidgetCard({
 function formatValue(v: number, fmt?: string): string {
   if (fmt === "percent") {
     const pct = Math.abs(v) <= 1 ? v * 100 : v;
-    return `${pct.toFixed(1)}%`;
+    return `${pct.toFixed(2)}%`;
   }
   if (fmt === "currency") return `$${v.toLocaleString()}`;
   if (fmt === "count") return Math.round(v).toLocaleString();

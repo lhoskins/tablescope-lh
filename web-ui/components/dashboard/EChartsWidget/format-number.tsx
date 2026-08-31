@@ -91,7 +91,7 @@ const SCALE_SUFFIXES: Record<Exclude<ValueScale, "auto">, string> = {
  */
 export function formatNumber(v: number, format?: string, scale?: ValueScale, currencySymbol = "$"): string {
   if (!Number.isFinite(v)) return "—";
-  if (format === "percent") return `${(v * 100).toFixed(1)}%`;
+  if (format === "percent") return `${(v * 100).toFixed(2)}%`;
   if (scale && scale !== "auto") {
     const scaled = v / SCALE_DIVISORS[scale];
     const prefix = format === "currency" ? currencySymbol : "";
@@ -107,4 +107,42 @@ export function formatNumber(v: number, format?: string, scale?: ValueScale, cur
     if (Math.abs(v) >= 1_000) return `${(v / 1_000).toFixed(0)}K`;
   }
   return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+/**
+ * Picks a single shared display unit (millions/thousands/none) for a whole
+ * chart's worth of values, based on the largest magnitude among them --
+ * e.g. a "revenue by customer" bar chart with every value in the tens of
+ * millions gets one consistent "M" axis, not a per-tick guess. Callers
+ * resolve this once, at widget-build time, and set the concrete result as
+ * `visualizationOptions.valueScale` -- this intentionally does not reuse
+ * the `"auto"` `ValueScale` member, which is documented (and tested) to mean
+ * "no forced scale, same as omitted" for designer-configured charts.
+ */
+export function autoValueScale(
+  values: Array<number | null | undefined>,
+): Exclude<ValueScale, "auto"> | undefined {
+  let max = 0;
+  for (const v of values) {
+    if (typeof v !== "number" || !Number.isFinite(v)) continue;
+    const abs = Math.abs(v);
+    if (abs > max) max = abs;
+  }
+  if (max >= 1_000_000) return "millions";
+  if (max >= 1_000) return "thousands";
+  return undefined;
+}
+
+/**
+ * Full-precision rendering for tooltips: the exact value, thousands
+ * separators, always two decimal places ("cents") -- regardless of any
+ * axis-display scale (K/M) applied to the same value's tick/bar label.
+ * Percent is capped at two decimals like every other percent display
+ * (see `formatNumber`'s `percent` branch); it has no "cents" concept.
+ */
+export function formatFullPrecision(v: number, format?: string, currencySymbol = "$"): string {
+  if (!Number.isFinite(v)) return "—";
+  if (format === "percent") return `${(v * 100).toFixed(2)}%`;
+  const prefix = format === "currency" ? currencySymbol : "";
+  return `${prefix}${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }

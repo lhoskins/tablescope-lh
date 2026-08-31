@@ -60,13 +60,19 @@ import {
   TransformComponent,
 } from "echarts/components";
 import { LegacyGridContainLabel } from "echarts/features";
-import { CanvasRenderer } from "echarts/renderers";import { formatNumber, type ValueScale } from "./format-number";
+import { CanvasRenderer } from "echarts/renderers";import { formatFullPrecision, type ValueScale } from "./format-number";
 
 
 
-export function tooltipFormatter(params: any, format?: string, scale?: ValueScale, currencySymbol?: string) {
+/**
+ * `scale` is accepted for call-site compatibility with `formatNumber` but is
+ * intentionally unused: a tooltip always shows the exact value (commas,
+ * two decimals) regardless of any K/M scale applied to the same value's
+ * axis tick or bar label -- hovering is how a user checks the real number.
+ */
+export function tooltipFormatter(params: any, format?: string, _scale?: ValueScale, currencySymbol?: string) {
   const rows = Array.isArray(params) ? params : [params];
   if (!rows.length) return "";
   const axis = rows[0].axisValueLabel ?? rows[0].name ?? "";
-  return axis + rows.map((p: any) => `<br/>${p.marker} ${p.seriesName}: ${formatNumber(Number(p.value ?? 0), format, scale, currencySymbol)}`).join("");
+  return axis + rows.map((p: any) => `<br/>${p.marker} ${p.seriesName}: ${formatFullPrecision(Number(p.value ?? 0), format, currencySymbol)}`).join("");
 }

@@ -300,7 +300,7 @@ function FieldRow({ field }: { field: CatalogField }) {
         {field.ai_description ?? "—"}
       </td>
       <td className="px-4 py-2.5 text-right text-ink-secondary">
-        {field.null_percent != null ? `${field.null_percent.toFixed(1)}%` : "—"}
+        {field.null_percent != null ? `${field.null_percent.toFixed(2)}%` : "—"}
       </td>
       <td className="px-4 py-2.5 text-right text-ink-secondary">
         {field.distinct_count != null

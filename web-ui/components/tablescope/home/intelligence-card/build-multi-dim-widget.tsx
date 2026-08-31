@@ -43,6 +43,7 @@ import {
 } from "@/lib/insights/export-csv";
 import { useToasts, ToastViewport } from "@/components/ui/toast";
 import { CARD_SEVERITY } from "@/lib/ui/insight-tones";
+import { autoValueScale } from "@/components/dashboard/EChartsWidget/format-number";
 
 
 /**
@@ -70,32 +71,47 @@ export function buildMultiDimWidget(chart: InsightChart, dataRows: Record<string
     position: 0,
   };
 
+  let widget: WidgetConfig;
   if (type === "scatter" || type === "effect_scatter") {
-    return {
+    widget = {
       ...base,
       xColumn: roles.x ?? "x",
       yColumn: roles.y ?? "y",
       groupByColumn: roles.group,
       xColumnType: "number",
     };
+  } else if (type === "radar") {
+    widget = { ...base, xColumn: roles.x ?? "subject", yColumn: roles.value ?? "value", groupByColumn: roles.group ?? "metric" };
+  } else if (type === "heatmap") {
+    widget = { ...base, xColumn: roles.x ?? "", yColumn: roles.value ?? "", groupByColumn: roles.y ?? roles.group ?? "" };
+  } else if (type === "treemap" || type === "sankey" || type === "sunburst" || type === "tree" || type === "graph") {
+    widget = { ...base, xColumn: roles.x ?? "", yColumn: roles.value ?? "", groupByColumn: roles.group ?? "" };
+  } else if (type === "funnel" || type === "gauge") {
+    widget = { ...base, xColumn: roles.x ?? (Object.keys(dataRows[0] ?? {})[0] || ""), yColumn: roles.value ?? "" };
+  } else if (type === "parallel" || type === "lines" || type === "candlestick" || type === "boxplot" || type === "pictorial_bar" || type === "theme_river" || type === "map") {
+    widget = { ...base, xColumn: roles.x ?? "", yColumn: roles.value ?? roles.y ?? "", groupByColumn: roles.group ?? "" };
+  } else if (type === "combo" && roles.y2) {
+    widget = { ...base, xColumn: roles.x ?? "label", yColumn: roles.y ?? "value", y2Column: roles.y2, y2Aggregation: "sum" };
+  } else {
+    widget = { ...base, xColumn: roles.x ?? "label", yColumn: roles.value ?? roles.y ?? "value" };
   }
-  if (type === "radar") {
-    return { ...base, xColumn: roles.x ?? "subject", yColumn: roles.value ?? "value", groupByColumn: roles.group ?? "metric" };
+
+  // A shared K/M axis unit, picked from this chart's own value range (see
+  // autoValueScale) -- e.g. a revenue-by-customer bar chart in the tens of
+  // millions reads "34.8M" on every tick/bar-end label instead of
+  // "34,840,581.67". Harmless for chart types with no numeric value axis
+  // (pie, heatmap, ...); their renderers simply never read valueScale.
+  const valueColumns = [widget.yColumn, widget.y2Column].filter((c): c is string => !!c);
+  const values = dataRows.flatMap((row) =>
+    valueColumns.map((col) => {
+      const v = row[col];
+      return typeof v === "number" ? v : Number(v);
+    }),
+  );
+  const valueScale = autoValueScale(values);
+  if (valueScale) {
+    widget.visualizationOptions = { ...widget.visualizationOptions, valueScale };
   }
-  if (type === "heatmap") {
-    return { ...base, xColumn: roles.x ?? "", yColumn: roles.value ?? "", groupByColumn: roles.y ?? roles.group ?? "" };
-  }
-  if (type === "treemap" || type === "sankey" || type === "sunburst" || type === "tree" || type === "graph") {
-    return { ...base, xColumn: roles.x ?? "", yColumn: roles.value ?? "", groupByColumn: roles.group ?? "" };
-  }
-  if (type === "funnel" || type === "gauge") {
-    return { ...base, xColumn: roles.x ?? (Object.keys(dataRows[0] ?? {})[0] || ""), yColumn: roles.value ?? "" };
-  }
-  if (type === "parallel" || type === "lines" || type === "candlestick" || type === "boxplot" || type === "pictorial_bar" || type === "theme_river" || type === "map") {
-    return { ...base, xColumn: roles.x ?? "", yColumn: roles.value ?? roles.y ?? "", groupByColumn: roles.group ?? "" };
-  }
-  if (type === "combo" && roles.y2) {
-    return { ...base, xColumn: roles.x ?? "label", yColumn: roles.y ?? "value", y2Column: roles.y2, y2Aggregation: "sum" };
-  }
-  return { ...base, xColumn: roles.x ?? "label", yColumn: roles.value ?? roles.y ?? "value" };
+
+  return widget;
 }

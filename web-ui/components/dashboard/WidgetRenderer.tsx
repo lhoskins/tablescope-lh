@@ -133,7 +133,7 @@ function KpiWidget({ widget, data, operational = false }: { widget: WidgetConfig
       <div className="mt-1 flex items-center gap-1 text-[11px]">
         {hasDelta ? <>
           <span className={`font-semibold ${favorable ? "text-emerald-600" : unfavorable ? "text-rose-600" : "text-ink-tertiary"}`}>
-            {deltaValue > 0 ? "↑" : deltaValue < 0 ? "↓" : "→"} {Math.abs(deltaValue).toFixed(1)}%
+            {deltaValue > 0 ? "↑" : deltaValue < 0 ? "↓" : "→"} {Math.abs(deltaValue).toFixed(2)}%
           </span>
           <span className="text-ink-tertiary">vs prior period</span>
         </> : <span className="text-ink-tertiary">No prior-period comparison</span>}

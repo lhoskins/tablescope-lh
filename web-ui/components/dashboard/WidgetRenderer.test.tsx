@@ -99,8 +99,8 @@ describe("WidgetRenderer", () => {
         data={[{ Value: 23.3, previousValue: 25, deltaPercent: -6.8 }]}
       />,
     );
-    expect(screen.getByText(/↓ 6.8%/)).toHaveClass("text-emerald-600");
-    expect(screen.queryByText(/8.2%/)).toBeNull();
+    expect(screen.getByText(/↓ 6\.80%/)).toHaveClass("text-emerald-600");
+    expect(screen.queryByText(/8\.20%/)).toBeNull();
   });
 
   it("renders every chart type through ECharts", async () => {

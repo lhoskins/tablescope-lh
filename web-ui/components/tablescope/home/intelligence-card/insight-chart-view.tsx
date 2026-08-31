@@ -44,6 +44,7 @@ import {
 import { useToasts, ToastViewport } from "@/components/ui/toast";
 import { CARD_SEVERITY } from "@/lib/ui/insight-tones";
 import { buildMultiDimWidget } from "./build-multi-dim-widget";
+import { autoValueScale } from "@/components/dashboard/EChartsWidget/format-number";
 import {
   OperationalChart,
   toOperationalChartData,
@@ -89,6 +90,9 @@ function buildOperationalInsightChart(
     [valueName]: item.value,
     ...(hasValue2 ? { [value2Name]: item.value2 ?? 0 } : {}),
   }));
+  const valueScale = autoValueScale(
+    rows.flatMap((row) => [row[valueName], hasValue2 ? row[value2Name] : undefined] as unknown[]).map(Number),
+  );
   const widget: WidgetConfig = {
     id: "operational-insight-chart",
     type: chart.type as WidgetType,
@@ -103,7 +107,7 @@ function buildOperationalInsightChart(
     aggregation: "sum",
     sortBy: "x_asc",
     filters: [],
-    visualizationOptions: { showLegend: false, showGrid: true, ...options },
+    visualizationOptions: { showLegend: false, showGrid: true, valueScale, ...options },
     colSpan: 1,
     position: 0,
   };
@@ -216,6 +220,9 @@ export function InsightChartView({
     return { [xName]: s.label, [valueName]: s.value };
   });
 
+  const valueScale = autoValueScale(
+    rows.flatMap((row) => [row[valueName], hasValue2 ? row[value2Name] : undefined] as unknown[]).map(Number),
+  );
   const base: WidgetConfig = {
     id: "insight-chart",
     type: chart.type as WidgetType,
@@ -228,7 +235,7 @@ export function InsightChartView({
     aggregation: "sum",
     sortBy: "x_asc",
     filters: [],
-    visualizationOptions: { showLegend: false, showGrid: false, ...options },
+    visualizationOptions: { showLegend: false, showGrid: false, valueScale, ...options },
     colSpan: 1,
     position: 0,
   };
