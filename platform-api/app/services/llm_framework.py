@@ -35,10 +35,18 @@ CAPABILITIES = ROUTING_CAPABILITIES
 
 @dataclass(frozen=True)
 class ActiveRouting:
-    """Resolved routing decision for a capability."""
+    """Resolved routing decision for a capability.
+
+    ``llm_target_url`` is whichever runtime target is actively routed for
+    this capability -- an Ollama host or a vLLM/OpenAI-compatible one alike
+    (``LLMRuntimeTarget.runtime_type`` decides which; ai-server's
+    ``_is_openai_target`` picks the wire protocol from the URL shape). Named
+    generically on purpose: for "sql_generation" this currently resolves to
+    a vLLM target serving Glimmer, not Ollama.
+    """
 
     model: str | None
-    ollama_url: str | None
+    llm_target_url: str | None
     target_id: int | None
     installation_id: int | None
     version: int | None
@@ -94,7 +102,7 @@ async def get_active_routing(session: AsyncSession, capability: str) -> ActiveRo
         return ActiveRouting(None, None, None, None, None)
     return ActiveRouting(
         model=profile.installation.ollama_model_name,
-        ollama_url=profile.target.host if profile.target else None,
+        llm_target_url=profile.target.host if profile.target else None,
         target_id=profile.target_id,
         installation_id=profile.installation_id,
         version=profile.version,

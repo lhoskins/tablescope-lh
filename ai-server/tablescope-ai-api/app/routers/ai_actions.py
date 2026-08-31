@@ -116,7 +116,7 @@ async def draft_action(req: DraftActionRequest) -> DraftActionResponse:
         temperature=0.2,
         response_format="json",
         max_tokens=2048,
-        ollama_url=req.ollama_url,
+        llm_target_url=req.llm_target_url,
     )
 
     parsed: dict[str, Any] = {}

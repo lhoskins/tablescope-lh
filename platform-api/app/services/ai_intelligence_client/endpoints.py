@@ -42,7 +42,7 @@ async def _post_with_model(
         payload = {
             **payload,
             "model": routing.model,
-            "ollama_url": routing.ollama_url,
+            "llm_target_url": routing.llm_target_url,
             "routing_version": routing.version,
             "capability": capability,
         }

@@ -154,7 +154,7 @@ async def test_num_ctx_has_no_effect_on_vllm_targets(_patch_async_client):
     await llm_client.generate(
         prompt="p",
         model="muse-glimmer",
-        ollama_url="http://vllm/v1",
+        llm_target_url="http://vllm/v1",
         num_ctx=24576,
         response_format="json",
     )
@@ -169,7 +169,7 @@ async def test_explicit_max_tokens_is_passed_through_unchanged(_patch_async_clie
     await llm_client.generate(
         prompt="p",
         model="sql-model",
-        ollama_url="http://vllm/v1",
+        llm_target_url="http://vllm/v1",
         max_tokens=1024,
         num_ctx=24576,
     )
@@ -183,7 +183,7 @@ async def test_generate_omits_min_tokens_when_unset(_patch_async_client):
     min_tokens must stay opt-in, not a blanket default for every caller."""
     _patch_async_client["response"] = _chat_completion({"content": "hi"})
 
-    await llm_client.generate(prompt="p", model="m", ollama_url="http://vllm/v1")
+    await llm_client.generate(prompt="p", model="m", llm_target_url="http://vllm/v1")
 
     assert "min_tokens" not in _patch_async_client["json"]
 
@@ -201,7 +201,7 @@ async def test_generate_sql_sends_min_tokens(_patch_async_client):
         context="",
         allowed_tables=["sales_revenue_monthly_CSV"],
         model="sql-model",
-        ollama_url="http://vllm/v1",
+        llm_target_url="http://vllm/v1",
     )
 
     assert _patch_async_client["json"]["min_tokens"] == llm_client._SQL_MIN_TOKENS
@@ -224,7 +224,7 @@ async def test_generate_sql_omits_max_tokens_on_vllm_targets(_patch_async_client
         context="",
         allowed_tables=["sales_revenue_monthly_CSV"],
         model="sql-model",
-        ollama_url="http://vllm/v1",
+        llm_target_url="http://vllm/v1",
     )
 
     assert "max_tokens" not in _patch_async_client["json"]
@@ -241,7 +241,7 @@ async def test_repair_sql_omits_max_tokens_on_vllm_targets(_patch_async_client):
         failed_sql="SELECT 1",
         validation_error="TEIID30492",
         model="sql-model",
-        ollama_url="http://vllm/v1",
+        llm_target_url="http://vllm/v1",
     )
 
     assert "max_tokens" not in _patch_async_client["json"]
@@ -259,7 +259,7 @@ async def test_generate_sql_keeps_max_tokens_cap_on_ollama_targets(_patch_async_
         context="",
         allowed_tables=["sales_revenue_monthly_CSV"],
         model="sql-model",
-        ollama_url="http://ollama:11434",
+        llm_target_url="http://ollama:11434",
     )
 
     assert _patch_async_client["json"]["options"]["num_predict"] == 1024
@@ -276,7 +276,7 @@ async def test_repair_sql_sends_min_tokens(_patch_async_client):
         failed_sql="SELECT 1",
         validation_error="TEIID30492",
         model="sql-model",
-        ollama_url="http://vllm/v1",
+        llm_target_url="http://vllm/v1",
     )
 
     assert _patch_async_client["json"]["min_tokens"] == llm_client._SQL_MIN_TOKENS
@@ -287,7 +287,7 @@ async def test_no_num_ctx_and_no_max_tokens_omits_max_tokens_entirely(_patch_asy
     _patch_async_client["response"] = _chat_completion({"content": "ok"})
 
     await llm_client.generate(
-        prompt="p", model="muse-glimmer", ollama_url="http://vllm/v1",
+        prompt="p", model="muse-glimmer", llm_target_url="http://vllm/v1",
     )
 
     assert "max_tokens" not in _patch_async_client["json"]

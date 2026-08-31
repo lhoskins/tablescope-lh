@@ -142,7 +142,7 @@ async def intelligence_repair_sql_step(
         # Same guard llm_client.generate_sql/repair_sql already apply to
         # the initial generation call.
         min_tokens=llm_client._SQL_MIN_TOKENS,
-        ollama_url=req.ollama_url,
+        llm_target_url=req.llm_target_url,
     )
 
     decision = _parse_json_response(raw or "") or {}

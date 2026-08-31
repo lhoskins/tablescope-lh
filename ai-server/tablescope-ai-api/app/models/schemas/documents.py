@@ -25,7 +25,7 @@ class DocumentProfileRequest(BaseModel):
     timestamp: float = 0.0
     # Optional routing overrides from the LLM Framework.
     model: str | None = None
-    ollama_url: str | None = None
+    llm_target_url: str | None = None
     routing_version: int | None = None
 
 

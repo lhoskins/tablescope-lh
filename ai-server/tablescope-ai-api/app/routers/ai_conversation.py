@@ -197,7 +197,7 @@ async def classify_conversation_turn(
         max_tokens=400,
         num_ctx=8192,
         response_format="json",
-        ollama_url=req.ollama_url,
+        llm_target_url=req.llm_target_url,
     )
     parsed = _parse_json_response(raw or "") or {}
 

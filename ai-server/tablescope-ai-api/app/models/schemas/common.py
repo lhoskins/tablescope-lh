@@ -19,8 +19,11 @@ class AIBaseRequest(BaseModel):
     turn_id: int | None = None
     # Optional model override and routing capability supplied by the platform
     # LLM Framework. When omitted, the AI server falls back to static config.
+    # Despite the name history, this carries whichever backend is actively
+    # routed for the capability -- Ollama or vLLM alike (see llm_client.py's
+    # module docstring).
     model: str | None = None
-    ollama_url: str | None = None
+    llm_target_url: str | None = None
     routing_version: int | None = None
     capability: str | None = None
 
