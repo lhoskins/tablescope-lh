@@ -35,6 +35,12 @@ services:
       - OLLAMA_CONTEXT_LENGTH=8192
     volumes:
       - /mnt/tablescope-ai/ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c \"echo > /dev/tcp/localhost/11434\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     restart: unless-stopped
 
   qdrant:
@@ -99,8 +105,12 @@ services:
       - "8001"
       - --max-model-len
       - "12288"
+      # Was 0.9 -- left too little headroom for Ollama's models sharing this
+      # GPU (see the ollama service's comment above), which tracked with
+      # Ollama going unreachable on :11434 while vLLM stayed healthy. Lowered
+      # to leave real headroom instead of vLLM claiming the GPU almost whole.
       - --gpu-memory-utilization
-      - "0.9"
+      - "0.75"
     deploy:
       resources:
         reservations:
