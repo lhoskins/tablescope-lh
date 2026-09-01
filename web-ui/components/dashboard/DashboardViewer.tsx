@@ -767,13 +767,15 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
                 )}
                 {gridLayoutEditable && (
                   <Button
-                    variant="secondary"
-                    size="icon"
-                    title={editingLayout ? "Done" : "Edit Layout"}
+                    variant={editingLayout ? "brandSoft" : "secondary"}
+                    size="md"
+                    title={editingLayout ? "Done editing layout" : "Edit Layout"}
                     aria-label={editingLayout ? "Done editing layout" : "Edit Layout"}
+                    aria-pressed={editingLayout}
                     onClick={() => setEditingLayout((value) => !value)}
                   >
                     {editingLayout ? <IconCheck size={14} /> : <IconLayoutGrid size={14} />}
+                    {editingLayout ? "Done" : "Edit Layout"}
                   </Button>
                 )}
                 <Button
@@ -913,7 +915,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
         )}
         {operational && editingLayout && (
           <div className="mb-3 mt-3 rounded-md border border-dashed border-brand-200 bg-brand-50/40 px-3 py-2 text-xs text-ink-secondary">
-            Drag a widget by its header and resize it from any edge or corner. Empty grid space is preserved, and other widgets will not move.
+            Drag a widget by its header and resize it from any visible edge or corner handle. On a touchscreen, press and drag directly; empty grid space is preserved and other widgets will not move.
           </div>
         )}
         {widgets.length === 0 ? (
@@ -924,7 +926,14 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
             {operational && <button type="button" onClick={() => setDesignerMode("edit_dashboard")} className="mt-3 rounded-md bg-brand-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-brand-700">Design with AI</button>}
           </div>
         ) : widgets.length > 0 ? (
-          <div ref={containerRef} className="w-full">
+          <div
+            ref={containerRef}
+            className={`w-full ${
+              operational && editingLayout
+                ? "[&_.widget-drag-handle]:touch-none [&_.widget-drag-handle]:select-none [&_.react-resizable-handle]:!z-20 [&_.react-resizable-handle]:!h-11 [&_.react-resizable-handle]:!w-11 [&_.react-resizable-handle]:!opacity-100 [&_.react-resizable-handle]:touch-none [&_.react-resizable-handle]:select-none"
+                : ""
+            }`}
+          >
             {mounted && (
               <ResponsiveGridLayout
                 className="layout"
@@ -937,7 +946,14 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
                 compactor={operational ? OPERATIONAL_FREE_POSITION_COMPACTOR : undefined}
                 onDragStop={handleDragStop}
                 onResizeStop={handleResizeStop}
-                dragConfig={{ ...GRID_DRAG_CONFIG, enabled: !operational || editingLayout }}
+                dragConfig={{
+                  ...GRID_DRAG_CONFIG,
+                  enabled: !operational || editingLayout,
+                  // RGL's drag threshold reads MouseEvent coordinates. Use
+                  // immediate activation for touch input so iPad gestures are
+                  // never lost while Safari decides whether to scroll.
+                  threshold: operational ? 0 : GRID_DRAG_CONFIG.threshold,
+                }}
                 resizeConfig={{ ...GRID_RESIZE_CONFIG, enabled: !operational || editingLayout }}
                 width={containerWidth}
               >
