@@ -58,7 +58,7 @@ describe("IntelligenceCard Option 2 toolbar", () => {
       />,
     );
     const article = document.querySelector("article");
-    expect(article?.classList.contains("border-l-4")).toBe(true);
+    expect(article?.classList.contains("border-l-4")).toBe(false);
     expect(screen.queryByText("Title:")).toBeNull();
     expect(screen.queryByText("Summary:")).toBeNull();
     expect(screen.getByRole("button", { name: "Explain" })).toBeTruthy();

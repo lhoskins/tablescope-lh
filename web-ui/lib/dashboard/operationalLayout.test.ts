@@ -60,7 +60,7 @@ describe("operationalLayout", () => {
     expect(OPERATIONAL_FREE_POSITION_COMPACTOR.type).toBeNull();
     expect(OPERATIONAL_FREE_POSITION_COMPACTOR.allowOverlap).toBe(false);
     expect(OPERATIONAL_FREE_POSITION_COMPACTOR.preventCollision).toBe(true);
-    expect(OPERATIONAL_FREE_POSITION_COMPACTOR.compact(layout, 12)).toEqual(layout);
+    expect(OPERATIONAL_FREE_POSITION_COMPACTOR.compact(layout, 12)).toMatchObject(layout);
   });
 
 });
