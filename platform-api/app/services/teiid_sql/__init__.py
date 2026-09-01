@@ -6,6 +6,7 @@ from .identifiers import _TEIID_RESERVED_ALIASES as _TEIID_RESERVED_ALIASES
 from .identifiers import _is_aggregate_expression as _is_aggregate_expression
 from .identifiers import _next_clause_position as _next_clause_position
 from .identifiers import _strip_output_alias as _strip_output_alias
+from .identifiers import add_missing_from_clause as add_missing_from_clause
 from .identifiers import collapse_bare_following_parens as collapse_bare_following_parens
 from .identifiers import normalize_teiid_identifiers as normalize_teiid_identifiers
 from .identifiers import rebuild_group_by_from_select as rebuild_group_by_from_select

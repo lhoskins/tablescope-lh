@@ -23,6 +23,7 @@ from app.services.connection_pool import pool_manager
 from app.services.sql_authorization import SQLAuthorizationError, authorize_sql
 from app.services.sql_repair_agent import run_repair_loop
 from app.services.teiid_sql import (
+    add_missing_from_clause,
     normalize_teiid_identifiers,
     normalize_teiid_timestamps,
 )
@@ -307,6 +308,25 @@ def _auto_cast_aggregates(sql: str) -> str:
     return _cast_timestampdiff(_AGG_CAST_RE.sub(_replacer, sql))
 
 
+# Live finding: the SQL-generation/repair model occasionally emits a CASE
+# expression's closing END glued directly onto the next clause keyword with
+# no whitespace -- e.g. "...AS double) ENDORDER BY JobMonth" -- which Teiid's
+# tokenizer reads as one unrecognized identifier ("ENDORDER") instead of two
+# valid keywords (TEIID31100 "Encountered ... ENDORDER ..."). Nothing else in
+# this normalization pipeline removes whitespace (_cast_timestampdiff and
+# _auto_cast_aggregates only ever insert characters around an existing span),
+# so this is the model's own raw formatting, not something introduced here --
+# but it must still be corrected before the SQL ever reaches Teiid, on every
+# repair round as well as the first attempt (both flow through _prepare_sql).
+_GLUED_KEYWORD_RE = re.compile(
+    r"\bEND(ORDER\s+BY|GROUP\s+BY|WHERE|HAVING|LIMIT)\b", re.IGNORECASE
+)
+
+
+def _fix_glued_keywords(sql: str) -> str:
+    return _GLUED_KEYWORD_RE.sub(lambda m: f"END {m.group(1)}", sql)
+
+
 async def _prepare_sql(
     sql: str,
     *,
@@ -315,7 +335,9 @@ async def _prepare_sql(
     column_samples: dict[str, str],
 ) -> str:
     """Normalize and repair common AI SQL mistakes before execution."""
+    sql = _fix_glued_keywords(sql)
     if table_schema:
+        sql = add_missing_from_clause(sql, table_schema)
         sql = normalize_teiid_identifiers(sql, table_schema)
     sql = normalize_teiid_timestamps(
         sql, column_types=column_types, column_samples=column_samples
@@ -350,8 +372,21 @@ def _is_source_or_schema_error(err: str) -> bool:
     patterns = [
         r"TEIID30504",
         r"TEIID30498",
-        r"TEIID30492",
         r"TEIID30496",
+        # TEIID30492 deliberately NOT matched here. Teiid reuses that code for
+        # two unrelated messages: the per-source "capabilities not loaded yet"
+        # condition this list exists to catch (already matched below by its
+        # own text, "Capabilities for ... were not available", independent of
+        # the numeric code) -- and a completely different, rewrite-fixable
+        # "Aggregate functions are only allowed HAVING/SELECT/ORDER BY
+        # clauses ... requires a FROM clause" error, live-confirmed on a
+        # "backup failure rate" query whose generated SQL omitted FROM
+        # entirely. Matching the bare code here marked that fixable error
+        # unfixable and skipped the repair agent outright, on top of which
+        # the repair agent's own rewrites weren't reliably adding the missing
+        # FROM back in -- see add_missing_from_clause in
+        # app/services/teiid_sql/identifiers.py, which now fixes the FROM
+        # clause deterministically before either error can occur.
         # Function-dialect mismatches (e.g. the model reaching for
         # DATEADD/DATE_FORMAT, which Teiid does not implement) and hard
         # parse errors.
