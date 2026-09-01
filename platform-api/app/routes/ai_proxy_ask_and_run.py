@@ -31,6 +31,7 @@ from app.services.response_envelope import ResponseEnvelope
 from app.services.sql_repair_agent import is_read_only_select as _is_read_only_select
 from app.services.sql_repair_agent import run_repair_loop
 from app.services.teiid_sql import (
+    _fix_glued_keywords,
     add_missing_from_clause,
     collapse_bare_following_parens,
     normalize_teiid_identifiers,
@@ -324,6 +325,7 @@ async def _execute_with_repair(
     )
 
     async def _normalize(candidate: str) -> str:
+        candidate = _fix_glued_keywords(candidate)
         candidate = add_missing_from_clause(candidate, table_schema)
         candidate = normalize_teiid_identifiers(candidate, table_schema)
         candidate = normalize_teiid_string_filters(candidate, table_schema)

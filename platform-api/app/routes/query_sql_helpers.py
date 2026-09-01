@@ -23,6 +23,7 @@ from app.services.connection_pool import pool_manager
 from app.services.sql_authorization import SQLAuthorizationError, authorize_sql
 from app.services.sql_repair_agent import run_repair_loop
 from app.services.teiid_sql import (
+    _fix_glued_keywords,
     add_missing_from_clause,
     normalize_teiid_identifiers,
     normalize_teiid_timestamps,
@@ -306,25 +307,6 @@ def _auto_cast_aggregates(sql: str) -> str:
         return f"{func}(CAST({col} AS double))"
 
     return _cast_timestampdiff(_AGG_CAST_RE.sub(_replacer, sql))
-
-
-# Live finding: the SQL-generation/repair model occasionally emits a CASE
-# expression's closing END glued directly onto the next clause keyword with
-# no whitespace -- e.g. "...AS double) ENDORDER BY JobMonth" -- which Teiid's
-# tokenizer reads as one unrecognized identifier ("ENDORDER") instead of two
-# valid keywords (TEIID31100 "Encountered ... ENDORDER ..."). Nothing else in
-# this normalization pipeline removes whitespace (_cast_timestampdiff and
-# _auto_cast_aggregates only ever insert characters around an existing span),
-# so this is the model's own raw formatting, not something introduced here --
-# but it must still be corrected before the SQL ever reaches Teiid, on every
-# repair round as well as the first attempt (both flow through _prepare_sql).
-_GLUED_KEYWORD_RE = re.compile(
-    r"\bEND(ORDER\s+BY|GROUP\s+BY|WHERE|HAVING|LIMIT)\b", re.IGNORECASE
-)
-
-
-def _fix_glued_keywords(sql: str) -> str:
-    return _GLUED_KEYWORD_RE.sub(lambda m: f"END {m.group(1)}", sql)
 
 
 async def _prepare_sql(

@@ -219,26 +219,35 @@ _AGGREGATE_NAMES = frozenset({"AVG", "COUNT", "MAX", "MIN", "SUM"})
 
 
 def _is_aggregate_expression(expr: str) -> bool:
-    """Return True when ``expr``'s outermost function is an aggregate."""
-    expr = expr.strip()
-    while len(expr) >= 2 and expr[0] == "(" and expr[-1] == ")":
-        inner = expr[1:-1].strip()
-        depth = 0
-        balanced = True
-        for ch in inner:
-            if ch == "(":
-                depth += 1
-            elif ch == ")":
-                depth -= 1
-            if depth < 0:
-                balanced = False
-                break
-        if not balanced or depth != 0:
-            break
-        expr = inner
+    """Return True when ``expr`` contains an aggregate function call.
 
-    m = re.match(r"^\s*([A-Za-z_]\w*)\s*\(", expr)
-    return bool(m and m.group(1).upper() in _AGGREGATE_NAMES)
+    Aggregates like ``CAST(SUM(...) AS double)`` or ``NULLIF(COUNT(*), 0)``
+    are still aggregates even when wrapped in casts, CASE, or arithmetic.
+    """
+    # Strip string literals so aggregate names inside quoted strings are not
+    # treated as function calls.
+    expr_no_strings = re.sub(r"'[^']*'", "''", expr)
+    return bool(
+        re.search(
+            r"\b(?:AVG|COUNT|MAX|MIN|SUM)\s*\(",
+            expr_no_strings,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _fix_glued_keywords(sql: str) -> str:
+    """Insert whitespace when the model glues ``END`` to a following keyword.
+
+    The SQL-generation model sometimes emits ``CASE ... ENDORDER BY ...`` with
+    no space before ``ORDER BY`` (and similar for ``GROUP BY``, ``WHERE``,
+    ``HAVING``, ``LIMIT``). Teiid tokenizes that as a single unknown identifier,
+    producing ``TEIID31100``. This is a pure formatting repair.
+    """
+    _GLUED_KEYWORD_RE = re.compile(
+        r"\bEND(ORDER\s+BY|GROUP\s+BY|WHERE|HAVING|LIMIT)\b", re.IGNORECASE
+    )
+    return _GLUED_KEYWORD_RE.sub(lambda m: f"END {m.group(1)}", sql)
 
 
 def _strip_output_alias(select_item: str) -> tuple[str, str | None]:

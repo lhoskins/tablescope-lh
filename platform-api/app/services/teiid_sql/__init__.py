@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .identifiers import _AGGREGATE_NAMES as _AGGREGATE_NAMES
 from .identifiers import _TEIID_RESERVED_ALIASES as _TEIID_RESERVED_ALIASES
+from .identifiers import _fix_glued_keywords as _fix_glued_keywords
 from .identifiers import _is_aggregate_expression as _is_aggregate_expression
 from .identifiers import _next_clause_position as _next_clause_position
 from .identifiers import _strip_output_alias as _strip_output_alias
