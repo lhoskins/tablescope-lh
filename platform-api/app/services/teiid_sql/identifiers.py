@@ -312,6 +312,53 @@ def _next_clause_position(sql: str, after: int) -> int | None:
     return min(positions) if positions else None
 
 
+_TRAILING_CLAUSE_KEYWORDS = ("WHERE", r"GROUP\s+BY", "HAVING", r"ORDER\s+BY", "LIMIT", "OFFSET")
+
+
+def add_missing_from_clause(sql: str, table_schema: list[dict[str, Any]]) -> str:
+    """Insert a ``FROM`` clause when the generated SELECT omits one entirely.
+
+    Live finding: a "backup failure rate" query came back from the SQL
+    generator -- and, after two repair-agent rounds against the exact
+    TEIID30492 error, still came back -- as a bare aggregate SELECT with no
+    FROM clause at all: ``SELECT SUM(CASE WHEN ... END), COUNT(*)`` (no
+    ``FROM``), which Teiid rejects as "Aggregate functions are only allowed
+    HAVING/SELECT/ORDER BY clauses ... require a FROM clause to be present."
+    Nothing upstream of this reliably added it back, so it needs the same
+    deterministic-repair treatment as the other common model mistakes here.
+
+    Only applied when exactly one table is in scope: with more than one
+    candidate table, guessing which one belongs in FROM risks silently
+    returning the wrong table's data instead of surfacing an error the
+    repair agent (or the user) can act on.
+    """
+    if not sql:
+        return sql
+    tables = [str(entry["table"]) for entry in table_schema if entry.get("table")]
+    if len(tables) != 1:
+        return sql
+
+    select_kw = re.search(r"\bSELECT\b", sql, re.IGNORECASE)
+    if not select_kw:
+        return sql
+    if _top_level_keyword_index(sql, select_kw.end(), "FROM") is not None:
+        return sql  # FROM already present
+
+    stripped = sql.rstrip()
+    if stripped.endswith(";"):
+        stripped = stripped[:-1].rstrip()
+    insert_at = len(stripped)
+    for keyword in _TRAILING_CLAUSE_KEYWORDS:
+        idx = _top_level_keyword_index(sql, select_kw.end(), keyword)
+        if idx is not None and idx < insert_at:
+            insert_at = idx
+
+    prefix = sql[:insert_at].rstrip()
+    suffix = sql[insert_at:].strip()
+    from_clause = f'FROM "{tables[0]}"'
+    return f"{prefix} {from_clause} {suffix}".rstrip() if suffix else f"{prefix} {from_clause}"
+
+
 def rebuild_group_by_from_select(sql: str) -> str:
     """Rebuild the ``GROUP BY`` clause from the non-aggregate ``SELECT`` items.
 

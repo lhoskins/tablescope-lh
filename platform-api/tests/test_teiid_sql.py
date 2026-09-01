@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.services.teiid_sql import (
+    add_missing_from_clause,
     date_mask_for_value,
     date_masks_from_samples,
     normalize_date_casts,
@@ -229,6 +230,54 @@ def test_normalize_and_rebuild_group_by_together_fix_the_live_incident() -> None
     fixed = rebuild_group_by_from_select(fixed)
     assert 'PARSETIMESTAMP(MyCompany.it_backup_jobs_CSV."Date", \'yyyy-MM-dd\') >=' in fixed
     assert 'GROUP BY MyCompany.it_backup_jobs_CSV."System"' in fixed
+
+
+def test_add_missing_from_clause_inserts_from_for_single_table() -> None:
+    """Live reproduction: a "backup failure rate" query came back from both
+    the SQL generator and two repair-agent rounds with no FROM clause at
+    all -- TEIID30492 "Aggregate functions are only allowed HAVING/SELECT/
+    ORDER BY clauses ... require a FROM clause to be present."."""
+    sql = (
+        "SELECT SUM(CASE WHEN LOWER(Result) = LOWER('failed') THEN 1 ELSE 0 END), "
+        "COUNT(*)"
+    )
+    table_schema = [{"table": "it_backup_jobs_CSV", "columns": ["Result"]}]
+    fixed = add_missing_from_clause(sql, table_schema)
+    assert 'FROM "it_backup_jobs_CSV"' in fixed
+
+
+def test_add_missing_from_clause_inserts_before_trailing_clauses() -> None:
+    sql = 'SELECT COUNT(*) GROUP BY "Result" ORDER BY "Result"'
+    table_schema = [{"table": "it_backup_jobs_CSV", "columns": []}]
+    fixed = add_missing_from_clause(sql, table_schema)
+    assert (
+        fixed
+        == 'SELECT COUNT(*) FROM "it_backup_jobs_CSV" GROUP BY "Result" ORDER BY "Result"'
+    )
+
+
+def test_add_missing_from_clause_leaves_existing_from_unchanged() -> None:
+    sql = 'SELECT COUNT(*) FROM "it_backup_jobs_CSV"'
+    table_schema = [{"table": "it_backup_jobs_CSV", "columns": []}]
+    assert add_missing_from_clause(sql, table_schema) == sql
+
+
+def test_add_missing_from_clause_does_not_guess_with_multiple_tables() -> None:
+    sql = "SELECT COUNT(*)"
+    table_schema = [{"table": "a_CSV"}, {"table": "b_CSV"}]
+    assert add_missing_from_clause(sql, table_schema) == sql
+
+
+def test_add_missing_from_clause_ignores_extract_from_inside_select() -> None:
+    # EXTRACT(QUARTER FROM "Month") has its own FROM keyword nested inside a
+    # function call -- must not be mistaken for the query's real FROM clause
+    # (the same failure shape _top_level_keyword_index's own docstring warns
+    # rebuild_group_by_from_select against).
+    sql = 'SELECT EXTRACT(QUARTER FROM "Month"), COUNT(*)'
+    table_schema = [{"table": "it_backup_jobs_CSV", "columns": ["Month"]}]
+    fixed = add_missing_from_clause(sql, table_schema)
+    assert 'FROM "it_backup_jobs_CSV"' in fixed
+    assert fixed.count("FROM") == 2  # the EXTRACT's own FROM, plus the added one
 
 
 def test_date_mask_for_value() -> None:
