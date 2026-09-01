@@ -186,7 +186,7 @@ async def project_insight(req: ProjectInsightRequest) -> ProjectInsightResponse:
         temperature=0.2,
         num_ctx=24576,
         response_format="json",
-        ollama_url=req.ollama_url,
+        llm_target_url=req.llm_target_url,
     )
 
     parsed = _parse_json_response(raw) or {}

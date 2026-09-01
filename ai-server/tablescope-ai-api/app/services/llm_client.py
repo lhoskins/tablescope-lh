@@ -1,8 +1,13 @@
-"""Ollama LLM client with model routing.
+"""LLM client with model routing, targeting either Ollama or a vLLM/
+OpenAI-compatible server (``_is_openai_target`` picks the wire protocol
+from the target URL's shape). Text generation/reasoning currently route to
+Glimmer via vLLM through platform-api's LLM Framework; only embeddings and
+the health check are hard-wired to a real Ollama instance (see
+``generate_embeddings``/``check_health`` and their own docstrings).
 
-- SQL generation → qwen2.5-coder:7b
-- Reasoning/explanation → llama3.1:8b
-- Embeddings → nomic-embed-text
+- SQL generation → routed model (currently Glimmer via vLLM)
+- Reasoning/explanation → routed model (currently Glimmer via vLLM)
+- Embeddings → nomic-embed-text (always Ollama; see ``generate_embeddings``)
 
 The LLM only sees the context package built by the context_builder.
 It never has direct access to files, databases, or vector collections.
@@ -177,7 +182,7 @@ async def generate(
     prompt: str,
     system_prompt: str = "",
     model: str | None = None,
-    ollama_url: str | None = None,
+    llm_target_url: str | None = None,
     temperature: float = 0.1,
     max_tokens: int | None = None,
     min_tokens: int | None = None,
@@ -192,7 +197,7 @@ async def generate(
     response is parsed as JSON.
     """
     model = model or settings.reasoning_model
-    target_url = (ollama_url or settings.ollama_url).rstrip("/")
+    target_url = (llm_target_url or settings.ollama_url).rstrip("/")
 
     if _is_openai_target(target_url):
         # vLLM/OpenAI-compatible targets have no per-request context-window
@@ -427,7 +432,7 @@ async def generate_sql(
     relevant_columns: list[str] | None = None,
     relationship_hint_lines: str = "",
     model: str | None = None,
-    ollama_url: str | None = None,
+    llm_target_url: str | None = None,
 ) -> str:
     """Generate SQL using the code-specialized model with semantic discovery."""
     catalog = _catalog_text(allowed_tables, source_catalog)
@@ -465,7 +470,7 @@ async def generate_sql(
         prompt=prompt,
         system_prompt=system_prompt,
         model=model or settings.sql_model,
-        ollama_url=ollama_url,
+        llm_target_url=llm_target_url,
         temperature=0.0,
         # Confirmed live: a reasoning model can spend the whole 1024-token
         # budget on its reasoning trace before ever reaching the SQL answer
@@ -481,7 +486,7 @@ async def generate_sql(
         # completion itself from the prompt it just tokenized; Ollama has no
         # equivalent per-request sizing, so it keeps an explicit cap.
         max_tokens=None if _is_openai_target(
-            (ollama_url or settings.ollama_url).rstrip("/")
+            (llm_target_url or settings.ollama_url).rstrip("/")
         ) else 1024,
         min_tokens=_SQL_MIN_TOKENS,
         stop=[";"],
@@ -499,7 +504,7 @@ async def repair_sql(
     relevant_columns: list[str] | None = None,
     relationship_hint_lines: str = "",
     model: str | None = None,
-    ollama_url: str | None = None,
+    llm_target_url: str | None = None,
 ) -> str:
     """Ask the model to fix SQL that failed validation, preserving intent."""
     catalog = _catalog_text(allowed_tables, source_catalog)
@@ -541,12 +546,12 @@ async def repair_sql(
         prompt=repair_prompt,
         system_prompt=system_prompt,
         model=model or settings.sql_model,
-        ollama_url=ollama_url,
+        llm_target_url=llm_target_url,
         temperature=0.0,
         # See generate_sql's matching comment: unset on vLLM/OpenAI-compatible
         # targets to avoid overflowing max_model_len, capped on Ollama.
         max_tokens=None if _is_openai_target(
-            (ollama_url or settings.ollama_url).rstrip("/")
+            (llm_target_url or settings.ollama_url).rstrip("/")
         ) else 1024,
         min_tokens=_SQL_MIN_TOKENS,
         stop=[";"],

@@ -66,7 +66,7 @@ async def analyze_scopes(req: AnalyzeScopesRequest) -> AnalyzeScopesResponse:
         system_prompt="You are a data analyst that identifies drill-down relationships between SQL queries. Return only valid JSON.",
         model=req.model or settings.reasoning_model,
         temperature=0.0,
-        ollama_url=req.ollama_url,
+        llm_target_url=req.llm_target_url,
     )
 
     # Parse scopes from LLM response

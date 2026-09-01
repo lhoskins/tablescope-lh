@@ -35,7 +35,7 @@ async def analyze_file(req: AnalyzeFileRequest):
         ),
         model=req.model or settings.reasoning_model,
         temperature=0.1,
-        ollama_url=req.ollama_url,
+        llm_target_url=req.llm_target_url,
     )
 
     # Parse JSON from LLM response

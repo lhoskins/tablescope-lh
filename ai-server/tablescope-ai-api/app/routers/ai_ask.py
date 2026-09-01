@@ -259,7 +259,7 @@ async def ask(req: AskRequest) -> AskResponse:
         prompt=prompt,
         system_prompt=answer_system_prompt,
         model=req.model or settings.reasoning_model,
-        ollama_url=req.ollama_url,
+        llm_target_url=req.llm_target_url,
         max_tokens=answer_max_tokens,
         stop=answer_stop,
     )

@@ -66,7 +66,7 @@ async def _forward_to_ai(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     if capability:
         routing = await resolve_active_routing_for_capability(capability)
         payload["model"] = routing.model
-        payload["ollama_url"] = routing.ollama_url
+        payload["llm_target_url"] = routing.llm_target_url
         payload["routing_version"] = routing.version
         payload["capability"] = capability
 

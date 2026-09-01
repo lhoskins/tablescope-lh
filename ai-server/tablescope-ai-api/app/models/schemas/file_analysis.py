@@ -11,7 +11,7 @@ class AnalyzeFileRequest(BaseModel):
     signature: str = ""
     # Optional routing overrides from the LLM Framework.
     model: str | None = None
-    ollama_url: str | None = None
+    llm_target_url: str | None = None
 
 
 class AnalyzeFileResponse(BaseModel):

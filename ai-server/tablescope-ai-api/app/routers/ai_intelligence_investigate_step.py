@@ -126,7 +126,7 @@ async def intelligence_investigate_step(
         temperature=0.2,
         num_ctx=8192,
         response_format="json",
-        ollama_url=req.ollama_url,
+        llm_target_url=req.llm_target_url,
     )
 
     decision = _parse_json_response(raw or "") or {}

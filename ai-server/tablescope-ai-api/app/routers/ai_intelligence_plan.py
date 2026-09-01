@@ -535,7 +535,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         max_tokens=2048,
         num_ctx=settings.vllm_max_model_len,
         response_format="json",
-        ollama_url=req.ollama_url,
+        llm_target_url=req.llm_target_url,
     )
 
     parsed = _parse_json_response(raw)
