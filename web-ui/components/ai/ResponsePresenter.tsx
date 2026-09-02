@@ -4,6 +4,7 @@ import { useState } from "react";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { ResultChart, ResultTable } from "@/components/ai/ai-result-view";
 import { DashboardWidgetCard } from "@/components/ai/DashboardWidgetCard";
+import { renderInlineMarkdown } from "@/components/ai/inline-markdown";
 import type { ResponseEnvelope } from "@/lib/api/ai-actions";
 import type { DashboardWidgetSuggestion } from "@/lib/api/home-intelligence";
 
@@ -57,7 +58,7 @@ function Prose({ text, muted }: { text: string; muted?: boolean }) {
           : "whitespace-pre-wrap text-[13px] leading-relaxed text-ink-primary"
       }
     >
-      {text}
+      {renderInlineMarkdown(text)}
     </p>
   );
 }
@@ -72,7 +73,7 @@ function BulletList({ title, items }: { title: string; items: unknown[] }) {
       </div>
       <ul className="list-disc space-y-0.5 pl-5 text-[13px] text-ink-primary">
         {rendered.map((line, i) => (
-          <li key={i}>{line}</li>
+          <li key={i}>{renderInlineMarkdown(line)}</li>
         ))}
       </ul>
     </div>

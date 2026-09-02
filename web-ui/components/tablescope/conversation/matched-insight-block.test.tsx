@@ -43,4 +43,18 @@ describe("MatchedInsightBlock", () => {
     render(<MatchedInsightBlock match={{ ...baseMatch, chart: null }} />);
     expect(screen.queryByTestId("widget")).not.toBeInTheDocument();
   });
+
+  it("renders **bold** markdown in the summary as real emphasis, not literal asterisks", () => {
+    render(
+      <MatchedInsightBlock
+        match={{
+          ...baseMatch,
+          summary: "**WC-004** leads with **$506,713.68** total scrap cost.",
+        }}
+      />,
+    );
+    expect(screen.queryByText(/\*\*/)).not.toBeInTheDocument();
+    const strong = screen.getByText("WC-004", { selector: "strong" });
+    expect(strong).toBeInTheDocument();
+  });
 });

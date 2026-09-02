@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { IconArrowUpRight, IconTargetArrow } from "@tabler/icons-react";
+import { renderInlineMarkdown } from "@/components/ai/inline-markdown";
 import { InsightChartView } from "@/components/tablescope/home/intelligence-card/insight-chart-view";
 import type { MatchedInsight } from "@/lib/api/conversational-analytics";
 
@@ -26,11 +27,13 @@ function DiagnosticStep({
         <p className="text-[12px] text-ink-tertiary">{diagnostic.question}</p>
       ) : null}
       {diagnostic.finding ? (
-        <p className="text-[13px] text-ink-secondary">{diagnostic.finding}</p>
+        <p className="text-[13px] text-ink-secondary">
+          {renderInlineMarkdown(diagnostic.finding)}
+        </p>
       ) : null}
       {diagnostic.highlight ? (
         <p className="text-[13px] font-semibold text-ink-primary">
-          {diagnostic.highlight}
+          {renderInlineMarkdown(diagnostic.highlight)}
         </p>
       ) : null}
     </li>
@@ -50,7 +53,9 @@ function ProposedActionItem({
         aria-hidden
       />
       <span>
-        <span className="font-medium text-ink-primary">{action.headline}</span>
+        <span className="font-medium text-ink-primary">
+          {renderInlineMarkdown(action.headline)}
+        </span>
         {ACTION_KIND_LABELS[action.kind] ? (
           <span className="ml-1 rounded bg-bg-tertiary px-1.5 py-0.5 text-[11px] font-medium text-ink-tertiary">
             {ACTION_KIND_LABELS[action.kind]}
@@ -93,7 +98,9 @@ function InsightCard({ match }: { match: MatchedInsight }) {
       </div>
 
       {match.summary ? (
-        <p className="mt-2 text-[13px] text-ink-secondary">{match.summary}</p>
+        <p className="mt-2 text-[13px] text-ink-secondary">
+          {renderInlineMarkdown(match.summary)}
+        </p>
       ) : null}
 
       {match.chart && (

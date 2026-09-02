@@ -27,6 +27,40 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _format_row_value(value: Any) -> str:
+    """Render a row value for the LLM prompt, rounding excess float precision.
+
+    Live finding: a "backup failure rate" answer read "Network has the
+    highest average resolution time at 44.42777777777778 hours" -- the model
+    copied a Teiid-computed aggregate's raw float precision verbatim from
+    this prompt's row dump, even though it rounded the same value fine
+    elsewhere in the same sentence ("44.43 hours"). Rounding it here, before
+    the model ever sees the excess precision, is more reliable than only
+    instructing the model to round (see the prompt text below, and
+    _round_long_decimals as a deterministic backstop on the returned answer).
+    """
+    if isinstance(value, float):
+        return f"{value:.2f}"
+    return str(value)
+
+
+_LONG_DECIMAL_RE = re.compile(r"\b\d+\.\d{3,}\b")
+
+
+def _round_long_decimals(text: str) -> str:
+    """Deterministic backstop: round any number with 3+ decimal digits to 2.
+
+    Rounding the source row values (_format_row_value) closes the common
+    case, but the model can still compute and state a number of its own
+    (e.g. a ratio it derives inline) at full float precision -- this catches
+    that regardless of where the number came from.
+    """
+    def _round(match: re.Match[str]) -> str:
+        return f"{float(match.group(0)):.2f}"
+
+    return _LONG_DECIMAL_RE.sub(_round, text)
+
+
 def _fit_context(text: str, max_model_len: int = 8192, max_tokens: int = 512) -> str:
     """Truncate context so prompt + max_tokens stays under vLLM max_model_len."""
     # Approx 3.5 chars per token; reserve tokens for system prompt, question,
@@ -82,7 +116,7 @@ def _format_investigation_steps(question: str, steps: list[dict[str, Any]]) -> s
         lines.append(f"  Row count: {row_count}")
         for row in (step.get("sample_rows") or [])[:5]:
             if isinstance(row, dict):
-                lines.append("  - " + ", ".join(f"{k}={v}" for k, v in row.items()))
+                lines.append("  - " + ", ".join(f"{k}={_format_row_value(v)}" for k, v in row.items()))
             else:
                 lines.append(f"  - {row}")
     return "\n".join(lines)
@@ -114,7 +148,7 @@ def _format_data_result(question: str, data: dict[str, Any]) -> str:
         for row in rows[:20]:
             if isinstance(row, dict):
                 lines.append(
-                    "  - " + ", ".join(f"{k}={v}" for k, v in row.items())
+                    "  - " + ", ".join(f"{k}={_format_row_value(v)}" for k, v in row.items())
                 )
             else:
                 lines.append(f"  - {row}")
@@ -229,7 +263,8 @@ async def ask(req: AskRequest) -> AskResponse:
             f"{grounded_block}\n\n"
             f"User question: {req.question}\n\n"
             "Answer the question in one or two sentences using the live result "
-            "above. Cite specific numbers. Do not show reasoning or SQL."
+            "above. Cite specific numbers, rounded to at most two decimal "
+            "places. Do not show reasoning or SQL."
         )
         answer_system_prompt = (
             "You are a concise data assistant. Answer using only the provided result. "
@@ -266,6 +301,10 @@ async def ask(req: AskRequest) -> AskResponse:
 
     # Some models emit a "to=self" artifact or leading whitespace; strip it.
     answer = re.sub(r"^(to=self\s*)+", "", answer).strip()
+    # Backstop for a number the model computed/copied at full float
+    # precision despite the prompt's rounding instruction and pre-rounded
+    # row values above -- see _round_long_decimals's own docstring.
+    answer = _round_long_decimals(answer)
 
     # 4. Update activity
     update_activity(req.user_id, req.tenant_id, req.project_id)
