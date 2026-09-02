@@ -542,11 +542,20 @@ async def execute_turn(
 
     # New analysis or query-changing follow-up
     # Re-resolve the project every turn for cross-project surfaces (Business
-    # Insight / AI Assistant) so a follow-up can switch projects and a question
-    # like "Show me IT backup jobs" routes to the IT project even if the
-    # conversation was previously pinned to Manufacturing. Project Insights is
-    # page-scoped, so its project never changes mid-conversation.
-    is_project_scoped = conversation.surface == "project_insights"
+    # Insight / the untethered "ai_assistant" surface) so a follow-up can
+    # switch projects and a question like "Show me IT backup jobs" routes to
+    # the IT project even if the conversation was previously pinned to
+    # Manufacturing. Project Insights AND Project Workspace ("Workspace —
+    # <project>", opened from inside a specific project) are both page-scoped
+    # -- canonical_conversations.canonical_scope_key() requires a project_id
+    # for both and keys them per-project, exactly like project_insights -- so
+    # neither should ever have its project silently swapped mid-conversation.
+    # Live incident: a project_workspace conversation titled "Workspace —
+    # Sales" answered "Show my top performers" from an unrelated project's
+    # data entirely (a movies dataset) because this check excluded
+    # project_workspace and let the semantic resolver below override it with
+    # no anchor at all on the conversation's first turn.
+    is_project_scoped = conversation.surface in ("project_insights", "project_workspace")
     project_id = conversation.project_id
     resolved_project_id: int | None = None
     if not is_project_scoped:
@@ -803,7 +812,7 @@ async def execute_turn(
             tenant_id=context.tenant_id,
             project_id=project_id,
             question=question,
-            allow_cross_project=conversation.surface != "project_insights",
+            allow_cross_project=not is_project_scoped,
             max_cards=2,
             use_llm=False,
         )

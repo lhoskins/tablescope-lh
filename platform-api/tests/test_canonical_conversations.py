@@ -345,6 +345,125 @@ async def test_project_workspace_appends_to_one_conversation_per_project(client,
     assert body2["turn"]["sequence"] == 2
 
 
+async def test_project_workspace_never_re_resolves_to_another_project(
+    client, service_headers, monkeypatch
+):
+    """Live incident: a project_workspace conversation titled "Workspace —
+    Sales" answered "Show my top performers" from an unrelated project's data
+    (a movies dataset) because the per-turn cross-project resolver was being
+    consulted for this surface at all. project_workspace's own
+    canonical_scope_key() requires and keys on a project_id exactly like
+    project_insights -- the resolver must never even run for it, regardless
+    of how confidently it would point elsewhere."""
+    _, _, project, headers = await _setup(client, service_headers, "pw-no-resolve")
+
+    other_r = await client.post(
+        "/api/projects",
+        json={"name": "Other Project", "description": "x", "is_shared": False},
+        headers=headers,
+    )
+    assert other_r.status_code == 201
+    other_project = other_r.json()
+
+    calls: list[str] = []
+
+    async def _fake_resolver(*args, **kwargs):
+        calls.append("called")
+        from app.services.business_insight_project_resolver import ProjectResolveResult
+
+        return ProjectResolveResult(
+            status="resolved",
+            project_id=other_project["id"],
+            project_name="Other Project",
+            confidence=0.99,
+            reason="eager wrong guess",
+        )
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics.resolve_business_insight_project",
+        _fake_resolver,
+    )
+
+    r = await client.post(
+        "/api/conversational-analytics/canonical-turns",
+        json={
+            "surface": "project_workspace",
+            "project_id": project["id"],
+            "message": "Show my top performers",
+            "client_request_id": "req-1",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # Must stay pinned to the project this workspace conversation belongs to
+    # -- never silently swapped to the resolver's (wrong) guess.
+    assert body["project_id"] == project["id"]
+    assert calls == []
+
+
+async def test_project_workspace_never_widens_insight_cards_to_another_project(
+    client, service_headers, monkeypatch
+):
+    """Same guarantee as test_project_insights_never_widens_to_another_project,
+    for project_workspace -- "Workspace — Sales" must never even look at
+    another project's (e.g. IT's) cached Insight Cards as candidates, even
+    though AI Assistant and Business Insights would happily widen the
+    search.
+
+    Spies on `_cards_for_projects` (the function `allow_cross_project`
+    actually gates a second call to) rather than the LLM selector: the real
+    call site passes `use_llm=False`, so the LLM path this file's sibling
+    project_insights test mocks is never reached regardless of widening.
+    Also deliberately does NOT mock `_ask_and_run_core` into a
+    "generation_error" the way that sibling test does -- `execute_turn`
+    returns early on any non-"success" status (before ever reaching the
+    insight-matching block at all), which would make an assertion here pass
+    vacuously the same way the LLM-mock one did. The autouse `_fake_ask`'s
+    successful "month"/"amount"/"sales" result has zero term overlap with
+    this question, which is what actually drops the live-result score below
+    the 0.95 threshold that gates whether insight-card matching runs.
+    """
+    _, _, project, headers = await _setup(client, service_headers, "pw-no-widen")
+
+    other_r = await client.post(
+        "/api/projects",
+        json={"name": "Other Project", "description": "x", "is_shared": False},
+        headers=headers,
+    )
+    assert other_r.status_code == 201
+    other_project = other_r.json()
+
+    from app.services import insight_card_match as icm
+
+    calls: list[list[int]] = []
+    real_cards_for_projects = icm._cards_for_projects
+
+    async def _spy_cards_for_projects(session, *, tenant_id, project_ids, user_id=None):
+        calls.append(list(project_ids))
+        return await real_cards_for_projects(
+            session, tenant_id=tenant_id, project_ids=project_ids, user_id=user_id
+        )
+
+    monkeypatch.setattr(icm, "_cards_for_projects", _spy_cards_for_projects)
+
+    r = await client.post(
+        "/api/conversational-analytics/canonical-turns",
+        json={
+            "surface": "project_workspace",
+            "project_id": project["id"],
+            "message": "Show my top performers",
+            "client_request_id": "req-1",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    # Candidate gathering must only ever be called for this workspace's own
+    # project -- never for `other_project`, which is what widening would do.
+    assert calls == [[project["id"]]]
+    assert other_project["id"] not in [pid for call in calls for pid in call]
+
+
 async def test_project_workspace_grounds_on_active_table(
     client, db_session, service_headers, monkeypatch
 ):
