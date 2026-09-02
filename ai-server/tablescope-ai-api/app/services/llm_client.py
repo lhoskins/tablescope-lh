@@ -360,6 +360,14 @@ _SEMANTIC_RULES = (
     "range covers less time than the requested window, do NOT add a filter "
     "that would exclude all the rows the profile shows exist — query the "
     "data as it is instead of a filter guessed from wall-clock time.\n"
+    "- When a source below has NO 'profile' line, its real date range is "
+    "unknown to you — you have no way to check it against a relative "
+    "filter. Do NOT apply a relative/wall-clock date filter ('last 30 "
+    "days', 'this quarter', 'year over year', etc.) in that case: query the "
+    "source's full date range (omit the date filter) unless the user's "
+    "request names an explicit date or range themselves. A wrong guess "
+    "here doesn't error — it silently returns zero rows instead of an "
+    "answer, which is worse than not filtering at all.\n"
 )
 
 
