@@ -1,6 +1,5 @@
 "use client";
 
-
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -27,16 +26,16 @@ import type {
 
 import {
   homeNavGroups,
+  projectNavGroups,
   canViewSettings,
   type NavItem,
-} from "./nav";import { COLLAPSE_STORAGE_KEY } from "./sidebar/collapse-storage-key";
+} from "./nav";
+import { COLLAPSE_STORAGE_KEY } from "./sidebar/collapse-storage-key";
 import { SidebarProps } from "./sidebar/sidebar-props";
 import { NavGroupBlock } from "./sidebar/nav-group-block";
 import { NavRow } from "./sidebar/nav-row";
 import { AccountMenu } from "./sidebar/account-menu";
 import { ProjectsTree } from "./sidebar/projects-tree";
-
-
 
 export function Sidebar({
   mode,
@@ -139,7 +138,9 @@ export function Sidebar({
             aria-label="Tablescope home"
             className="flex min-w-0 flex-1 items-center gap-2 transition-opacity hover:opacity-80"
           >
-            <span className="truncate text-h2 font-bold text-ink-primary">Tablescope</span>
+            <span className="truncate text-h2 font-bold text-ink-primary">
+              Tablescope
+            </span>
           </Link>
           <button
             type="button"
@@ -229,6 +230,17 @@ export function Sidebar({
         {mode === "home" && adminManagementItems.length > 0 && (
           <NavGroupBlock
             group={{ heading: "Administration", items: adminManagementItems }}
+            activeNav={activeNav}
+            collapsed={collapsed}
+          />
+        )}
+
+        {mode === "project" && project && (
+          <NavGroupBlock
+            // Just "Tools" (Data Source Builder) -- the rest of
+            // projectNavGroups duplicates the top nav grid and is
+            // intentionally not re-added here.
+            group={projectNavGroups(project.id)[1]}
             activeNav={activeNav}
             collapsed={collapsed}
           />
