@@ -1,10 +1,10 @@
-# Devin: merge + deploy — combo chart axis fix + restore conversation timestamps
+# Devin: merge + deploy — combo chart axis fix, conversation timestamps, literal ** bold rendering
 
 **Repository:** `lhoskins/tablescope-lh`
 **Branch to merge:** `fix-combo-chart-axis-and-turn-timestamps`
 **Base:** `UX-design-03`, plus a merge of `codex/ai-conversation-timestamps` (see §2b — this branch was never merged into `UX-design-03`, which is very likely *why* the timestamp feature regressed)
 
-**2 commits (1 fix + 1 merge) · `platform-api/` + `web-ui/` · no migration · all tests green**
+**4 commits (1 fix + 1 merge + 1 doc + 1 follow-up fix) · `platform-api/` + `web-ui/` · no migration · all tests green**
 
 ---
 
@@ -59,15 +59,56 @@ This was already built, tested, and (per your own report) deployed once — on b
 - **`conversation-row.tsx`**: the sidebar conversation-list entries show a "Last updated {relative time}" tooltip via `conversation.updated_at`, restoring the **conversation-level** timestamp half of the report.
 - **`page.tsx`**: wires an optimistic pending turn's `created_at` through so the user's own message gets a timestamp immediately, not only after the AI responds.
 
+### 2c. Follow-up: the right-side collapsible "Workspace" AI Assistant panel had none either
+
+After the above merge, you reported timestamps working on the main `/ai` page but still missing on the **right-side collapsible AI Assistant** panel (opened from inside a project — "Workspace — `<project>`", `workspace-assistant-panel.tsx`). That panel renders through `TurnBubble` in `components/tablescope/conversation/conversation-turn.tsx` — a **separate** component from `UserBubble`/`turn-bubbles.tsx`, which is why the earlier merge didn't reach it.
+
+Wired in the same `MessageTimestamp` component (imported directly — `components/` importing from `app/ai/` already has precedent elsewhere in this codebase, e.g. `workspace-tab-bar.tsx`, `project-chats-screen.tsx`): `Sent`/`Answered` labels, hover-only, `turn.created_at` for the user bubble and `turn.updated_at` (`null` while `status === "pending"`) for the assistant bubble — identical behavior to the main page.
+
+**Tests** (`conversation-turn.test.tsx`, +2 tests, mirroring `turn-bubbles.test.tsx`'s existing pattern): both bubbles render a hover-only timestamp; no AI-answer timestamp while the turn is still pending.
+
+---
+
+## 3'. Literal `**` on the Home page and Business Insight page
+
+**Report:** the Home page's Executive Brief ("Revenue is heavily concentrated... **Ironclad Industrial** leads with **$34,840,581.67**...") and the Business Insight page's "Priority insights" cards ("Open actions rose from **16.0** in **2026-02**...") showed literal asterisks instead of bold text. You noted: if `**` is markdown for bold, provision it as bold rather than stripping it.
+
+**Root cause:** the codebase already has a purpose-built utility for exactly this — `renderBold` (`components/tablescope/home/intelligence-card/render-bold.tsx`): renders valid `**pairs**` as `<strong>`, and strips any stray unpaired `**` via a sibling `stripStars` helper rather than leaving it visible. It's already correctly wired into the shared `<IntelligenceCard>` component (title, summary, callout — used across most of the app's insight surfaces). The gap was narrower than it first looked:
+
+- **Business Insight's "Priority insights" preview cards** (the Overview tab's 3-card grid) build their own inline markup instead of reusing `<IntelligenceCard>`, and the one line rendering `item.card.summary` simply never called `renderBold`.
+- **The Home page's four LLM-authored summary spots** (Executive Brief body, Key developments list, Risk preview, Opportunity preview) had never used `renderBold` at all — an earlier, less-complete pass of mine had wired in a separate chat-oriented helper (`components/ai/inline-markdown.tsx`, built for the chat/insight-card-block family) before I found the more complete, already-established `renderBold`. Switched all four to `renderBold` for consistency with the rest of this page family (it also strips a stray unpaired `**`, which the chat helper doesn't).
+
+**Fix:**
+```diff
+  // business-intelligence-workspace.tsx — Priority insights card
+  <span className="mt-2 line-clamp-3 text-body text-ink-secondary">
+-   {item.card.summary}
++   {renderBold(item.card.summary)}
+  </span>
+```
+```diff
+  // personalized-home.tsx — 4 call sites switched from the chat helper to renderBold
+- import { renderInlineMarkdown } from "@/components/ai/inline-markdown";
++ import { renderBold } from "@/components/tablescope/home/intelligence-card/render-bold";
+  ...
+- {renderInlineMarkdown(truncate(briefBody, 260))}
++ {renderBold(truncate(briefBody, 260))}
+  // (same swap for the Key developments, Risk, and Opportunity summaries)
+```
+
+**Tests:**
+- `render-bold.test.tsx` (new, 3 tests) — a dedicated unit test of the real `renderBold` implementation (it had none before): bold pairing, stray-`**` stripping, plain text passthrough.
+- `business-intelligence-workspace.test.tsx` (+1 test, verified to fail pre-fix and pass post-fix) — asserts `renderBold` is actually called for the Priority insights summary. Deliberately uses a **second** card (a trend, alongside a risk) for this assertion: a risk card always wins the Executive Brief slot too, so asserting against the risk's own summary text wouldn't have discriminated between "the Priority insights block calls `renderBold`" and "only the Executive Brief, which already worked, happens to call it" — an earlier draft of this test had exactly that flaw and passed even with the bug still present.
+
 ## 3. Verification
 
 | Suite | Result |
 |---|---|
-| platform-api `pytest` (full suite) | verify locally — see §4 below; targeted run (`test_conversation_turn_timestamps.py`, `test_canonical_conversations.py`, `test_conversational_analytics.py`, `test_chart_field_selection.py`) — 38 / 38 passed |
+| platform-api `pytest` (full suite) | 1653 passed, 7 failed (pre-existing/unrelated — `test_business_insight_phase1.py`, `test_percent_change_summary.py`, confirmed against the clean `UX-design-03` base earlier this session), 4 skipped (no live E2E endpoint) |
 | platform-api `ruff check` / `mypy` (touched files) | clean |
-| web-ui `vitest` (`app/ai`, `components/tablescope/conversation`) | 18 / 18 passed |
+| web-ui `vitest` (full suite) | 590 / 590 passed (97 files) |
 | web-ui `tsc --noEmit` (whole project) | clean, 0 errors |
-| web-ui `eslint` (touched files) | clean (1 pre-existing `max-lines` warning on `page.tsx`, not new, not an error) |
+| web-ui `eslint` (touched files) | clean (1 pre-existing `max-lines` warning, unrelated to the diff — `page.tsx` at 501 lines, `business-intelligence-workspace.tsx` at 501 lines after a 1-line net change) |
 
 ```bash
 cd platform-api
@@ -101,7 +142,10 @@ The branch is `fix-combo-chart-axis-and-turn-timestamps` — a plain `git revert
 - Combo chart: re-ask "Show me the incidents open vs resolve by month" (or any bar+line question) and confirm the bar and line show *different* numbers matching the data table, not the same value duplicated.
 - Timestamps: hover a chat message bubble (both the user's question and the AI's answer) and confirm a timestamp fades in; hover longer for the full-precision tooltip. Confirm the sidebar conversation list shows "Last updated ..." on hover too.
 - Confirm an in-flight (pending) question shows its own timestamp immediately, and the AI's answer timestamp appears once it completes (not before).
+- Confirm the **right-side collapsible AI Assistant panel** (opened from inside a project) also shows hover-only timestamps on both bubbles — not just the main `/ai` page.
+- Confirm the Home page's Executive Brief, Key developments, Risk preview, and Opportunity preview all render real bold text where the AI emphasized a figure or entity, with no literal `**` visible anywhere.
+- Confirm the Business Insight page's "Priority insights" cards (Overview tab) render bold text the same way — this was the actual reported gap.
 
 ## 6. Report back
 
-Confirmation both reported issues are resolved; and — since `codex/ai-conversation-timestamps` apparently reached production once without ever landing in `UX-design-03` — worth flagging to whoever manages the deploy pipeline: **is there a second deploy path that bypasses this integration branch?** If so, this exact class of regression (a feature deployed once, then silently dropped by the next `UX-design-03`-sourced deploy) will keep recurring for anything shipped that way until `UX-design-03` is the single source of truth for what's live.
+Confirmation all issues are resolved (combo chart, both timestamp surfaces, both bold-rendering surfaces); and — since `codex/ai-conversation-timestamps` apparently reached production once without ever landing in `UX-design-03` — worth flagging to whoever manages the deploy pipeline: **is there a second deploy path that bypasses this integration branch?** If so, this exact class of regression (a feature deployed once, then silently dropped by the next `UX-design-03`-sourced deploy) will keep recurring for anything shipped that way until `UX-design-03` is the single source of truth for what's live.
