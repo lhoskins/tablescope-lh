@@ -59,6 +59,10 @@ export interface ChatAttachmentSummary {
 export interface ConversationTurn {
   id: number;
   sequence: number;
+  /** Stored when the user's message turn was created. */
+  created_at?: string;
+  /** Stored when processing last updated, normally when the AI answer completed. */
+  updated_at?: string;
   user_message: string;
   intent_type: string | null;
   status: TurnStatus;

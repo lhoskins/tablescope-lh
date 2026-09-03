@@ -179,18 +179,17 @@ function AiAssistantPageInner() {
     });
 
   const sendMutation = useMutation({
-    mutationFn: async ({
-      question,
-      pid,
-      attachmentIds,
-    }: {
+    mutationFn: async (variables: {
       question: string;
       // Omitted when the user hasn't narrowed to a project — the backend
       // (resolve_business_insight_project) picks the best authorized project
       // from the question itself, the same resolver Business Insights uses.
       pid: number | undefined;
       attachmentIds: number[];
+      // Used only for the optimistic user bubble while the request is pending.
+      submittedAt: string;
     }): Promise<Conversation | { conversation_id: number }> => {
+      const { question, pid, attachmentIds } = variables;
       const signal = abortControllerRef.current?.signal;
       if (activeId == null) {
         const convo = await createConversation(
@@ -250,7 +249,12 @@ function AiAssistantPageInner() {
       // the backend resolves the project from the question.
       const pid = active?.project_id ?? projectId ?? undefined;
       abortControllerRef.current = new AbortController();
-      sendMutation.mutate({ question, pid, attachmentIds: attachments.map((a) => a.id) });
+      sendMutation.mutate({
+        question,
+        pid,
+        attachmentIds: attachments.map((a) => a.id),
+        submittedAt: new Date().toISOString(),
+      });
     },
     [active, projectId, busy, sendMutation],
   );
@@ -395,7 +399,10 @@ function AiAssistantPageInner() {
                   </div>
                 ))}
                 {pendingQuestion && (
-                  <UserBubble content={pendingQuestion} />
+                  <UserBubble
+                    content={pendingQuestion}
+                    timestamp={sendMutation.variables?.submittedAt}
+                  />
                 )}
                 {busy && (
                   <div className="flex items-start gap-3">

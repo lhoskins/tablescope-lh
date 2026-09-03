@@ -104,6 +104,8 @@ class ChatAttachmentSummary(BaseModel):
 class TurnResponse(BaseModel):
     id: int
     sequence: int
+    created_at: datetime
+    updated_at: datetime
     user_message: str
     intent_type: str | None
     status: str
@@ -196,6 +198,8 @@ def _turn_to_response(turn: AnalyticsConversationTurn) -> TurnResponse:
     return TurnResponse(
         id=turn.id,
         sequence=turn.sequence,
+        created_at=turn.created_at,
+        updated_at=turn.updated_at,
         user_message=turn.user_message,
         intent_type=turn.intent_type,
         status=turn.status,

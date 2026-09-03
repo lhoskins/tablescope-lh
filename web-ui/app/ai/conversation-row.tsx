@@ -1,41 +1,33 @@
 "use client";
 
-
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  IconArrowUp,
-  IconSparkles,
-  IconPlus,
-  IconTrash,
-  IconRefresh,
-  IconDots,
-  IconPencil,
-} from "@tabler/icons-react";
-import { AppShell } from "@/components/tablescope/app-shell";
-import { Button } from "@/components/ui/button";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { AutosizeTextarea } from "@/components/ui/autosize-textarea";
+import { useEffect, useState } from "react";
+import { IconDots, IconPencil, IconTrash } from "@tabler/icons-react";
 import { cn } from "@/lib/cn";
-import { getUserMeta } from "@/lib/auth";
-import { useCurrentUser, useProjectSummaries } from "@/lib/ui/use-shell-data";
-import {
-  createConversation,
-  listConversations,
-  getConversation,
-  submitTurn,
-  renameConversation,
-  deleteConversation,
-  type Conversation,
-  type ConversationSummary,
-  type ConversationTurn,
-} from "@/lib/api/conversational-analytics";
-import { ResultChart, ResultTable } from "@/components/ai/ai-result-view";
-import type { SuggestedVisualization } from "@/lib/api/ai-actions";
-import type { CurrentUser, TenantSummary } from "@/lib/ui/types";import { MenuItem } from "./menu-item";
+import type { ConversationSummary } from "@/lib/api/conversational-analytics";
+import { MenuItem } from "./menu-item";
 
+export interface ConversationTimestamp {
+  compact: string;
+  full: string;
+}
 
+export function formatConversationTimestamp(value: string): ConversationTimestamp | null {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  return {
+    compact: new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(date),
+    full: new Intl.DateTimeFormat(undefined, {
+      dateStyle: "full",
+      timeStyle: "long",
+    }).format(date),
+  };
+}
 
 export function ConversationRow({
   conversation,
@@ -53,6 +45,13 @@ export function ConversationRow({
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(conversation.title);
+  const [timestamp, setTimestamp] = useState<ConversationTimestamp | null>(null);
+
+  // Format after mount so the browser's locale and time zone are used without
+  // creating a server/client hydration mismatch.
+  useEffect(() => {
+    setTimestamp(formatConversationTimestamp(conversation.updated_at));
+  }, [conversation.updated_at]);
 
   const startRename = () => {
     setDraft(conversation.title);
@@ -65,6 +64,10 @@ export function ConversationRow({
     if (next && next !== conversation.title) onRename(next);
     setEditing(false);
   };
+
+  const tooltip = timestamp
+    ? `${conversation.title}\nLast updated ${timestamp.full}`
+    : conversation.title;
 
   return (
     <div
@@ -95,10 +98,28 @@ export function ConversationRow({
         <button
           type="button"
           onClick={onSelect}
-          className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap scrollbar-none text-left"
-          title={conversation.title}
+          className="min-w-0 flex-1 text-left"
+          title={tooltip}
+          aria-label={
+            timestamp
+              ? `${conversation.title}, last updated ${timestamp.full}`
+              : conversation.title
+          }
         >
-          {conversation.title}
+          <span className="block overflow-x-auto whitespace-nowrap scrollbar-none">
+            {conversation.title}
+          </span>
+          {timestamp && (
+            <span
+              className={cn(
+                "mt-0.5 block text-[11px] leading-4 text-ink-tertiary transition-opacity",
+                active ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+              )}
+              data-testid="conversation-timestamp"
+            >
+              {timestamp.compact}
+            </span>
+          )}
         </button>
       )}
       {!editing && (
