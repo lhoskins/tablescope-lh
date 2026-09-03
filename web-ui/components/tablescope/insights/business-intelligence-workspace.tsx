@@ -432,7 +432,7 @@ export function BusinessIntelligenceWorkspace({
                       {item.card.title}
                     </span>
                     <span className="mt-2 line-clamp-3 text-body text-ink-secondary">
-                      {item.card.summary}
+                      {renderBold(item.card.summary)}
                     </span>
                     <span className="mt-4 inline-flex items-center gap-1 text-small font-medium text-ink-primary">
                       Review insight <IconArrowRight size={14} />

@@ -16,6 +16,7 @@ import {
   IconTargetArrow,
 } from "@tabler/icons-react";
 import { buildMultiDimWidget } from "@/components/tablescope/home/intelligence-card/build-multi-dim-widget";
+import { renderBold } from "@/components/tablescope/home/intelligence-card/render-bold";
 import { autoValueScale } from "@/components/dashboard/EChartsWidget/format-number";
 import { Button } from "@/components/ui/button";
 import {
@@ -241,7 +242,7 @@ export function PersonalizedHome({
         </div>
         <h2 className="mt-2 max-w-5xl text-h2 text-ink-primary">{briefHeadline}</h2>
         <p className="mt-1.5 max-w-5xl text-body leading-relaxed text-ink-secondary">
-          {truncate(briefBody, 260)}
+          {renderBold(truncate(briefBody, 260))}
         </p>
         {topInsight ? (
           <Link
@@ -337,7 +338,7 @@ export function PersonalizedHome({
                         </span>
                       </span>
                       <span className="mt-0.5 block text-caption text-ink-tertiary">
-                        {development.projectName} · {truncate(development.summary, 105)}
+                        {development.projectName} · {renderBold(truncate(development.summary, 105))}
                       </span>
                     </span>
                   </Link>
@@ -367,7 +368,9 @@ export function PersonalizedHome({
             <strong className="text-h2 text-ink-primary">{risks.length}</strong>
           </div>
           <p className="mt-3 min-h-10 text-small leading-relaxed text-ink-tertiary">
-            {risks[0] ? truncate(risks[0].summary) : "No material AI risk signals are available for this view."}
+            {risks[0]
+              ? renderBold(truncate(risks[0].summary))
+              : "No material AI risk signals are available for this view."}
           </p>
           {risks[0] ? (
             <Link
@@ -388,7 +391,7 @@ export function PersonalizedHome({
           </div>
           <p className="mt-3 min-h-10 text-small leading-relaxed text-ink-tertiary">
             {opportunities[0]
-              ? truncate(opportunities[0].summary)
+              ? renderBold(truncate(opportunities[0].summary))
               : "No AI opportunity signals are available for this view."}
           </p>
           {opportunities[0] ? (

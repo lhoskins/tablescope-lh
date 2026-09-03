@@ -16,6 +16,8 @@ function turn(overrides: Partial<ConversationTurn> = {}): ConversationTurn {
   return {
     id: 1,
     sequence: 1,
+    created_at: "2026-08-31T05:31:45Z",
+    updated_at: "2026-08-31T05:32:10Z",
     user_message: "Why is material cost increasing?",
     intent_type: null,
     status: "success",
@@ -61,5 +63,26 @@ describe("TurnBubble (Business/Project Insights shared conversation UI)", () => 
   it("renders no matched-insight block when the turn has none", () => {
     render(<TurnBubble turn={turn()} />);
     expect(screen.queryByText(/explore full analysis/i)).not.toBeInTheDocument();
+  });
+
+  it("renders hover-only timestamps under both bubbles, matching the AI Assistant page", async () => {
+    render(<TurnBubble turn={turn()} />);
+
+    const timestamps = await screen.findAllByTestId("message-timestamp");
+    expect(timestamps).toHaveLength(2);
+    expect(timestamps[0]).toHaveAccessibleName(/Sent .*2026/i);
+    expect(timestamps[1]).toHaveAccessibleName(/Answered .*2026/i);
+    for (const timestamp of timestamps) {
+      expect(timestamp).toHaveClass("opacity-0");
+      expect(timestamp).toHaveClass("group-hover:opacity-100");
+    }
+  });
+
+  it("does not show an AI completion timestamp while the answer is pending", async () => {
+    render(<TurnBubble turn={turn({ status: "pending", assistant_message: null })} />);
+
+    const timestamps = await screen.findAllByTestId("message-timestamp");
+    expect(timestamps).toHaveLength(1);
+    expect(timestamps[0]).toHaveAccessibleName(/Sent .*2026/i);
   });
 });
