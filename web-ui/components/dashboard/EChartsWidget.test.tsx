@@ -80,6 +80,32 @@ describe("EChartsWidget", () => {
     }
   });
 
+  it("renders the calendar heatmap subtype with a calendar coordinate system", async () => {
+    const data = Array.from({ length: 28 }, (_, index) => ({
+      Date: `2026-08-${String(index + 1).padStart(2, "0")}`,
+      Value: index % 8,
+    }));
+    render(
+      <EChartsWidget
+        widget={makeWidget({
+          type: "heatmap",
+          chartSubtype: "calendar",
+          xColumn: "Date",
+          yColumn: "Value",
+        })}
+        {...defaultProps}
+        data={data}
+        xKey="Date"
+        yKey="Value"
+        chartData={data}
+      />,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const option = chartMock.setOption.mock.calls.at(-1)?.[0];
+    expect(option.calendar.range).toEqual(["2026-08-01", "2026-08-28"]);
+    expect(option.series[0].coordinateSystem).toBe("calendar");
+  });
+
   it("registers a click listener when onElementClick is provided", async () => {
     const onClick = vi.fn();
     render(<EChartsWidget widget={makeWidget({ type: "bar" })} {...defaultProps} onElementClick={onClick} />);

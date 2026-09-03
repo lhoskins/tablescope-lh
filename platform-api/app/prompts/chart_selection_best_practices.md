@@ -16,6 +16,8 @@ Rules-block schema (one fenced ```rules block per family):
   `time` (ordered period axis), `raw` (unaggregated rows), `flow`
   (source/target pairs), `hierarchy` (parent/child or path), `ohlc`
   (open/high/low/close), `single_row`, `rate` (0..1 or 0..100 measure).
+- `needs_any` — optional comma-separated alternatives; at least one trait must
+  be present. Use this when a family supports more than one legitimate shape.
 - `excludes` — disqualifiers: `period_only_dimension` (the only dimension is a
   time period), `time` (must NOT be a time series), `negative_values`.
 - `roles` — how columns map onto the chart: comma-separated `role=kind` pairs
@@ -111,8 +113,9 @@ Two measures on a shared time axis, especially with different units/scales
 
 ```rules
 family: bar
-min_dims: 1
+min_dims: 0
 min_measures: 1
+needs_any: category, time
 roles: x=dimension, y=measure
 subtypes: column, stacked_bar, grouped_bar, horizontal_bar, stacked_horizontal, positive_negative, population_pyramid
 score: 0.85
@@ -409,7 +412,7 @@ correlation matrix. Prefer over grouped bars when both cardinalities exceed ~5.
 family: calendar_heatmap
 min_dims: 0
 min_measures: 1
-needs: time, raw
+needs: time, daily
 roles: x=time, value=measure
 score: 0.55
 min_rows: 28

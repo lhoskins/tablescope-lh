@@ -278,8 +278,17 @@ def _card(
                     if card.get("chart") and not preserve_type:
                         card["chart"]["type"] = chosen.decision.chart_type.value
                         card["chart"]["subtype"] = chosen.decision.chart_style or ""
-    except Exception as exc:
-        logger.debug("chart candidate generation failed for insight %s: %s", insight_id, exc)
+    except Exception:
+        # Candidate generation is optional for card delivery, but it is not
+        # optional operationally: a debug-only message made ranking failures
+        # indistinguishable from a legitimately narrow data shape in production.
+        logger.exception(
+            "chart candidate generation failed for insight %s (project=%s, columns=%s, rows=%s)",
+            insight_id,
+            project.id,
+            result_columns,
+            len(result_rows),
+        )
 
     # M4 fast-follow (contract-only): stamp the shared ResponseEnvelope so a
     # Home card also emits the unified contract. The card keeps its bespoke

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.services.chart_catalog import (
+    ChartFamilyRule,
     fit_ranked,
 )
 
@@ -13,6 +14,7 @@ from .heuristics import (
     _looks_like_id_labels,
     _looks_like_metric_label,
     _looks_like_share,
+    business_dimensions,
     detect_value_format,
 )
 from .shape import (
@@ -98,6 +100,68 @@ def _candidate(
         supported=supported,
         unsupported_reason=unsupported_reason,
     )
+
+
+def _catalog_candidate_fields(
+    rule: ChartFamilyRule,
+    shape: _Shape,
+    dict_rows: list[dict[str, Any]],
+    semantic_roles: dict[str, str | None],
+) -> tuple[str | None, str | None, str | None]:
+    """Resolve a catalog rule's abstract roles onto columns in this result.
+
+    Catalog-only families used to be promoted without any field mappings. They
+    appeared in the picker but could render as an empty/incorrect chart. Keep
+    the generic catalog authoritative while grounding its role vocabulary in
+    the actual result columns.
+    """
+    dims = business_dimensions(shape, dict_rows)
+    measures = shape.measures
+    time_col = shape.time_columns[0] if shape.time_columns else None
+
+    def field_for(kind: str) -> str | None:
+        explicit = semantic_roles.get(kind)
+        if explicit:
+            return explicit
+        if kind == "time":
+            return time_col
+        if kind in {"dimension", "category", "stage", "parent", "source"}:
+            return dims[0] if dims else time_col
+        if kind in {"dimension2", "child", "target"}:
+            return dims[1] if len(dims) > 1 else None
+        if kind in {"measure", "value", "rate", "open"}:
+            return measures[0] if measures else None
+        if kind in {"measure2", "high"}:
+            return measures[1] if len(measures) > 1 else None
+        if kind in {"size", "low"}:
+            return measures[2] if len(measures) > 2 else None
+        if kind == "close":
+            return measures[3] if len(measures) > 3 else None
+        return None
+
+    resolved = {name: field_for(kind) for name, kind in rule.roles.items()}
+    x_field = (
+        resolved.get("x")
+        or resolved.get("category")
+        or resolved.get("stage")
+        or resolved.get("source")
+        or resolved.get("parent")
+    )
+    y_field = resolved.get("y") or resolved.get("value")
+    y2_field = (
+        resolved.get("y2")
+        or resolved.get("dimension2")
+        or resolved.get("target")
+        or resolved.get("child")
+        or resolved.get("measure2")
+    )
+
+    # Flow/network renderers need source, target, and (when present) magnitude.
+    if resolved.get("source") and resolved.get("target"):
+        x_field = resolved["source"]
+        y_field = resolved["target"]
+        y2_field = resolved.get("value")
+    return x_field, y_field, y2_field
 
 
 def recommend_visualizations(
@@ -528,23 +592,40 @@ def recommend_visualizations(
     # Dedupe by family: if an inline branch already produced this ChartType it
     # picked a considered style (e.g. horizontal_bar for id-like labels), so the
     # catalog must not add a bare duplicate that outranks it.
-    existing_types = {c.decision.chart_type.value for c in filtered}
+    existing_variants = {
+        (c.decision.chart_type.value, c.decision.chart_style) for c in filtered
+    }
     for family, rule in catalog_rules.items():
         confidence = fit_by_family[family][1]
-        if confidence < 0.5:
-            continue
         resolved = _catalog_chart_type(family)
         if resolved is None:
             continue
         chart_type, chart_style = resolved
-        if chart_type.value in existing_types:
+        variant = (chart_type.value, chart_style)
+        if variant in existing_variants:
             continue
-        existing_types.add(chart_type.value)
+        # A top-level catalog family validates an inline candidate of the same
+        # renderer type; it must not add a second bare variant that overwrites
+        # a deliberate style such as horizontal_bar or donut. Named catalog
+        # subtype families (waterfall, bubble, bump, calendar_heatmap, ...)
+        # remain distinct and are added below.
+        if family == chart_type.value and any(
+            existing_type == chart_type.value
+            for existing_type, _existing_style in existing_variants
+        ):
+            continue
+        existing_variants.add(variant)
+        x_field, y_field, y2_field = _catalog_candidate_fields(
+            rule, shape, dict_rows, roles
+        )
         filtered.append(
             _candidate(
                 chart_type,
                 confidence,
                 chart_style=chart_style,
+                x_field=x_field,
+                y_field=y_field,
+                y2_field=y2_field,
                 reason=rule.guidance.split(".")[0] if rule.guidance else f"{family} from catalog",
             )
         )
@@ -704,19 +785,19 @@ def _fallback_candidates(
 
 
 def _diverse_top_n(candidates: list[VizCandidate], limit: int) -> list[VizCandidate]:
-    """Return the top ``limit`` candidates while maximising family diversity.
+    """Return the top ``limit`` candidates while maximising visual diversity.
 
-    Each ``ChartType`` is treated as a family. The highest-scoring candidate from
-    each family is kept first; remaining slots are filled with the next-best
-    candidates. This prevents a single family (e.g. bar) from filling all six
-    suggestion slots.
+    A semantic catalog subtype such as waterfall, histogram, bubble, bump, or
+    calendar heatmap is a distinct visual choice even though it renders through
+    a parent ``ChartType``. The old type-only key silently discarded every one
+    of those options whenever its parent was present.
     """
     sorted_by_score = sorted(candidates, key=lambda c: c.score, reverse=True)
-    seen_families: set[str] = set()
+    seen_families: set[tuple[str, str]] = set()
     first_pass: list[VizCandidate] = []
     second_pass: list[VizCandidate] = []
     for c in sorted_by_score:
-        family = c.decision.chart_type.value
+        family = (c.decision.chart_type.value, c.decision.chart_style)
         if family in seen_families:
             second_pass.append(c)
         else:
