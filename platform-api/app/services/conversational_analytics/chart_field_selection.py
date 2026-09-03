@@ -76,11 +76,25 @@ def _build_chart_config(
     # actual result columns.
     x_field = suggested.get("xField")
     y_field = suggested.get("yField")
+    y2_field = suggested.get("y2Field")
     metric_field = suggested.get("metricField") or y_field
     if x_field in columns:
         config["labelColumn"] = x_field
     if y_field in columns:
         config["valueColumns"] = [y_field]
+        # Live finding: a combo (bar+line) chart -- "incidents open vs
+        # resolve by month" -- rendered both series from the same value.
+        # visualization_engine's recommendation carries a second measure as
+        # y2Field (see recommend.py's y2_field), but this only ever kept
+        # valueColumns as a single-element list, so the frontend's y2Field
+        # (turn.chart_config.valueColumns?.[1]) was always undefined for
+        # every combo chart -- and build-combo-option.ts's fallback for a
+        # missing second series duplicates the first (bar AND line both
+        # from valueColumns[0]) rather than erroring, so this shipped a
+        # chart that looked fine but was silently wrong on every combo
+        # chart, not just this one.
+        if y2_field and y2_field in columns and y2_field != y_field:
+            config["valueColumns"].append(y2_field)
     if metric_field in columns and chart_type == "kpi":
         config["metricField"] = metric_field
 
