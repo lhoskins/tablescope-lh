@@ -6,6 +6,7 @@ import {
   IconChartBar,
   IconTable,
 } from "@tabler/icons-react";
+import { MessageTimestamp } from "@/app/ai/message-timestamp";
 import { ResponsePresenter } from "@/components/ai/ResponsePresenter";
 import type { ResponseEnvelope, SuggestedVisualization } from "@/lib/api/ai-actions";
 import type { ConversationTurn } from "@/lib/api/conversational-analytics";
@@ -63,32 +64,37 @@ export function TurnBubble({
   isLast?: boolean;
 }) {
   const envelope = useMemo<ResponseEnvelope | null>(() => buildEnvelope(turn), [turn]);
+  const assistantTimestamp = turn.status === "pending" ? null : turn.updated_at;
   return (
     <div className="space-y-2">
-      <div className="flex justify-end">
+      <div className="group flex flex-col items-end">
         <div className="max-w-[80%] rounded-lg bg-brand px-3.5 py-2.5 text-[13px] leading-relaxed text-brand-fg">
           {turn.user_message}
         </div>
+        <MessageTimestamp value={turn.created_at} label="Sent" align="right" />
       </div>
-      <div className="flex gap-2.5">
+      <div className="group flex gap-2.5">
         <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-500">
           <IconSparkles size={15} />
         </div>
-        <div className="max-w-[80%] min-w-0 flex-1 rounded-lg border border-line-tertiary bg-bg-primary px-3.5 py-2.5 text-[13px] leading-relaxed text-ink-primary">
-          {turn.status === "error" ? (
-            <p className="text-red-600">{turn.assistant_message}</p>
-          ) : (
-            <>
-              {envelope ? (
-                <ResponsePresenter envelope={envelope} />
-              ) : (
-                <p className="mb-2 whitespace-pre-wrap">{turn.assistant_message}</p>
-              )}
-              {turn.matched_insight && (
-                <MatchedInsightBlock match={turn.matched_insight} />
-              )}
-            </>
-          )}
+        <div className="max-w-[80%] min-w-0 flex-1">
+          <div className="rounded-lg border border-line-tertiary bg-bg-primary px-3.5 py-2.5 text-[13px] leading-relaxed text-ink-primary">
+            {turn.status === "error" ? (
+              <p className="text-red-600">{turn.assistant_message}</p>
+            ) : (
+              <>
+                {envelope ? (
+                  <ResponsePresenter envelope={envelope} />
+                ) : (
+                  <p className="mb-2 whitespace-pre-wrap">{turn.assistant_message}</p>
+                )}
+                {turn.matched_insight && (
+                  <MatchedInsightBlock match={turn.matched_insight} />
+                )}
+              </>
+            )}
+          </div>
+          <MessageTimestamp value={assistantTimestamp} label="Answered" align="left" />
         </div>
       </div>
       {isLast && turn.status === "success" && envelope && onFollowUp && (
