@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.database import get_db
-from app.models.project import Project
+from app.services.knowledge_graph.visibility import _hidden_project_asset_ids
+from app.services.project_access import authorize_project_access
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects/{project_id}/graph", tags=["project-graph"])
@@ -65,13 +66,15 @@ class NodeCentricGraphResponse(BaseModel):
 
 async def _require_project_access(
     project_id: int, session: AsyncSession, context: RequestContext,
-) -> Project:
-    project = await session.get(Project, project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    if project.tenant_id != context.tenant_id:
-        raise HTTPException(status_code=403, detail="Not in this tenant")
-    return project
+):
+    """Real project membership (owner or active ProjectMember), not just a
+    tenant match -- see app.services.project_access. A tenant match alone let
+    any same-tenant user, including non-members of a private project, read
+    its Knowledge Graph."""
+    return await authorize_project_access(
+        session, tenant_id=context.tenant_id, user_id=context.user_id,
+        project_id=project_id,
+    )
 
 
 FAMILY_NODE_TYPES = {"document_family"}
@@ -125,6 +128,7 @@ async def get_project_graph(
             tenant_id=context.tenant_id,
             project_id=project_id,
             user_id=context.user_id,
+            role=context.role,
             center_node=center_node,
             lens=lens or "insight-first",
             min_confidence=min_confidence,
@@ -176,17 +180,29 @@ async def get_project_graph(
             {"tid": context.tenant_id, "pid": project_id},
         )
 
+    raw_rows = [
+        {"id": r[0], "node_type": r[1], "name": r[2], "source_type": r[3], "source_id": r[4], "properties": r[5]}
+        for r in nodes_result.fetchall()
+    ]
+    # KG-04: a private document is only for its owner (and tenant admins),
+    # even though every project member can otherwise read this graph.
+    hidden_asset_ids = await _hidden_project_asset_ids(
+        session, raw_rows, tenant_id=context.tenant_id,
+        user_id=context.user_id, role=context.role,
+    )
+
     nodes = []
     node_ids = set()
-    for row in nodes_result.fetchall():
-        nid, ntype, name, stype, sid, props = row
-        if not include_families and ntype in FAMILY_NODE_TYPES:
+    for nrow in raw_rows:
+        if not include_families and nrow["node_type"] in FAMILY_NODE_TYPES:
             continue
-        node_ids.add(nid)
+        if nrow["source_type"] == "project_asset" and nrow["source_id"] in hidden_asset_ids:
+            continue
+        node_ids.add(nrow["id"])
         nodes.append(GraphNodeRead(
-            id=nid, type=ntype, label=name,
-            source_type=stype, source_id=sid,
-            properties=props if isinstance(props, dict) else {},
+            id=nrow["id"], type=nrow["node_type"], label=nrow["name"],
+            source_type=nrow["source_type"], source_id=nrow["source_id"],
+            properties=nrow["properties"] if isinstance(nrow["properties"], dict) else {},
         ))
 
     if not node_ids:

@@ -20,6 +20,7 @@ from .constants import (
 )
 from .loader import _is_canvas_hidden, _load_stored_graph, enrich_node
 from .renderer import build_graph_payload, build_node_centric_graph_from_snapshot
+from .visibility import filter_payload_for_viewer
 
 logger = logging.getLogger(__name__)
 
@@ -257,6 +258,7 @@ async def build_node_centric_graph(
     tenant_id: int,
     project_id: int,
     user_id: int | None = None,
+    role: str | None = None,
     center_node: str | None = None,
     lens: str = "insight-first",
     min_confidence: float = DEFAULT_MIN_CONFIDENCE,
@@ -307,4 +309,11 @@ async def build_node_centric_graph(
     payload["snapshotId"] = snapshot.get("id")
     payload["pipelineVersion"] = snapshot.get("pipelineVersion", "")
     payload["isCached"] = not refresh
+
+    # The cached snapshot is shared by every project member, but a private
+    # document is only for its owner (and tenant admins) -- filter per the
+    # actual requesting viewer on every read, not just at build time (KG-04).
+    payload = await filter_payload_for_viewer(
+        session, payload, tenant_id=tenant_id, user_id=user_id, role=role,
+    )
     return payload

@@ -91,6 +91,7 @@ async def collect_structural_graph(
             select(FileSourceMeta)
             .where(
                 FileSourceMeta.project_id == project_id,
+                FileSourceMeta.tenant_id == tenant_id,
                 FileSourceMeta.archived.is_(False),
             )
             .order_by(FileSourceMeta.id)
@@ -130,6 +131,7 @@ async def collect_structural_graph(
             select(DatabaseDataSource)
             .where(
                 DatabaseDataSource.project_id == project_id,
+                DatabaseDataSource.tenant_id == tenant_id,
                 DatabaseDataSource.archived.is_(False),
             )
             .order_by(DatabaseDataSource.id)
@@ -164,6 +166,10 @@ async def collect_structural_graph(
                 ds_by_name[key] = nid
 
     # ── Saved queries (and their table lineage) ──────────────────────
+    # SavedQuery has no tenant_id column -- project_id alone is safe here
+    # because collect_structural_graph already verified the project itself
+    # belongs to tenant_id above, and project ids are never reused across
+    # tenants.
     queries = (
         await session.scalars(
             select(SavedQuery)
@@ -221,7 +227,10 @@ async def collect_structural_graph(
     dashboards = (
         await session.scalars(
             select(Dashboard)
-            .where(Dashboard.project_id == project_id)
+            .where(
+                Dashboard.project_id == project_id,
+                Dashboard.tenant_id == tenant_id,
+            )
             .order_by(Dashboard.id)
             .limit(_MAX_PER_KIND)
         )
@@ -257,7 +266,10 @@ async def collect_structural_graph(
     assets = (
         await session.scalars(
             select(ProjectAsset)
-            .where(ProjectAsset.project_id == project_id)
+            .where(
+                ProjectAsset.project_id == project_id,
+                ProjectAsset.tenant_id == tenant_id,
+            )
             .order_by(ProjectAsset.id)
             .limit(_MAX_PER_KIND)
         )
