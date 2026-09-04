@@ -17,6 +17,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.business_insight_result import BusinessInsightResult
 from app.models.home_pin import HomePin
+from app.models.intelligence_snapshot import IntelligenceSnapshot
 from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
 
 
@@ -127,6 +128,26 @@ async def persist_chart_selection(
                 hp_row.frozen_payload = fp
                 flag_modified(hp_row, "frozen_payload")
                 updated_any = True
+
+    # Home/Business Intelligence snapshot (per-user aggregate of project results).
+    # The insight may live inside one of the per-project result payloads rather
+    # than a dedicated Business/Project snapshot.
+    is_stmt = select(IntelligenceSnapshot).where(
+        IntelligenceSnapshot.tenant_id == tenant_id,
+        IntelligenceSnapshot.user_id == user_id,
+    )
+    is_row = (await session.execute(is_stmt)).scalar_one_or_none()
+    if is_row is not None:
+        is_payload = copy.deepcopy(is_row.payload or {})
+        results = is_payload.get("results") or []
+        for result in results:
+            if str(result.get("projectId") or "") != str(project_id):
+                continue
+            if _walk_card_groups(result, insight_id, selection):
+                is_row.payload = is_payload
+                flag_modified(is_row, "payload")
+                updated_any = True
+                break
 
     if updated_any:
         await session.commit()
