@@ -604,16 +604,6 @@ def recommend_visualizations(
         variant = (chart_type.value, chart_style)
         if variant in existing_variants:
             continue
-        # A top-level catalog family validates an inline candidate of the same
-        # renderer type; it must not add a second bare variant that overwrites
-        # a deliberate style such as horizontal_bar or donut. Named catalog
-        # subtype families (waterfall, bubble, bump, calendar_heatmap, ...)
-        # remain distinct and are added below.
-        if family == chart_type.value and any(
-            existing_type == chart_type.value
-            for existing_type, _existing_style in existing_variants
-        ):
-            continue
         existing_variants.add(variant)
         x_field, y_field, y2_field = _catalog_candidate_fields(
             rule, shape, dict_rows, roles
@@ -785,26 +775,13 @@ def _fallback_candidates(
 
 
 def _diverse_top_n(candidates: list[VizCandidate], limit: int) -> list[VizCandidate]:
-    """Return the top ``limit`` candidates while maximising visual diversity.
+    """Return every candidate ranked purely by confidence.
 
-    A semantic catalog subtype such as waterfall, histogram, bubble, bump, or
-    calendar heatmap is a distinct visual choice even though it renders through
-    a parent ``ChartType``. The old type-only key silently discarded every one
-    of those options whenever its parent was present.
+    The preview list is no longer capped or reordered by a diversity pass.
+    Confidence is the single rank signal; all eligible catalog and inline
+    candidates are surfaced and sorted by their computed score.
     """
-    sorted_by_score = sorted(candidates, key=lambda c: c.score, reverse=True)
-    seen_families: set[tuple[str, str]] = set()
-    first_pass: list[VizCandidate] = []
-    second_pass: list[VizCandidate] = []
-    for c in sorted_by_score:
-        family = (c.decision.chart_type.value, c.decision.chart_style)
-        if family in seen_families:
-            second_pass.append(c)
-        else:
-            seen_families.add(family)
-            first_pass.append(c)
-    diverse = first_pass + second_pass
-    return diverse[:limit]
+    return sorted(candidates, key=lambda c: c.score, reverse=True)
 
 
 def rank_visualizations(
