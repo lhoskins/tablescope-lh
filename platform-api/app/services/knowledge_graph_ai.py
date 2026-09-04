@@ -142,6 +142,41 @@ def _resolve_evidence_keys(
     return resolved
 
 
+def _evidence_strength(
+    evidence_nodes: list[dict[str, Any]],
+    grounding_edges: list[dict[str, Any]],
+    *,
+    has_project_evidence: bool,
+) -> float:
+    """KG-31: an independent 0-1 evidence-quality score, derived only from the
+    card's own grounded evidence (never from the model's self-reported
+    confidence) -- how much real support this claim actually has, separate
+    from how confident the model says it is.
+
+    Deliberately simple and explainable rather than learned/calibrated:
+    - a single evidence node is weaker support than several converging ones;
+    - evidence resting only on Reference Library guidance (no project data)
+      is weaker than evidence that includes the project's own data;
+    - the structural confidence already recorded on the grounding edges
+      (from deterministic collection, not the LLM) factors in directly.
+    """
+    if not evidence_nodes:
+        return 0.0
+    node_count_score = min(1.0, len(evidence_nodes) / 3.0)
+    project_evidence_score = 1.0 if has_project_evidence else 0.5
+    if grounding_edges:
+        edge_confidences = [float(e.get("confidence") or 0.0) for e in grounding_edges]
+        edge_score = sum(edge_confidences) / len(edge_confidences)
+    else:
+        # No structural edge ties the evidence directly together/to the
+        # center -- evidence was matched by label/reference only.
+        edge_score = 0.5
+    return round(
+        max(0.0, min(1.0, (node_count_score + project_evidence_score + edge_score) / 3)),
+        4,
+    )
+
+
 def _map_card(
     raw: dict[str, Any],
     *,
@@ -159,11 +194,11 @@ def _map_card(
 
     evidence_nodes = [nodes_by_key[k] for k in evidence_keys]
     evidence_ids = {center["id"], *[n["id"] for n in evidence_nodes]}
-    edge_ids = [
-        e["id"]
-        for e in edges
+    grounding_edges = [
+        e for e in edges
         if e["source"] in evidence_ids and e["target"] in evidence_ids
     ]
+    edge_ids = [e["id"] for e in grounding_edges]
 
     def _labels(types: set[str]) -> list[str]:
         out: list[str] = []
@@ -190,9 +225,19 @@ def _map_card(
         has_project_evidence=has_project_evidence,
     )
     try:
-        confidence = max(0.0, min(1.0, float(raw.get("confidence", 0.0))))
+        model_confidence = max(0.0, min(1.0, float(raw.get("confidence", 0.0))))
     except (TypeError, ValueError):
-        confidence = 0.0
+        model_confidence = 0.0
+
+    evidence_strength = _evidence_strength(
+        evidence_nodes, grounding_edges, has_project_evidence=has_project_evidence,
+    )
+    # KG-31: a card's overall confidence can never exceed what its own
+    # evidence supports -- a high self-reported model score can't make a
+    # weakly-evidenced claim look authoritative. reviewer_confidence is
+    # schema-ready for a future human-review workflow; nothing populates it
+    # yet, so it stays None rather than a fabricated placeholder value.
+    confidence = min(model_confidence, evidence_strength)
 
     return {
         "id": f"aicard:{center['graphKey']}:{raw.get('id') or index}",
@@ -203,7 +248,11 @@ def _map_card(
         "summary": str(raw.get("summary", "")),
         "businessQuestion": str(raw.get("businessQuestion", "")),
         "businessImpact": str(raw.get("businessImpact", "")),
+        "valid": True,
         "confidence": confidence,
+        "modelConfidence": model_confidence,
+        "evidenceStrength": evidence_strength,
+        "reviewerConfidence": None,
         "evidencePath": evidence_keys,
         "sourceDocuments": source_documents,
         "sourceTables": _labels(_TABLE_TYPES),

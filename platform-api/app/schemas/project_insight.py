@@ -74,6 +74,12 @@ class ProjectInsightResponse(BaseModel):
     graphMode: str = "full"
     graphBlockingReasons: list[str] = Field(default_factory=list)
     graphDisclosure: str = ""
+    # KG-39: True when Knowledge Graph context collection for this specific
+    # report failed (not merely "the graph has no content yet") -- the report
+    # still generates (fail-open by design), but the caller must be able to
+    # tell that it did so without KG grounding, not silently treat it as
+    # fully grounded.
+    kgGroundingDegraded: bool = False
 
 
 class AcknowledgeInsightRequest(BaseModel):

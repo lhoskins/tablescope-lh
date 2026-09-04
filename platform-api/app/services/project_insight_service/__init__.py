@@ -313,6 +313,16 @@ async def build_project_insight(
         session, tenant_id=tenant_id, project_id=project.id, user_id=user_id,
         surface="project_insights",
     )
+    kg_grounding_degraded = kg_context.get("grounding_status") == "unavailable"
+    if kg_grounding_degraded:
+        # KG-39: fail-open by design (the report still generates), but this
+        # must be visible rather than indistinguishable from a healthy,
+        # legitimately-empty graph.
+        logger.warning(
+            "Project Insight for project %s proceeding WITHOUT Knowledge "
+            "Graph grounding (context collection failed)",
+            project.id,
+        )
     kpi_names: list[str] = []
     for bucket in ("measured_kpis", "recommended_kpis"):
         for item in kg_context.get(bucket, []) or []:
@@ -375,6 +385,7 @@ async def build_project_insight(
             graphMode=graph_mode,
             graphBlockingReasons=graph_blocking_reasons,
             graphDisclosure=graph_disclosure,
+            kgGroundingDegraded=kg_grounding_degraded,
         )
 
     es = ai_result.get("executiveSummary") or {}
@@ -443,6 +454,7 @@ async def build_project_insight(
         graphMode=graph_mode,
         graphBlockingReasons=graph_blocking_reasons,
         graphDisclosure=graph_disclosure,
+        kgGroundingDegraded=kg_grounding_degraded,
     )
 
 
