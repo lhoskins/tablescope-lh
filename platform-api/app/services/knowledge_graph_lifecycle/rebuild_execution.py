@@ -25,6 +25,7 @@ from app.services.knowledge_graph_builder import (
 from app.services.knowledge_graph_context import compute_source_coverage
 
 from .base import LifecycleBase
+from .incremental_cards import affected_center_keys
 from .state import logger
 from .structural_integrity import evaluate_structural_integrity
 
@@ -236,11 +237,18 @@ class RebuildExecutionMixin(LifecycleBase):
             affected_types = affected.get("affected_types", [])
             affected_ids = affected.get("affected_ids", [])
 
+            # KG-42: snapshot the pre-patch graph/cards so the cards touched by
+            # this change can be identified after patching, below.
+            prior_full_graph = payload.get("fullGraph") or {}
+            prior_nodes = prior_full_graph.get("nodes") or []
+            prior_edges = prior_full_graph.get("edges") or []
+            prior_cards_by_center = payload.get("aiCardsByCenter") or {}
+
             # Reload the stored graph rows plus the structural Evidence graph so
             # content changes (new/updated documents, data sources, queries) are
-            # reflected in the new version. The expensive part of a full rebuild
-            # is AI enrichment, which stays cached: ``aiCardsByCenter`` carries
-            # over from the active snapshot unchanged.
+            # reflected in the new version. AI enrichment is scoped below to
+            # only the centres this change set actually touches, so most of the
+            # active snapshot's cached cards are reused rather than recomputed.
             fresh_nodes, fresh_edges = await _load_stored_graph(
                 self.session,
                 tenant_id=build.tenant_id,
@@ -268,6 +276,41 @@ class RebuildExecutionMixin(LifecycleBase):
             payload["sourceFingerprint"] = fingerprint
             payload["generatedAt"] = datetime.now(UTC).isoformat()
             payload["pipelineVersion"] = SNAPSHOT_PIPELINE_VERSION
+
+            # KG-42: refresh AI insight cards for the centres this change set
+            # actually touched (and evict cards for centres that no longer
+            # exist), instead of carrying every cached card over unchanged.
+            refresh_keys, stale_keys = affected_center_keys(
+                old_nodes=prior_nodes,
+                old_edges=prior_edges,
+                new_nodes=raw_nodes,
+                new_edges=raw_edges,
+                cached_cards_by_center=prior_cards_by_center,
+            )
+            cards_by_center = {
+                key: bundle
+                for key, bundle in prior_cards_by_center.items()
+                if key not in stale_keys
+            }
+            if refresh_keys and build.requested_by is not None:
+                try:
+                    refreshed = await _precache_center_cards(
+                        self.session,
+                        raw_nodes,
+                        raw_edges,
+                        tenant_id=build.tenant_id,
+                        user_id=build.requested_by,
+                        project_id=build.project_id,
+                        center_keys=refresh_keys,
+                    )
+                    cards_by_center.update(refreshed)
+                except Exception:
+                    logger.exception(
+                        "AI card refresh failed for incremental build %s; "
+                        "keeping previously cached cards for affected centres",
+                        build.id,
+                    )
+            payload["aiCardsByCenter"] = _json_safe(cards_by_center)
 
             version_number = await self._next_version_number(build.project_id)
             version = KnowledgeGraphVersion(
@@ -356,8 +399,16 @@ class RebuildExecutionMixin(LifecycleBase):
         affected_types: list[str],
         affected_ids: list[int | None],
     ) -> None:
-        """Patch project-context synthetic nodes into the existing payload."""
+        """Patch project-context synthetic nodes into the existing payload.
+
+        KG-43: each bucket is reconciled against the *authoritative active set*
+        for that type, not merely upserted -- a goal/metric/risk that was
+        deleted or deactivated is removed from the payload here too, instead
+        of lingering in the copied snapshot forever (every prior incremental
+        patch just re-copies whatever node ids it doesn't touch).
+        """
         nodes: list[dict[str, Any]] = payload.setdefault("fullGraph", {}).setdefault("nodes", [])
+        original_ids = {n.get("id") for n in nodes if n.get("id") is not None}
         node_map = {n.get("id"): n for n in nodes if n.get("id") is not None}
 
         if "goal" in affected_types:
@@ -369,9 +420,11 @@ class RebuildExecutionMixin(LifecycleBase):
                     )
                 )
             ).all()
+            active_keys: set[str] = set()
             for goal in goals:
                 key = f"goal:{goal.id}"
-                node = {
+                active_keys.add(key)
+                node_map[key] = {
                     "id": key,
                     "node_type": "goal",
                     "name": goal.title,
@@ -383,7 +436,8 @@ class RebuildExecutionMixin(LifecycleBase):
                         "category": goal.category,
                     },
                 }
-                node_map[key] = node
+            for stale_key in [k for k in node_map if isinstance(k, str) and k.startswith("goal:") and k not in active_keys]:
+                del node_map[stale_key]
 
         if "metric" in affected_types:
             metrics = (
@@ -394,9 +448,11 @@ class RebuildExecutionMixin(LifecycleBase):
                     )
                 )
             ).all()
+            active_keys = set()
             for metric in metrics:
                 key = f"metric:{metric.id}"
-                node = {
+                active_keys.add(key)
+                node_map[key] = {
                     "id": key,
                     "node_type": "metric",
                     "name": metric.name,
@@ -408,7 +464,8 @@ class RebuildExecutionMixin(LifecycleBase):
                         "unit": metric.unit,
                     },
                 }
-                node_map[key] = node
+            for stale_key in [k for k in node_map if isinstance(k, str) and k.startswith("metric:") and k not in active_keys]:
+                del node_map[stale_key]
 
         if "risk" in affected_types:
             risks = (
@@ -419,9 +476,11 @@ class RebuildExecutionMixin(LifecycleBase):
                     )
                 )
             ).all()
+            active_keys = set()
             for risk in risks:
                 key = f"risk:{risk.id}"
-                node = {
+                active_keys.add(key)
+                node_map[key] = {
                     "id": key,
                     "node_type": "risk",
                     "name": risk.title,
@@ -433,9 +492,18 @@ class RebuildExecutionMixin(LifecycleBase):
                         "severity": risk.severity,
                     },
                 }
-                node_map[key] = node
+            for stale_key in [k for k in node_map if isinstance(k, str) and k.startswith("risk:") and k not in active_keys]:
+                del node_map[stale_key]
 
+        removed_ids = original_ids - set(node_map.keys())
         payload["fullGraph"]["nodes"] = list(node_map.values())
+        if removed_ids:
+            edges: list[dict[str, Any]] = payload["fullGraph"].get("edges") or []
+            payload["fullGraph"]["edges"] = [
+                e for e in edges
+                if e.get("from_node_id") not in removed_ids
+                and e.get("to_node_id") not in removed_ids
+            ]
 
 
     def _validate_payload(
