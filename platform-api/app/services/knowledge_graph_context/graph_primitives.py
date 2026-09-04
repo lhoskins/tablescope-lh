@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from app.models.reference_library import (
@@ -43,13 +44,26 @@ def _norm(value: str | None) -> str:
     ).strip("_")
 
 
+def _norm_words(value: str | None) -> str:
+    """Like ``_norm``, but collapses non-alphanumeric runs to a single space
+    instead of deleting them, so word boundaries survive punctuation (e.g.
+    "On-time Delivery" -> "on time delivery", not "ontimedelivery"). Used for
+    KPI phrase matching (KG-19) -- ``_norm`` itself stays untouched since
+    other callers rely on its no-space form for exact-match graph keys."""
+    collapsed = re.sub(r"[^a-z0-9]+", " ", (value or "").lower())
+    return collapsed.strip()
+
+
 # Minimum length for a KPI phrase to be matched against query/dashboard text,
 # so short/ambiguous tokens never create spurious "measured" relationships.
 _KPI_PHRASE_MIN = 4
 
 
 def _kpi_phrases(name: str | None, props: dict[str, Any]) -> set[str]:
-    """Normalized phrases that identify a KPI in free text (name + aliases)."""
+    """Word-boundary-safe phrases that identify a KPI in free text (name +
+    aliases). Kept space-separated (not squashed like ``_norm``) so
+    ``_phrase_in`` can require whole-word/whole-phrase matches -- KG-19: a
+    KPI named "Rate" must not match inside unrelated text like "corporate"."""
     phrases: set[str] = set()
     candidates = [name, props.get("display_name"), props.get("kpi_key")]
     aliases = props.get("aliases")
@@ -58,14 +72,15 @@ def _kpi_phrases(name: str | None, props: dict[str, Any]) -> set[str]:
     for raw in candidates:
         if not isinstance(raw, str):
             continue
-        norm = _norm(raw)
-        if len(norm) >= _KPI_PHRASE_MIN:
+        norm = _norm_words(raw)
+        if len(norm.replace(" ", "")) >= _KPI_PHRASE_MIN:
             phrases.add(norm)
     return phrases
 
 
 def _haystack(*parts: Any) -> str:
-    """Normalized concatenation of text/JSON parts for substring matching."""
+    """Word-boundary-preserving concatenation of text/JSON parts for KPI
+    phrase matching (see ``_phrase_in``)."""
     chunks: list[str] = []
     for part in parts:
         if part is None:
@@ -77,11 +92,17 @@ def _haystack(*parts: Any) -> str:
                 continue
         else:
             chunks.append(str(part))
-    return _norm(" ".join(chunks))
+    return _norm_words(" ".join(chunks))
 
 
 def _phrase_in(phrases: set[str], haystack: str) -> bool:
-    return any(p in haystack for p in phrases)
+    """Whole-word/whole-phrase containment, not raw substring containment
+    (KG-19). Both ``phrases`` and ``haystack`` are space-separated word
+    sequences (see ``_norm_words``); padding each with boundary spaces turns
+    a plain substring check into one that only matches on word boundaries --
+    a KPI phrase can never match as a fragment inside an unrelated word."""
+    padded = f" {haystack} "
+    return any(f" {p} " in padded for p in phrases)
 
 
 def _node(
