@@ -158,6 +158,7 @@ export type ChartSubtype =
   | "biaxial_line"
   | "tiny_line"
   | "animated_line"
+  | "calendar"        // daily calendar heatmap
   // Area variants
   | "stacked_area"
   // Pie variants

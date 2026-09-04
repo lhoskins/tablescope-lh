@@ -58,6 +58,7 @@ import {
   GeoComponent,
   DatasetComponent,
   TransformComponent,
+  CalendarComponent,
 } from "echarts/components";
 import { LegacyGridContainLabel } from "echarts/features";
 import { CanvasRenderer } from "echarts/renderers";import { EChartsType } from "./EChartsWidget/echarts-type";
@@ -108,6 +109,7 @@ echarts.use([
   GeoComponent,
   DatasetComponent,
   TransformComponent,
+  CalendarComponent,
   LegacyGridContainLabel,
   CanvasRenderer,
 ]);
@@ -138,8 +140,9 @@ export function EChartsWidget({ widget, data, xKey, yKey, y2Key, chartData, seri
       let chart: any;
       try {
         chart = echarts.init(el, undefined, { renderer: "canvas" });
-      } catch {
-        // Zero-dimension container in test suites; ECharts is a no-op here.
+      } catch (error) {
+        // Keep the card alive, but make real initialization failures visible.
+        if (!inVitest) console.error("ECharts initialization failed", error);
         return;
       }
       chartRef.current = chart;
@@ -220,7 +223,12 @@ export function EChartsWidget({ widget, data, xKey, yKey, y2Key, chartData, seri
             option = { title: { text: "Unknown widget type", left: "center", top: "center" } };
         }
         chart.setOption(option, true);
-      } catch {
+      } catch (error) {
+        console.error("ECharts option rendering failed", {
+          type,
+          chartSubtype,
+          error,
+        });
         try { chart.dispose(); } catch {}
         return;
       }

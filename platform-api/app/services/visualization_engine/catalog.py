@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import date, datetime
+from itertools import pairwise
+from statistics import median
 from typing import Any
 
 from app.services.chart_catalog import (
@@ -95,8 +98,12 @@ def _catalog_shape(
     # families are eligible.
     dims = business_dimensions(shape, dict_rows)
     traits: set[str] = set()
+    if dims:
+        traits.add("category")
     if shape.time_columns:
         traits.add("time")
+        if _has_daily_grain(dict_rows, shape.time_columns[0]):
+            traits.add("daily")
     if shape.dimensions and not dims:
         traits.add("period_only_dimension")
     if shape.row_count == 1 and not shape.dimensions:
@@ -124,6 +131,46 @@ def _catalog_shape(
     if any(_has_negative(dict_rows, m) for m in shape.measures):
         traits.add("negative_values")
     return ShapeSummary(dims=len(dims), measures=len(shape.measures), traits=frozenset(traits))
+
+
+def _parse_calendar_date(value: Any) -> date | None:
+    """Parse only values that carry a real calendar day.
+
+    Month/quarter/year labels intentionally return ``None`` so a calendar
+    heatmap is never offered for coarse time series.
+    """
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if len(raw) < 10:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).date()
+    except ValueError:
+        try:
+            return date.fromisoformat(raw[:10])
+        except ValueError:
+            return None
+
+
+def _has_daily_grain(rows: list[dict[str, Any]], time_col: str) -> bool:
+    """Return true for a genuine daily/near-daily ordered time axis."""
+    parsed = sorted(
+        {
+            parsed_date
+            for row in rows
+            if (parsed_date := _parse_calendar_date(row.get(time_col))) is not None
+        }
+    )
+    if len(parsed) < 3:
+        return False
+    gaps = [(right - left).days for left, right in pairwise(parsed)]
+    positive_gaps = [gap for gap in gaps if gap > 0]
+    return bool(positive_gaps) and median(positive_gaps) <= 2
 
 
 #: Below this fit confidence no chart explains the data, so the detail table

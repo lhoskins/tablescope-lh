@@ -263,7 +263,40 @@ def test_rank_visualizations_time_series_excludes_gauge() -> None:
     ranked = rank_visualizations(["month", "sales"], rows, limit=6)
     families = {c.decision.chart_type for c in ranked}
     assert ChartType.GAUGE not in families
+    assert ChartType.BAR in families
     assert ranked[0].decision.chart_type in (ChartType.LINE, ChartType.COMBO, ChartType.AREA)
+
+
+def test_rank_visualizations_daily_series_adds_mapped_calendar_heatmap() -> None:
+    rows = [
+        {"date": f"2026-08-{day:02d}", "incidents": day % 8}
+        for day in range(1, 29)
+    ]
+    ranked = rank_visualizations(["date", "incidents"], rows, limit=8)
+    calendar = next(
+        c
+        for c in ranked
+        if c.decision.chart_type is ChartType.HEATMAP
+        and c.decision.chart_style == "calendar"
+    )
+    assert calendar.decision.x_field == "date"
+    assert calendar.decision.y_field == "incidents"
+
+
+def test_catalog_subtype_is_not_deduped_against_parent_family() -> None:
+    rows = [
+        {"site": "Carson", "incidents": 42},
+        {"site": "Costa Mesa", "incidents": 18},
+        {"site": "Lamphun", "incidents": 10},
+        {"site": "Brazil", "incidents": 11},
+    ]
+    ranked = rank_visualizations(["site", "incidents"], rows, limit=8)
+    variants = {
+        (c.decision.chart_type, c.decision.chart_style) for c in ranked
+    }
+    assert (ChartType.BAR, "") in variants
+    assert (ChartType.BAR, "waterfall") in variants
+    assert (ChartType.PICTORIAL_BAR, "") in variants
 
 
 def test_rank_visualizations_time_series_excludes_category_families() -> None:

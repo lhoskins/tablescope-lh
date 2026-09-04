@@ -21,7 +21,6 @@ import type {
 import type {
   InsightCallout,
   InsightCard as InsightCardData,
-  InsightChart,
   TimeSeriesViewState,
   VizCandidate,
 } from "@/lib/api/home-intelligence";
@@ -46,6 +45,7 @@ import { useToasts, ToastViewport } from "@/components/ui/toast";
 import { CARD_SEVERITY } from "@/lib/ui/insight-tones";
 import { cn } from "@/lib/cn";
 import { renderBold } from "./render-bold";
+import { applyCandidateToInsightChart } from "@/lib/insights/chart-candidate";
 import { calloutLabel } from "./callout-label";
 import { KpiGridView } from "./kpi-grid-view";
 import { IntelligenceCardProps } from "./intelligence-card-props";
@@ -95,11 +95,7 @@ export function IntelligenceCard({
     const d = selectedChart.decision;
     return {
       ...base,
-      chart: {
-        ...card.chart,
-        type: d.chartType as InsightChart["type"],
-        subtype: d.chartStyle || undefined,
-      },
+      chart: applyCandidateToInsightChart(card.chart, selectedChart),
       chartType: d.chartType,
       visualizationDecision: d,
     };

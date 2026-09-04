@@ -1,11 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation } from "@tanstack/react-query";
 import { IconX, IconCheck, IconChartBar } from "@tabler/icons-react";
 import { InsightChartView } from "@/components/tablescope/home/intelligence-card";
-import type { InsightCard, InsightChart, VizCandidate } from "@/lib/api/home-intelligence";
+import type { InsightCard, VizCandidate } from "@/lib/api/home-intelligence";
 import { applyChartSelection } from "@/lib/api/home-intelligence";
 import { useToasts, ToastViewport } from "@/components/ui/toast";
+import { apiClient } from "@/lib/api-client";
+import {
+  applyCandidateToInsightChart,
+  insightChartCandidateData,
+} from "@/lib/insights/chart-candidate";
 
 interface ChartSuggestionDialogProps {
   card: InsightCard;
@@ -13,6 +19,10 @@ interface ChartSuggestionDialogProps {
   open: boolean;
   onClose: () => void;
   onApplied?: (candidate: VizCandidate) => void;
+}
+
+interface ChartCandidatesResponse {
+  chartCandidates?: VizCandidate[];
 }
 
 const FALLBACK_CANDIDATES: VizCandidate[] = [
@@ -33,20 +43,6 @@ const FALLBACK_CANDIDATES: VizCandidate[] = [
   },
 ];
 
-function buildCandidateChart(
-  baseChart: InsightChart | null | undefined,
-  candidate: VizCandidate,
-): InsightChart {
-  const d = candidate.decision;
-  return {
-    ...baseChart,
-    type: d.chartType as InsightChart["type"],
-    subtype: d.chartStyle || undefined,
-    // Keep the original data + roles so InsightChartView can map columns.
-    // The candidate type is the only thing we override.
-  } as InsightChart;
-}
-
 export function ChartSuggestionDialog({
   card,
   projectId,
@@ -56,7 +52,39 @@ export function ChartSuggestionDialog({
 }: ChartSuggestionDialogProps) {
   const { toasts, push, dismiss } = useToasts();
 
-  const candidates = card.chartCandidates?.length ? card.chartCandidates : FALLBACK_CANDIDATES;
+  const candidateData = useMemo(
+    () => (card.chart ? insightChartCandidateData(card.chart) : { columns: [], rows: [] }),
+    [card.chart],
+  );
+  const candidatesMutation = useMutation({
+    mutationFn: () =>
+      apiClient.post<ChartCandidatesResponse>(
+        "/api/ai/actions/dashboard-designer/chart-candidates",
+        {
+          project_id: projectId,
+          columns: candidateData.columns,
+          rows: candidateData.rows,
+        },
+      ),
+  });
+  const { mutate: refreshCandidates } = candidatesMutation;
+  useEffect(() => {
+    if (!open || candidateData.rows.length === 0) return;
+    refreshCandidates();
+  }, [open, card.insightId, candidateData.rows.length, refreshCandidates]);
+
+  const candidates = useMemo(() => {
+    if (candidatesMutation.isSuccess) {
+      return candidatesMutation.data?.chartCandidates ?? [];
+    }
+    return card.chartCandidates?.length
+      ? card.chartCandidates
+      : FALLBACK_CANDIDATES;
+  }, [
+    candidatesMutation.data?.chartCandidates,
+    candidatesMutation.isSuccess,
+    card.chartCandidates,
+  ]);
 
   const initialSelected = useMemo(() => {
     const currentType = card.chart?.type;
@@ -72,6 +100,10 @@ export function ChartSuggestionDialog({
 
   const [selected, setSelected] = useState<VizCandidate | null>(initialSelected);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) setSelected(initialSelected);
+  }, [open, initialSelected]);
 
   if (!open) return null;
 
@@ -130,7 +162,7 @@ export function ChartSuggestionDialog({
 
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
           {candidates.map((candidate, idx) => {
-            const candidateChart = buildCandidateChart(card.chart, candidate);
+            const candidateChart = applyCandidateToInsightChart(card.chart!, candidate);
             const isSelected =
               selected?.decision.chartType === candidate.decision.chartType &&
               selected?.decision.chartStyle === candidate.decision.chartStyle;
@@ -164,6 +196,24 @@ export function ChartSuggestionDialog({
             );
           })}
         </div>
+
+        {candidatesMutation.isPending && (
+          <p className="mt-2 text-[11px] text-ink-tertiary" role="status">
+            Rechecking chart compatibility against this insight&apos;s data...
+          </p>
+        )}
+        {candidatesMutation.isError && (
+          <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-warning" role="alert">
+            <span>Couldn&apos;t refresh compatibility; showing the saved chart options.</span>
+            <button
+              type="button"
+              className="rounded border border-line-tertiary px-2 py-1 text-ink-secondary"
+              onClick={() => refreshCandidates()}
+            >
+              Retry
+            </button>
+          </div>
+        )}
 
         <div className="mt-4 flex shrink-0 justify-end gap-2">
           <button

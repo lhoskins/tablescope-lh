@@ -83,6 +83,84 @@ export function buildHeatmapOption(
   isDark: boolean
 ) {
   const tiny = !!opts.tinyMode;
+  if (widget.chartSubtype === "calendar") {
+    if (data.length === 0) {
+      return {
+        _noData: true,
+        title: {
+          text: "Calendar heatmap needs daily dates and a numeric value.",
+          left: "center",
+          top: "center",
+          textStyle: { color: "#94a3b8", fontSize: 12 },
+        },
+      };
+    }
+    const calendarData = data
+      .map((row) => {
+        const rawDate = String(row[xKey] ?? "").slice(0, 10);
+        const value = toNumber(row[yKey]);
+        return /^\d{4}-\d{2}-\d{2}$/.test(rawDate) && value !== null
+          ? ([rawDate, value] as [string, number])
+          : null;
+      })
+      .filter((item): item is [string, number] => item !== null);
+    if (calendarData.length === 0) {
+      return {
+        _noData: true,
+        title: {
+          text: "Calendar heatmap needs ISO daily dates and a numeric value.",
+          left: "center",
+          top: "center",
+          textStyle: { color: "#94a3b8", fontSize: 12 },
+        },
+      };
+    }
+    const values = calendarData.map(([, value]) => value);
+    const dates = calendarData.map(([day]) => day).sort();
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const colorsForChart = axisColors(isDark);
+    return {
+      aria: { enabled: true, description: `${widget.title || widget.type} calendar heatmap` },
+      tooltip:
+        opts.showTooltip === false || tiny
+          ? { show: false }
+          : {
+              formatter: (p: any) =>
+                `${p.data?.[0] ?? ""}: ${formatNumber(Number(p.data?.[1] ?? 0), opts.yAxisFormat, undefined, opts.currencySymbol)}`,
+            },
+      visualMap: {
+        min,
+        max: max === min ? min + 1 : max,
+        calculable: !tiny,
+        orient: "horizontal" as const,
+        left: "center" as const,
+        bottom: 0,
+        inRange: { color: [colors[0], colors[1 % colors.length], colors[2 % colors.length]] },
+      },
+      calendar: {
+        top: 24,
+        left: 38,
+        right: 18,
+        bottom: tiny ? 8 : 42,
+        range: [dates[0], dates[dates.length - 1]],
+        cellSize: ["auto", 15],
+        splitLine: { show: false },
+        itemStyle: { borderWidth: 2, borderColor: isDark ? "#0f172a" : "#ffffff" },
+        dayLabel: { show: !tiny, color: colorsForChart.text },
+        monthLabel: { show: !tiny, color: colorsForChart.text },
+        yearLabel: { show: false },
+      },
+      series: [
+        {
+          type: "heatmap" as const,
+          coordinateSystem: "calendar" as const,
+          data: calendarData,
+        },
+      ],
+      animation: !!opts.animate,
+    };
+  }
   const groupKey = widget.groupByColumn;
   if (!groupKey || data.length === 0) {
     return {

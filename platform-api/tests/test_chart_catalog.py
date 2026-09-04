@@ -49,14 +49,30 @@ def test_allowed_plan_chart_types_covers_families_and_subtypes():
     assert "not_a_chart" not in allowed
 
 
-def test_time_series_shape_excludes_category_and_single_value_families():
-    """A monthly single-metric series must not offer gauge/radial_bar/pie/etc."""
+def test_time_series_shape_allows_simple_bar_but_excludes_category_only_families():
+    """A monthly series supports a simple period bar, not category-only charts."""
     shape = ShapeSummary(dims=0, measures=1, traits=frozenset({"time", "period_only_dimension"}))
     families = {r.family for r in eligible_families(shape)}
     assert "line" in families
     assert "area" in families
-    for wrong in ("gauge", "kpi", "radial_bar", "pie", "radar", "funnel", "treemap", "bar"):
+    assert "bar" in families
+    for wrong in ("gauge", "kpi", "radial_bar", "pie", "radar", "funnel", "treemap"):
         assert wrong not in families, f"{wrong} offered for a time series"
+
+
+def test_needs_any_requires_at_least_one_declared_trait():
+    bar = load_chart_catalog()["bar"]
+    assert bar.eligible(ShapeSummary(dims=0, measures=1, traits=frozenset({"time"})))
+    assert bar.eligible(ShapeSummary(dims=1, measures=1, traits=frozenset({"category"})))
+    assert not bar.eligible(ShapeSummary(dims=0, measures=1, traits=frozenset()))
+
+
+def test_calendar_heatmap_requires_daily_time_trait():
+    calendar = load_chart_catalog()["calendar_heatmap"]
+    monthly = ShapeSummary(dims=0, measures=1, traits=frozenset({"time"}))
+    daily = ShapeSummary(dims=0, measures=1, traits=frozenset({"time", "daily"}))
+    assert not calendar.eligible(monthly)
+    assert calendar.eligible(daily)
 
 
 def test_single_scalar_shape_prefers_kpi_then_gauge():

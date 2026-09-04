@@ -42,6 +42,7 @@ class ChartFamilyRule:
     min_measures: int = 0
     max_measures: int | None = None
     needs: frozenset[str] = frozenset()
+    needs_any: frozenset[str] = frozenset()
     excludes: frozenset[str] = frozenset()
     roles: dict[str, str] = field(default_factory=dict)
     subtypes: tuple[str, ...] = ()
@@ -65,6 +66,8 @@ class ChartFamilyRule:
         if self.max_measures is not None and shape.measures > self.max_measures:
             return False
         if not self.needs <= shape.traits:
+            return False
+        if self.needs_any and not (self.needs_any & shape.traits):
             return False
         if self.excludes & shape.traits:
             return False
@@ -152,6 +155,7 @@ def _parse_rules_block(family_heading: str, text: str, guidance: str) -> ChartFa
         min_measures=min_measures if min_measures is not None else 0,
         max_measures=_parse_int(fields.get("max_measures", "")),
         needs=frozenset(_parse_csv(fields.get("needs", ""))),
+        needs_any=frozenset(_parse_csv(fields.get("needs_any", ""))),
         excludes=frozenset(_parse_csv(fields.get("excludes", ""))),
         roles=_parse_roles(fields.get("roles", "")),
         subtypes=_parse_csv(fields.get("subtypes", "")),
@@ -271,7 +275,9 @@ def fit_score(rule: ChartFamilyRule, shape: ShapeSummary, facts: ShapeFacts) -> 
     # Specificity: a family that consumes the data's full structure explains it
     # better than one that discards a dimension/measure (a 2-dimension matrix is
     # a heatmap, not a bar chart that drops a dimension).
-    if shape.dims and rule.min_dims >= shape.dims:
+    if shape.dims and (
+        rule.min_dims >= shape.dims or "category" in rule.needs_any
+    ):
         confidence += 0.15
     if shape.measures >= 2 and rule.min_measures >= shape.measures:
         confidence += 0.05
