@@ -150,8 +150,11 @@ async def _can_access_project(
         return None
     if project.owner_id == context.user_id:
         return project
-    if project.is_shared:
-        return project
+    # TS-ISO-003: `is_shared` used to short-circuit here and grant any
+    # same-tenant user access without checking membership at all -- it
+    # controls discoverability, not automatic authorization (see
+    # app.services.project_access, the single canonical policy). A shared
+    # project still requires ACTIVE membership for non-owners.
     member = await session.scalar(
         select(ProjectMember).where(
             ProjectMember.project_id == project_id,

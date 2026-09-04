@@ -20,6 +20,7 @@ from .constants import (
 )
 from .loader import _is_canvas_hidden, _load_stored_graph, enrich_node
 from .renderer import build_graph_payload, build_node_centric_graph_from_snapshot
+from .visibility import filter_payload_for_viewer
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ def _center_eligible_keys(
 
 
 async def _precache_center_cards(
+    session: AsyncSession,
     raw_nodes: list[dict[str, Any]],
     raw_edges: list[dict[str, Any]],
     *,
@@ -64,8 +66,19 @@ async def _precache_center_cards(
     Enrichment runs with bounded concurrency. Centres are AI-only: a centre
     whose AI enrichment yields no grounded card is still cached (with an empty
     card list) so the read path serves it from cache without re-calling the AI.
+
+    KG-06: a document private to another project member is stripped before
+    it ever becomes AI context (role isn't known this deep in a background
+    rebuild, so this conservatively filters as a non-admin -- worst case a
+    tenant admin's own precache omits admin-only evidence, never the reverse).
     """
     from app.services.knowledge_graph_ai import enrich_payload_with_ai
+
+    from .visibility import filter_raw_graph_for_user
+
+    raw_nodes, raw_edges = await filter_raw_graph_for_user(
+        session, raw_nodes, raw_edges, tenant_id=tenant_id, user_id=user_id, role=None,
+    )
 
     center_keys = _center_eligible_keys(raw_nodes)
     if not center_keys:
@@ -133,7 +146,7 @@ async def rebuild_project_graph_snapshot(
     ai_cards_by_center: dict[str, Any] = {}
     if enrich_with_ai and user_id is not None:
         ai_cards_by_center = await _precache_center_cards(
-            raw_nodes, raw_edges,
+            session, raw_nodes, raw_edges,
             tenant_id=tenant_id, user_id=user_id, project_id=project_id,
         )
 
@@ -257,6 +270,7 @@ async def build_node_centric_graph(
     tenant_id: int,
     project_id: int,
     user_id: int | None = None,
+    role: str | None = None,
     center_node: str | None = None,
     lens: str = "insight-first",
     min_confidence: float = DEFAULT_MIN_CONFIDENCE,
@@ -307,4 +321,11 @@ async def build_node_centric_graph(
     payload["snapshotId"] = snapshot.get("id")
     payload["pipelineVersion"] = snapshot.get("pipelineVersion", "")
     payload["isCached"] = not refresh
+
+    # The cached snapshot is shared by every project member, but a private
+    # document is only for its owner (and tenant admins) -- filter per the
+    # actual requesting viewer on every read, not just at build time (KG-04).
+    payload = await filter_payload_for_viewer(
+        session, payload, tenant_id=tenant_id, user_id=user_id, role=role,
+    )
     return payload

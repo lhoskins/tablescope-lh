@@ -9,7 +9,11 @@ AI graph before the node-centric payload is built.
 from __future__ import annotations
 
 from app.models.ai_project_graph import AIProjectGraphEdge, AIProjectGraphNode
+from app.models.dashboard import Dashboard
+from app.models.database_data_source import DatabaseDataSource
+from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project
+from app.models.project_asset import ProjectAsset
 from app.models.reference_library import (
     TIER_COMPANY,
     TIER_INDUSTRY,
@@ -359,3 +363,79 @@ async def test_company_library_reaches_ai_server_request(db_session) -> None:
     assert company["display_group"] == "Authoritative Reference Library"
     assert company["relationship"] == "company_reference"
     assert company["direction"] == "out"  # hub -> company library
+
+
+async def test_structural_collectors_ignore_tenant_mismatched_rows(db_session) -> None:
+    """KG-03: file/database sources, dashboards, and assets carry their own
+    tenant_id -- a row whose project_id matches but tenant_id doesn't (a data
+    integrity anomaly, e.g. from a bug elsewhere) must never surface in
+    another tenant's graph, even though project ids are never reused across
+    tenants and the project itself is already tenant-checked above.
+    """
+    tenant_id = 1
+    other_tenant_id = 2
+    project_id = await _seed_project(db_session, tenant_id=tenant_id)
+
+    # Correctly tenant-scoped rows -- these must appear.
+    db_session.add_all(
+        [
+            FileSourceMeta(
+                tenant_id=tenant_id, owner_id=1, project_id=project_id,
+                view_name="ok_file", file_name="ok_file.csv",
+            ),
+            DatabaseDataSource(
+                tenant_id=tenant_id, project_id=project_id,
+                display_name="OK DB Source", source_type="database_table",
+                db_type="mysql", host="db.example.com", port=3306,
+                database_name="quality", table_name="ok_table", username="svc",
+                teiid_model_name="m_ok", teiid_table_name="ok_table",
+                teiid_view_name="v_ok_table", teiid_jndi_name="java:/ok",
+                status="active",
+            ),
+            Dashboard(
+                tenant_id=tenant_id, project_id=project_id, owner_id=1,
+                name="OK Dashboard",
+            ),
+            ProjectAsset(
+                tenant_id=tenant_id, project_id=project_id,
+                asset_type="document", title="OK Asset", filename="ok.pdf",
+                storage_location="ok.pdf",
+            ),
+        ]
+    )
+    # Tenant-mismatched rows with the same project_id -- must never appear.
+    db_session.add_all(
+        [
+            FileSourceMeta(
+                tenant_id=other_tenant_id, owner_id=1, project_id=project_id,
+                view_name="rogue_file", file_name="rogue_file.csv",
+            ),
+            DatabaseDataSource(
+                tenant_id=other_tenant_id, project_id=project_id,
+                display_name="Rogue DB Source", source_type="database_table",
+                db_type="mysql", host="db.example.com", port=3306,
+                database_name="quality", table_name="rogue_table", username="svc",
+                teiid_model_name="m_rogue", teiid_table_name="rogue_table",
+                teiid_view_name="v_rogue_table", teiid_jndi_name="java:/rogue",
+                status="active",
+            ),
+            Dashboard(
+                tenant_id=other_tenant_id, project_id=project_id, owner_id=1,
+                name="Rogue Dashboard",
+            ),
+            ProjectAsset(
+                tenant_id=other_tenant_id, project_id=project_id,
+                asset_type="document", title="Rogue Asset", filename="rogue.pdf",
+                storage_location="rogue.pdf",
+            ),
+        ]
+    )
+    await db_session.flush()
+
+    nodes, _edges, _hub = await collect_structural_graph(
+        db_session, tenant_id=tenant_id, project_id=project_id
+    )
+    names = {n["name"] for n in nodes}
+
+    assert {"ok_file", "OK DB Source", "OK Dashboard", "OK Asset"} <= names
+    assert not names & {"rogue_file", "Rogue DB Source", "Rogue Dashboard", "Rogue Asset"}

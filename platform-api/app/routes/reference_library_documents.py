@@ -86,6 +86,8 @@ async def _project_read_access(
         select(ProjectMember).where(
             ProjectMember.project_id == project_id,
             ProjectMember.user_id == context.user_id,
+            # TS-ISO-003: a removed/deactivated member must not keep access.
+            ProjectMember.is_active.is_(True),
         )
     )
     if member is None:

@@ -24,6 +24,7 @@ from app.schemas.knowledge_graph import (
 from app.services.executive_insight_dependencies import ExecutiveInsightDependencyService
 from app.services.knowledge_graph_health import KnowledgeGraphHealthService
 from app.services.knowledge_graph_lifecycle import KnowledgeGraphLifecycleManager
+from app.services.project_access import authorize_project_access
 from app.tasks.workflows import (
     enqueue_rebuild_knowledge_graph,
     enqueue_run_knowledge_graph_health_check,
@@ -51,8 +52,15 @@ def _health(
 async def get_knowledge_graph_status(
     project_id: int,
     lifecycle: KnowledgeGraphLifecycleManager = Depends(_lifecycle),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> KnowledgeGraphStatusRead:
     """Return the current knowledge graph lifecycle status, builds, and versions."""
+    await authorize_project_access(
+        lifecycle.session,
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        project_id=project_id,
+    )
     data = await lifecycle.get_status(project_id)
     return KnowledgeGraphStatusRead.model_validate(data)
 
@@ -64,6 +72,12 @@ async def request_full_rebuild(
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> KnowledgeGraphRebuildResponse:
     """Queue a full knowledge graph rebuild for the project."""
+    await authorize_project_access(
+        lifecycle.session,
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        project_id=project_id,
+    )
     build, build_type = await lifecycle.request_full_rebuild(project_id)
     enqueued = False
     try:
@@ -90,6 +104,12 @@ async def request_incremental_rebuild(
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> KnowledgeGraphRebuildResponse:
     """Analyze the supplied change set and queue an incremental or full rebuild."""
+    await authorize_project_access(
+        lifecycle.session,
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        project_id=project_id,
+    )
     build, build_type = await lifecycle.request_incremental_rebuild(
         project_id,
         change_set=[item.model_dump() for item in payload.change_set],
@@ -117,8 +137,15 @@ async def request_incremental_rebuild(
 async def list_knowledge_graph_builds(
     project_id: int,
     lifecycle: KnowledgeGraphLifecycleManager = Depends(_lifecycle),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> list[KnowledgeGraphBuildRead]:
     """List recent knowledge graph builds for the project."""
+    await authorize_project_access(
+        lifecycle.session,
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        project_id=project_id,
+    )
     data = await lifecycle.get_status(project_id)
     return [KnowledgeGraphBuildRead.model_validate(b) for b in data["builds"]]
 
@@ -128,10 +155,17 @@ async def get_knowledge_graph_build(
     project_id: int,
     build_id: int,
     lifecycle: KnowledgeGraphLifecycleManager = Depends(_lifecycle),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> KnowledgeGraphBuildRead:
     """Return a single build record."""
     from app.models import KnowledgeGraphBuild
 
+    await authorize_project_access(
+        lifecycle.session,
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        project_id=project_id,
+    )
     build = await lifecycle.session.get(KnowledgeGraphBuild, build_id)
     if build is None or build.project_id != project_id:
         raise HTTPException(status_code=404, detail="Build not found")
@@ -145,6 +179,12 @@ async def run_knowledge_graph_health_check(
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> KnowledgeGraphHealthCheckRead:
     """Run an on-demand health check and enqueue it via the worker."""
+    await authorize_project_access(
+        health.session,
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        project_id=project_id,
+    )
     hc = await health.run_health_check(project_id, check_type="on_demand")
     try:
         await enqueue_run_knowledge_graph_health_check(project_id)
@@ -159,8 +199,15 @@ async def run_knowledge_graph_health_check(
 async def get_knowledge_graph_health(
     project_id: int,
     health: KnowledgeGraphHealthService = Depends(_health),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> KnowledgeGraphHealthCheckRead:
     """Return the latest health check result."""
+    await authorize_project_access(
+        health.session,
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        project_id=project_id,
+    )
     latest = await health.session.scalar(
         select(KnowledgeGraphHealthCheck)
         .where(KnowledgeGraphHealthCheck.project_id == project_id)
@@ -175,8 +222,15 @@ async def get_knowledge_graph_health(
 async def list_knowledge_graph_versions(
     project_id: int,
     lifecycle: KnowledgeGraphLifecycleManager = Depends(_lifecycle),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> list[KnowledgeGraphVersionRead]:
     """List recent knowledge graph versions."""
+    await authorize_project_access(
+        lifecycle.session,
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        project_id=project_id,
+    )
     data = await lifecycle.get_status(project_id)
     return [KnowledgeGraphVersionRead.model_validate(v) for v in data["versions"]]
 
@@ -188,6 +242,12 @@ async def get_executive_insight_dependency(
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> ExecutiveInsightDependencyRead:
     """Return Executive Insight readiness based on the active knowledge graph."""
+    await authorize_project_access(
+        session,
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        project_id=project_id,
+    )
     service = ExecutiveInsightDependencyService(session)
     dep = await service.check(project_id)
     return ExecutiveInsightDependencyRead(**dep)
