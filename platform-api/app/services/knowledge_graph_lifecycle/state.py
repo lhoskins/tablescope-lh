@@ -131,7 +131,15 @@ class StateMixin(LifecycleBase):
 
 
     async def activate_version(self, graph_id: int, version_id: int) -> KnowledgeGraph:
-        """Atomically activate a validated candidate version and supersede the prior active."""
+        """Atomically activate a validated candidate version and supersede the prior active.
+
+        KG-45: an older, slower build can finish (and call this) after a newer,
+        faster build already activated its own version -- out-of-order
+        completion must not regress the active graph. If the version already
+        active has a higher ``version_number`` than the one being activated,
+        this is a no-op: the caller's candidate stays superseded/unactivated
+        rather than clobbering a genuinely newer active version.
+        """
         graph = await self.session.get(KnowledgeGraph, graph_id)
         if graph is None:
             raise HTTPException(
@@ -145,11 +153,23 @@ class StateMixin(LifecycleBase):
             )
 
         previous_active_id = graph.active_version_id
-        if previous_active_id:
-            prev = await self.session.get(KnowledgeGraphVersion, previous_active_id)
-            if prev is not None:
-                prev.status = "superseded"
-                prev.superseded_at = datetime.now(UTC)
+        prev = (
+            await self.session.get(KnowledgeGraphVersion, previous_active_id)
+            if previous_active_id
+            else None
+        )
+        if prev is not None and prev.version_number > version.version_number:
+            logger.warning(
+                "KG activate_version: skipping out-of-order activation of version %s "
+                "(v%s) for graph %s -- active version %s (v%s) is newer",
+                version_id, version.version_number, graph_id,
+                previous_active_id, prev.version_number,
+            )
+            return graph
+
+        if prev is not None:
+            prev.status = "superseded"
+            prev.superseded_at = datetime.now(UTC)
 
         version.status = "active"
         version.activated_at = datetime.now(UTC)
@@ -187,13 +207,28 @@ class StateMixin(LifecycleBase):
 
 
     async def recover_stale_builds(self, *, older_than_seconds: int = 600) -> list[int]:
-        """Find builds stuck in queued/building/validating and mark them failed."""
+        """Find builds stuck in queued/building/validating and mark them failed.
+
+        KG-46: ``heartbeat_at < cutoff`` never matches a NULL heartbeat in
+        SQL, so a build that was queued but never picked up by a worker
+        (lost queue message, worker crash before dequeue) was invisible to
+        this recovery pass forever. Builds are now given a heartbeat at
+        queue time (see ``request_full_rebuild``/``request_incremental_rebuild``),
+        but this query also falls back to ``queued_at`` then the row's own
+        ``created_at`` (never null) as defense-in-depth against any build
+        that still ends up with a null heartbeat.
+        """
         cutoff = datetime.now(UTC) - timedelta(seconds=older_than_seconds)
+        staleness = func.coalesce(
+            KnowledgeGraphBuild.heartbeat_at,
+            KnowledgeGraphBuild.queued_at,
+            KnowledgeGraphBuild.created_at,
+        )
         builds = (
             await self.session.scalars(
                 select(KnowledgeGraphBuild).where(
                     KnowledgeGraphBuild.status.in_(["queued", "building", "validating"]),
-                    KnowledgeGraphBuild.heartbeat_at < cutoff,
+                    staleness < cutoff,
                 )
             )
         ).all()

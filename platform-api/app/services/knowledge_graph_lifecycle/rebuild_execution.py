@@ -29,6 +29,10 @@ from .incremental_cards import affected_center_keys
 from .state import logger
 from .structural_integrity import evaluate_structural_integrity
 
+# KG-45: a build in any of these statuses is done -- re-running it for a
+# redelivered/retried queue message would only redo (and duplicate) work.
+_TERMINAL_BUILD_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
+
 
 class RebuildExecutionMixin(LifecycleBase):
     """KnowledgeGraphLifecycleManager mixin."""
@@ -37,6 +41,17 @@ class RebuildExecutionMixin(LifecycleBase):
         build = await self.session.get(KnowledgeGraphBuild, build_id)
         if build is None:
             logger.error("Knowledge graph build %s not found", build_id)
+            return
+
+        # KG-45: a redelivered/retried queue message for a build that already
+        # finished must not redo the work -- it would create a redundant
+        # version/snapshot (and, without this guard, redundant AI spend) for
+        # a build_id that's already succeeded, failed, or been cancelled.
+        if build.status in _TERMINAL_BUILD_STATUSES:
+            logger.info(
+                "Knowledge graph build %s already %s; skipping duplicate run",
+                build_id, build.status,
+            )
             return
 
         graph = await self.session.get(KnowledgeGraph, build.graph_id)
@@ -190,6 +205,13 @@ class RebuildExecutionMixin(LifecycleBase):
         """Execute an incremental rebuild, falling back to full if validation fails."""
         build = await self.session.get(KnowledgeGraphBuild, build_id)
         if build is None:
+            return
+        # KG-45: see the matching guard in run_full_rebuild.
+        if build.status in _TERMINAL_BUILD_STATUSES:
+            logger.info(
+                "Knowledge graph build %s already %s; skipping duplicate run",
+                build_id, build.status,
+            )
             return
         if build.build_type != "incremental":
             # Something scheduled the wrong runner; defer to full rebuild logic.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import and_, func, or_, select
@@ -33,6 +34,21 @@ from app.services.knowledge_graph_builder import (
 )
 
 from .base import LifecycleBase
+
+# KG-13/KG-44: the canonical set of graph-relevant sources -- both
+# ``compute_source_fingerprint`` (staleness hashing) and
+# ``current_source_watermark`` (checkpoint verification) iterate this same
+# list, so the two can no longer silently diverge on which sources count.
+_FINGERPRINT_MODELS: list[tuple[Any, str, str, str]] = [
+    (ProjectGoal, "goals", "id", "updated_at"),
+    (ProjectMetric, "metrics", "id", "updated_at"),
+    (ProjectRisk, "risks", "id", "updated_at"),
+    (DatabaseDataSource, "data_sources", "id", "updated_at"),
+    (FileSourceMeta, "file_sources", "id", "updated_at"),
+    (SavedQuery, "saved_queries", "id", "updated_at"),
+    (Dashboard, "dashboards", "id", "updated_at"),
+    (ProjectAsset, "assets", "id", "updated_at"),
+]
 
 
 class BootstrapMixin(LifecycleBase):
@@ -111,17 +127,7 @@ class BootstrapMixin(LifecycleBase):
         if settings:
             parts["project_version"] = settings.version
 
-        fingerprint_models: list[tuple[Any, str, str, str]] = [
-            (ProjectGoal, "goals", "id", "updated_at"),
-            (ProjectMetric, "metrics", "id", "updated_at"),
-            (ProjectRisk, "risks", "id", "updated_at"),
-            (DatabaseDataSource, "data_sources", "id", "updated_at"),
-            (FileSourceMeta, "file_sources", "id", "updated_at"),
-            (SavedQuery, "saved_queries", "id", "updated_at"),
-            (Dashboard, "dashboards", "id", "updated_at"),
-            (ProjectAsset, "assets", "id", "updated_at"),
-        ]
-        for model, key, id_attr, ts_attr in fingerprint_models:
+        for model, key, id_attr, ts_attr in _FINGERPRINT_MODELS:
             id_col = getattr(model, id_attr)
             ts_col = getattr(model, ts_attr)
             stmt = select(id_col, ts_col).where(model.project_id == project_id)
@@ -184,5 +190,77 @@ class BootstrapMixin(LifecycleBase):
 
         serialized = json.dumps(parts, sort_keys=True, default=str)
         return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+    async def current_source_watermark(
+        self, project_id: int, tenant_id: int,
+    ) -> datetime | None:
+        """KG-44: latest ``updated_at`` across every graph-relevant source.
+
+        ``_verify_source_checkpoint`` previously only watched
+        ``AIProjectGraphNode``/``AIProjectGraphEdge`` staging-table
+        ``created_at`` -- a row *update* never bumps ``created_at`` (those
+        tables have no ``updated_at`` column), and a change to any
+        non-staging source (a goal/metric/risk edit, a file/query/dashboard
+        rename, a reference-library update, a repository scan) was never
+        watched at all, so a coalesced build could start before such a
+        change was actually visible to the builder. This iterates the same
+        source list ``compute_source_fingerprint`` hashes, so the two can't
+        drift apart on which sources count as graph-relevant.
+        """
+        watermarks: list[datetime] = []
+
+        for model, _key, _id_attr, ts_attr in _FINGERPRINT_MODELS:
+            ts_col = getattr(model, ts_attr)
+            stmt = select(func.max(ts_col)).where(model.project_id == project_id)
+            if hasattr(model, "tenant_id"):
+                stmt = stmt.where(model.tenant_id == tenant_id)
+            ts = await self.session.scalar(stmt)
+            if ts is not None:
+                watermarks.append(ts)
+
+        ref_ts = await self.session.scalar(
+            select(func.max(ReferenceDocument.updated_at)).where(
+                ReferenceDocument.status == "active",
+                or_(
+                    ReferenceDocument.tier == TIER_INDUSTRY,
+                    and_(
+                        ReferenceDocument.tier == TIER_COMPANY,
+                        ReferenceDocument.tenant_id == tenant_id,
+                    ),
+                    and_(
+                        ReferenceDocument.tier == TIER_PROJECT,
+                        ReferenceDocument.project_id == project_id,
+                    ),
+                ),
+            )
+        )
+        if ref_ts is not None:
+            watermarks.append(ref_ts)
+
+        scan_ts = await self.session.scalar(
+            select(func.max(RepositoryScan.updated_at))
+            .join(
+                RepositoryConnection,
+                RepositoryScan.connection_id == RepositoryConnection.id,
+            )
+            .where(
+                RepositoryConnection.project_id == project_id,
+                RepositoryConnection.tenant_id == tenant_id,
+            )
+        )
+        if scan_ts is not None:
+            watermarks.append(scan_ts)
+
+        context_ts = await self.session.scalar(
+            select(func.max(ProjectBusinessContext.updated_at)).where(
+                ProjectBusinessContext.project_id == project_id,
+                ProjectBusinessContext.tenant_id == tenant_id,
+            )
+        )
+        if context_ts is not None:
+            watermarks.append(context_ts)
+
+        return max(watermarks) if watermarks else None
 
 

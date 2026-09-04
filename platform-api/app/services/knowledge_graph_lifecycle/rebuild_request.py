@@ -60,6 +60,12 @@ class RebuildRequestMixin(LifecycleBase):
         if duplicate is not None:
             return duplicate, "full"
 
+        # KG-46: set an initial heartbeat at queue time -- otherwise a build
+        # that's never picked up by a worker (lost queue message, worker
+        # crash before dequeue) sits with heartbeat_at NULL forever, and
+        # ``heartbeat_at < cutoff`` never matches NULL in SQL, so
+        # recover_stale_builds can never see it.
+        now = datetime.now(UTC)
         build = KnowledgeGraphBuild(
             graph_id=graph.id,
             tenant_id=graph.tenant_id,
@@ -68,7 +74,8 @@ class RebuildRequestMixin(LifecycleBase):
             build_type="full",
             requested_by=self._resolve_requested_by(requested_by),
             status="queued",
-            queued_at=datetime.now(UTC),
+            queued_at=now,
+            heartbeat_at=now,
             stage="queued",
             progress=0,
         )
@@ -135,6 +142,10 @@ class RebuildRequestMixin(LifecycleBase):
         if source_checkpoint is not None:
             checkpoint_value["timestamp"] = source_checkpoint.isoformat()
 
+        # KG-46: see the matching comment in request_full_rebuild -- a queued
+        # build needs a non-null heartbeat from the start so it can never be
+        # invisible to recover_stale_builds's ``heartbeat_at < cutoff`` filter.
+        now = datetime.now(UTC)
         build = KnowledgeGraphBuild(
             graph_id=graph.id,
             tenant_id=graph.tenant_id,
@@ -143,7 +154,8 @@ class RebuildRequestMixin(LifecycleBase):
             build_type=build_type,
             requested_by=self._resolve_requested_by(requested_by),
             status="queued",
-            queued_at=datetime.now(UTC),
+            queued_at=now,
+            heartbeat_at=now,
             stage="queued",
             progress=0,
             source_checkpoint=checkpoint_value,
@@ -233,8 +245,9 @@ class RebuildRequestMixin(LifecycleBase):
 
         Document/relationship writes are committed before the rebuild is enqueued,
         but replica lag or an early coalesced build can still read a stale view.
-        If the most-recent ``created_at`` on the staging node/edge tables is
-        older than the caller's checkpoint, defer the job so arq retries.
+        If the newest write across the staging node/edge tables *and* every
+        graph-relevant source table (KG-44) is older than the caller's
+        checkpoint, defer the job so arq retries.
         """
         if not build.source_checkpoint:
             return
@@ -268,9 +281,20 @@ class RebuildRequestMixin(LifecycleBase):
         if edge_max is not None and edge_max.tzinfo is None:
             edge_max = edge_max.replace(tzinfo=UTC)
 
-        max_ts = node_max or edge_max
-        if node_max and edge_max:
-            max_ts = max(node_max, edge_max)
+        # KG-44: a row *update* never bumps AIProjectGraphNode/Edge's
+        # created_at (no updated_at column on the staging tables), and a
+        # change to any non-staging source (goal/metric/risk edits, a
+        # file/query/dashboard rename, a reference-library update, a
+        # repository scan) was never watched at all -- so also consult the
+        # watermark across every graph-relevant source table.
+        source_max = await self.current_source_watermark(
+            build.project_id, build.tenant_id,
+        )
+        if source_max is not None and source_max.tzinfo is None:
+            source_max = source_max.replace(tzinfo=UTC)
+
+        candidates = [ts for ts in (node_max, edge_max, source_max) if ts is not None]
+        max_ts = max(candidates) if candidates else None
 
         if max_ts is None or max_ts < checkpoint:
             logger.info(
