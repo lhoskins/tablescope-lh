@@ -236,7 +236,7 @@ async def _kg_context(
     the resulting evidence-access audit row is labeled correctly.
     """
     try:
-        return await collect_knowledge_graph_ai_context(
+        kg_context = await collect_knowledge_graph_ai_context(
             session,
             tenant_id=context.tenant_id,
             project_id=project_id,
@@ -244,6 +244,16 @@ async def _kg_context(
             max_items=max_items,
             surface=surface,
         )
+        if kg_context.get("grounding_status") == "unavailable":
+            # KG-39: fail-open by design (generation proceeds without KG
+            # hypotheses), but must be visible to operators rather than
+            # indistinguishable from a healthy, legitimately-empty graph.
+            logger.warning(
+                "%s for project %s proceeding WITHOUT Knowledge Graph "
+                "grounding (context collection failed)",
+                surface, project_id,
+            )
+        return kg_context
     except Exception:  # context is optional enrichment
         logger.exception(
             "Failed to collect Knowledge Graph context for project %s", project_id,

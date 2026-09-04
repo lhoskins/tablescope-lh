@@ -98,6 +98,16 @@ async def collect_knowledge_graph_ai_context(
     ``knowledge_graph_evidence_access``, so an administrator can later
     reconstruct exactly what evidence informed that feature's answer for
     this tenant/project/user.
+
+    KG-39: the returned block always carries ``grounding_status`` --
+    ``"ok"`` for both a real result and a project that legitimately has no
+    Knowledge Graph content yet, ``"unavailable"`` only when loading the
+    graph itself failed. Previously both cases returned the identical empty
+    shape, so a caller (and, transitively, whatever it generates) could never
+    tell "this project has no KG-worthy content" apart from "the KG failed to
+    load and this answer has no grounding at all" -- callers should degrade
+    visibly (surface a note, log distinctly) rather than silently proceed as
+    if fully grounded.
     """
     empty: dict[str, Any] = {
         "risks": [], "opportunities": [], "gaps": [], "warnings": [],
@@ -106,6 +116,7 @@ async def collect_knowledge_graph_ai_context(
         "processes": [], "entities": [],
         "query_lineage": [], "dashboard_lineage": [],
         "datasource_relationships": [],
+        "grounding_status": "ok",
     }
 
     try:
@@ -113,11 +124,12 @@ async def collect_knowledge_graph_ai_context(
             session, tenant_id=tenant_id, project_id=project_id,
         )
     except Exception:  # context is best-effort; never block AI gen
-        logger.exception(
-            "knowledge_graph_ai_context: failed to load graph (tenant=%s project=%s)",
-            tenant_id, project_id,
+        logger.warning(
+            "KG grounding degraded: failed to load graph for %s "
+            "(tenant=%s project=%s) -- proceeding without KG context",
+            surface, tenant_id, project_id, exc_info=True,
         )
-        return empty
+        return {**empty, "grounding_status": "unavailable"}
 
     if not raw_nodes:
         return empty
@@ -326,4 +338,4 @@ async def collect_knowledge_graph_ai_context(
         for item in items:
             item.pop("_ids", None)
 
-    return {**bucketed, **lineage}
+    return {**bucketed, **lineage, "grounding_status": "ok"}

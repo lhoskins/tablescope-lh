@@ -122,6 +122,17 @@ async def run_ai_intelligence(
                 max_items=10,
                 surface="business_insights",
             )
+            if kg_context.get("grounding_status") == "unavailable":
+                # KG-39: distinguish "the graph legitimately has nothing yet"
+                # from "grounding failed" -- this plan proceeds without KG
+                # hypotheses either way (fail-open by design), but that must
+                # be visible to operators, not indistinguishable from a
+                # quiet, healthy empty result.
+                logger.warning(
+                    "Business Insights for project %s proceeding WITHOUT "
+                    "Knowledge Graph grounding (context collection failed)",
+                    project.id,
+                )
         except Exception as exc:
             logger.warning(
                 "Failed to collect KG context for project %s: %s", project.id, exc

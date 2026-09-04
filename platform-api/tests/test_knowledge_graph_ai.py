@@ -102,6 +102,87 @@ def test_map_card_rejects_fabricated_evidence():
     assert kg_ai._map_card(raw, index=0, center=center, nodes_by_key=nodes_by_key, nodes=payload["nodes"], edges=payload["edges"]) is None
 
 
+# ── KG-31: confidence separation ──────────────────────────────────────
+
+def test_map_card_separates_model_confidence_from_evidence_strength():
+    """A card must carry independent modelConfidence/evidenceStrength fields,
+    not just one opaque confidence number -- and confidence itself is
+    capped by evidence_strength, not merely echoed from the model."""
+    payload = _payload()
+    center = payload["centerNode"]
+    nodes_by_key = {n["graphKey"]: n for n in payload["nodes"]}
+    raw = {
+        "id": "c1",
+        "category": "risk",
+        "severity": "urgent",
+        "title": "CAPA closures slipping",
+        "confidence": 0.95,
+        "evidenceKeys": ["policy:3", "kpi:on_time_closure", "datasource:capa_table"],
+    }
+    card = kg_ai._map_card(
+        raw, index=0, center=center, nodes_by_key=nodes_by_key,
+        nodes=payload["nodes"], edges=payload["edges"],
+    )
+    assert card is not None
+    assert card["modelConfidence"] == 0.95
+    assert 0.0 <= card["evidenceStrength"] <= 1.0
+    assert card["reviewerConfidence"] is None
+    assert card["valid"] is True
+    assert card["confidence"] <= card["modelConfidence"]
+    assert card["confidence"] <= card["evidenceStrength"]
+
+
+def test_map_card_confidence_cannot_exceed_weak_evidence_strength():
+    """The scenario the review calls out: a high self-reported model score
+    must not make a thinly-evidenced claim look authoritative. A single
+    evidence item (even one with a strong structural edge to the center)
+    pulls evidence_strength -- and therefore overall confidence -- below
+    what the model itself claimed."""
+    payload = _payload()
+    center = payload["centerNode"]
+    nodes_by_key = {n["graphKey"]: n for n in payload["nodes"]}
+    raw = {
+        "id": "c4",
+        "title": "Overclaimed finding",
+        "confidence": 0.99,  # the model claims near-certainty
+        "sourceDocuments": ["Quality Manual"],  # single evidence item
+    }
+    card = kg_ai._map_card(
+        raw, index=0, center=center, nodes_by_key=nodes_by_key,
+        nodes=payload["nodes"], edges=payload["edges"],
+    )
+    assert card is not None
+    assert card["modelConfidence"] == 0.99
+    # Thin evidence (a single item) must pull confidence down below the
+    # model's own claimed score, however confident the model was.
+    assert card["confidence"] < card["modelConfidence"]
+    assert card["evidenceStrength"] < 0.85
+
+
+def test_map_card_stronger_evidence_yields_higher_evidence_strength():
+    """More converging, project-grounded, structurally-connected evidence
+    scores higher than a single reference-only match -- evidence_strength is
+    a real signal, not a constant."""
+    payload = _payload()
+    center = payload["centerNode"]
+    nodes_by_key = {n["graphKey"]: n for n in payload["nodes"]}
+    weak_raw = {"id": "weak", "title": "Weak", "confidence": 0.9, "sourceDocuments": ["Quality Manual"]}
+    strong_raw = {
+        "id": "strong", "title": "Strong", "confidence": 0.9,
+        "evidenceKeys": ["policy:3", "kpi:on_time_closure", "datasource:capa_table"],
+    }
+    weak_card = kg_ai._map_card(
+        weak_raw, index=0, center=center, nodes_by_key=nodes_by_key,
+        nodes=payload["nodes"], edges=payload["edges"],
+    )
+    strong_card = kg_ai._map_card(
+        strong_raw, index=1, center=center, nodes_by_key=nodes_by_key,
+        nodes=payload["nodes"], edges=payload["edges"],
+    )
+    assert weak_card is not None and strong_card is not None
+    assert strong_card["evidenceStrength"] > weak_card["evidenceStrength"]
+
+
 def test_map_card_resolves_evidence_by_source_name():
     # The AI returns source document / KPI *names* (not graph keys); they must
     # still map onto the real nodes via label matching.
