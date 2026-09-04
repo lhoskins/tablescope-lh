@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime
 from typing import Any
@@ -21,6 +22,28 @@ from app.services.visualization_engine import (
 
 from .query_helpers import _now_iso, _to_float, logger
 from .schema_context import project_color
+
+_LONG_DECIMAL_RE = re.compile(r"\b\d+\.\d{3,}\b")
+
+
+def _round_long_decimals(text: str) -> str:
+    """Round any number with 3+ decimal digits to 2, e.g. for a percentage
+    cited in narrative text.
+
+    Live finding: an insight card's summary read "AvgVariancePct moves from
+    -1.4538461538461154% in 2026-01 to 13.13846153846154% in 2026-02..." --
+    a Teiid-computed aggregate's raw float precision cited verbatim in
+    LLM-authored narrative text, the same failure mode already fixed for
+    /ai/ask's chat-answer synthesis (ai-server's own _round_long_decimals).
+    Applied here at ``_card()``, the single constructor every insight card's
+    title/summary passes through regardless of which analysis method
+    produced it, rather than chasing every prompt/narrative call site.
+    """
+
+    def _round(match: re.Match[str]) -> str:
+        return f"{float(match.group(0)):.2f}"
+
+    return _LONG_DECIMAL_RE.sub(_round, text)
 
 
 def _card(
@@ -49,6 +72,8 @@ def _card(
     method_envelope: dict[str, Any] | None = None,
     relationship_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    title = _round_long_decimals(title)
+    summary = _round_long_decimals(summary)
     card: dict[str, Any] = {
         "id": f"{project.id}-{insight_type}-{int(datetime.now().timestamp() * 1000) % 100000}",
         "insightId": insight_id or uuid.uuid4().hex,

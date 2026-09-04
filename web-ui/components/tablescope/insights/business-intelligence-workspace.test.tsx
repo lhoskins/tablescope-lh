@@ -227,6 +227,95 @@ describe("BusinessIntelligenceWorkspace", () => {
     expect(screen.getByText("analysis-1 title")).toBeTruthy();
   });
 
+  it("Priority insights tile is led by the most impactful card in its category, not array position 0", () => {
+    // Live report: the Risk/Trend/Opportunity tiles picked whichever card
+    // was first in the array -- not the most severe/impactful one.
+    render(
+      <BusinessIntelligenceWorkspace
+        projectIds={[1]}
+        cards={[
+          card("risk-low", "risk_delivery", "warning"),
+          card("risk-high", "risk_delivery", "critical"),
+        ]}
+        running={false}
+        lastUpdated={new Date("2026-08-25T00:00:00Z")}
+        toolbar={{
+          running: false,
+          lastUpdatedLabel: null,
+          onRefresh: vi.fn(),
+          granularity: 50,
+          onGranularityChange: vi.fn(),
+          availableProjects: [],
+          selectedProjectIds: new Set<string>(),
+          onToggleProject: vi.fn(),
+          onSelectAll: vi.fn(),
+          onClear: vi.fn(),
+        }}
+        actions={{}}
+        feedback={{ feedbackById: {}, savingFeedback: false }}
+        emptyMessages={{
+          risks: "No risks",
+          trends: "No trends",
+          opportunities: "No opportunities",
+          analysis: "No analysis",
+        }}
+        showToolbar={false}
+      />,
+    );
+
+    // Synthesized title: "2 risks — led by risk-high title". Appears in
+    // both the Priority insights tile and the Executive Brief here (this
+    // scenario has only risk cards, so risk-high also wins the executive
+    // brief) -- assert it renders at all, and never the array-first card.
+    expect(screen.getAllByText(/led by risk-high title/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/led by risk-low title/)).toBeNull();
+    // Severity badge reflects the actual lead card (critical), not the
+    // array-first card (warning).
+    expect(screen.getByText("Risk · critical")).toBeInTheDocument();
+  });
+
+  it("shows a neutral loading state instead of 'No pressing matters' during the initial fetch", () => {
+    // Live report: a static "No Pressing" message showed before the
+    // Executive Brief had even finished its first load -- `running` (an
+    // active AI refresh) was false, but so was there any data yet, and the
+    // two were being treated as the same "nothing to show" case.
+    render(
+      <BusinessIntelligenceWorkspace
+        projectIds={[1]}
+        cards={[]}
+        running={false}
+        initialLoading={true}
+        lastUpdated={null}
+        toolbar={{
+          running: false,
+          lastUpdatedLabel: null,
+          onRefresh: vi.fn(),
+          granularity: 50,
+          onGranularityChange: vi.fn(),
+          availableProjects: [],
+          selectedProjectIds: new Set<string>(),
+          onToggleProject: vi.fn(),
+          onSelectAll: vi.fn(),
+          onClear: vi.fn(),
+        }}
+        actions={{}}
+        feedback={{ feedbackById: {}, savingFeedback: false }}
+        emptyMessages={{
+          risks: "No risks",
+          trends: "No trends",
+          opportunities: "No opportunities",
+          analysis: "No analysis",
+        }}
+        showToolbar={false}
+      />,
+    );
+
+    expect(screen.getByText(/Loading the executive briefing/)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/No pressing matters require executive attention/),
+    ).toBeNull();
+  });
+
   it("renders the passed header beside the toolbar", () => {
     render(
       <BusinessIntelligenceWorkspace
