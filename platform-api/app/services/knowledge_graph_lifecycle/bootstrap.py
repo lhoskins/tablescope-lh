@@ -4,11 +4,12 @@ import hashlib
 import json
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 
 from app.models import (
     Dashboard,
     DatabaseDataSource,
+    FileSourceMeta,
     KnowledgeGraph,
     KnowledgeGraphVersion,
     Project,
@@ -20,6 +21,12 @@ from app.models import (
     RepositoryConnection,
     RepositoryScan,
     SavedQuery,
+)
+from app.models.reference_library import (
+    TIER_COMPANY,
+    TIER_INDUSTRY,
+    TIER_PROJECT,
+    ReferenceDocument,
 )
 from app.services.knowledge_graph_builder import (
     SNAPSHOT_PIPELINE_VERSION,
@@ -86,9 +93,11 @@ class BootstrapMixin(LifecycleBase):
             "metrics": [],
             "risks": [],
             "data_sources": [],
+            "file_sources": [],
             "saved_queries": [],
             "dashboards": [],
             "assets": [],
+            "reference_documents": [],
             "repository_scans": [],
             "pipeline_version": SNAPSHOT_PIPELINE_VERSION,
         }
@@ -107,6 +116,7 @@ class BootstrapMixin(LifecycleBase):
             (ProjectMetric, "metrics", "id", "updated_at"),
             (ProjectRisk, "risks", "id", "updated_at"),
             (DatabaseDataSource, "data_sources", "id", "updated_at"),
+            (FileSourceMeta, "file_sources", "id", "updated_at"),
             (SavedQuery, "saved_queries", "id", "updated_at"),
             (Dashboard, "dashboards", "id", "updated_at"),
             (ProjectAsset, "assets", "id", "updated_at"),
@@ -125,6 +135,34 @@ class BootstrapMixin(LifecycleBase):
                 ],
                 key=lambda x: x[0],
             )
+
+        # Reference Library: same tier-based scope collect_structural_graph
+        # uses (project docs, tenant-wide company docs, and global industry
+        # standards) -- KG-13, so updating any of them (including one another
+        # tenant/project's active industry standard) marks this project's
+        # graph stale, matching what the collector actually pulls in.
+        ref_rows = (
+            await self.session.execute(
+                select(ReferenceDocument.id, ReferenceDocument.updated_at).where(
+                    ReferenceDocument.status == "active",
+                    or_(
+                        ReferenceDocument.tier == TIER_INDUSTRY,
+                        and_(
+                            ReferenceDocument.tier == TIER_COMPANY,
+                            ReferenceDocument.tenant_id == tenant_id,
+                        ),
+                        and_(
+                            ReferenceDocument.tier == TIER_PROJECT,
+                            ReferenceDocument.project_id == project_id,
+                        ),
+                    ),
+                )
+            )
+        ).all()
+        parts["reference_documents"] = sorted(
+            [(r[0], r[1].isoformat() if r[1] else None) for r in ref_rows],
+            key=lambda x: x[0],
+        )
 
         conn_ids = (
             await self.session.scalars(
