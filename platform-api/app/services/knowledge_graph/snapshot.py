@@ -58,6 +58,7 @@ async def _precache_center_cards(
     tenant_id: int,
     user_id: int,
     project_id: int,
+    center_keys: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run AI enrichment for every centre-eligible node and return the bundles.
 
@@ -71,6 +72,12 @@ async def _precache_center_cards(
     it ever becomes AI context (role isn't known this deep in a background
     rebuild, so this conservatively filters as a non-admin -- worst case a
     tenant admin's own precache omits admin-only evidence, never the reverse).
+
+    KG-42: ``center_keys`` lets an incremental rebuild re-enrich only the
+    centres actually touched by the change set, instead of every centre in
+    the project (the default, used by full rebuilds). Every candidate is
+    re-checked for centre-eligibility against the *current* graph, so a
+    caller can pass a superset (e.g. "possibly affected") safely.
     """
     from app.services.knowledge_graph_ai import enrich_payload_with_ai
 
@@ -80,7 +87,12 @@ async def _precache_center_cards(
         session, raw_nodes, raw_edges, tenant_id=tenant_id, user_id=user_id, role=None,
     )
 
-    center_keys = _center_eligible_keys(raw_nodes)
+    eligible_keys = _center_eligible_keys(raw_nodes)
+    if center_keys is None:
+        center_keys = eligible_keys
+    else:
+        eligible_set = set(eligible_keys)
+        center_keys = [k for k in center_keys if k in eligible_set]
     if not center_keys:
         return {}
 

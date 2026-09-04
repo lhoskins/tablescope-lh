@@ -101,6 +101,15 @@ class RebuildRequestMixin(LifecycleBase):
         the project instead of stacking duplicates: an incremental run re-reads
         current source state at execution time, so one queued build covers every
         change that lands before it starts.
+
+        KG-41: coalescing used to return the already-queued build completely
+        unchanged, discarding this call's own change set -- ``_patch_context_nodes``
+        only patches the types named in ``affected_entity_summary``, so an event
+        that arrived after the first (e.g. a risk created while a document-change
+        build was still queued) was silently dropped from the eventual incremental
+        patch. The new event's impact is now unioned into the pending build, and
+        the build escalates to a full rebuild if this event alone isn't safely
+        incremental, even when the original queued build was.
         """
         await self._require_project(project_id, write=True)
         graph = await self.ensure_graph(project_id, reason="Incremental rebuild requested")
@@ -113,10 +122,13 @@ class RebuildRequestMixin(LifecycleBase):
             )
             .order_by(KnowledgeGraphBuild.id.desc())
         )
+        analysis = await self.impact_analyzer.analyze(change_set, current_graph=graph)
+
         if pending is not None:
+            self._coalesce_change_set(pending, analysis, source_checkpoint)
+            await self.session.flush()
             return pending, pending.build_type
 
-        analysis = await self.impact_analyzer.analyze(change_set, current_graph=graph)
         build_type = "full" if not analysis["safe_incremental"] else "incremental"
 
         checkpoint_value: dict[str, Any] = {"analysis": analysis}
@@ -153,6 +165,49 @@ class RebuildRequestMixin(LifecycleBase):
             prompt_type=build_type,
         )
         return build, build_type
+
+
+    def _coalesce_change_set(
+        self,
+        pending: KnowledgeGraphBuild,
+        analysis: dict[str, Any],
+        source_checkpoint: datetime | None,
+    ) -> None:
+        """KG-41: fold a new change event's impact into an already-queued build.
+
+        Unions the new event's affected types/ids into ``affected_entity_summary``
+        (deduped, order-preserving), advances the source checkpoint used to defer
+        the job until the newest write is visible, and escalates the queued
+        build to ``full`` if this event alone requires it -- a build already
+        queued as incremental must not silently stay incremental once a later,
+        unsafe change has been folded into it.
+        """
+        summary = dict(pending.affected_entity_summary or {})
+        merged_types = list(summary.get("affected_types") or [])
+        for t in analysis["affected_entity_types"]:
+            if t not in merged_types:
+                merged_types.append(t)
+        merged_ids = list(summary.get("affected_ids") or [])
+        for i in analysis["affected_entity_ids"]:
+            if i not in merged_ids:
+                merged_ids.append(i)
+        summary["affected_types"] = merged_types
+        summary["affected_ids"] = merged_ids
+        if not analysis["safe_incremental"]:
+            summary["fallback_reason"] = analysis.get("fallback_reason")
+        pending.affected_entity_summary = summary
+
+        if not analysis["safe_incremental"] and pending.build_type == "incremental":
+            pending.build_type = "full"
+
+        checkpoint = dict(pending.source_checkpoint or {})
+        checkpoint["analysis"] = analysis
+        if source_checkpoint is not None:
+            existing_ts = checkpoint.get("timestamp")
+            new_ts = source_checkpoint.isoformat()
+            if not existing_ts or new_ts > str(existing_ts):
+                checkpoint["timestamp"] = new_ts
+        pending.source_checkpoint = checkpoint
 
 
     def evaluate_rebuild_type(
