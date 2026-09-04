@@ -98,6 +98,7 @@ export function IntelligenceFeed({
         projectIds={selectedProjectIdsArray.map((id) => Number(id))}
         cards={allInsights}
         running={running}
+        initialLoading={status === "idle"}
         lastUpdated={lastUpdated}
         snapshotFingerprint={status === "complete" ? lastUpdated?.toISOString() ?? null : null}
         toolbar={{

@@ -33,6 +33,12 @@ export interface IntelligenceWorkspaceProps {
   projectIds: number[];
   cards: InsightCard[];
   running: boolean;
+  /** True only during the very first fetch of a cached snapshot, before any
+   * refresh run has started -- distinct from `running`, which is only true
+   * once an active AI run is streaming. Lets the executive presentation show
+   * a neutral loading state instead of "No pressing matters" while data just
+   * hasn't arrived yet. */
+  initialLoading?: boolean;
   lastUpdated: Date | null;
   snapshotFingerprint?: string | null;
   toolbar: IntelligenceWorkspaceToolbar;
@@ -55,6 +61,7 @@ export function IntelligenceWorkspace({
   projectIds,
   cards,
   running,
+  initialLoading = false,
   lastUpdated,
   snapshotFingerprint,
   toolbar,
@@ -84,6 +91,7 @@ export function IntelligenceWorkspace({
         projectIds={projectIds}
         cards={cards}
         running={running}
+        initialLoading={initialLoading}
         lastUpdated={lastUpdated}
         snapshotFingerprint={snapshotFingerprint}
         toolbar={toolbar}

@@ -24,6 +24,7 @@ import { PanelEmpty } from "@/components/tablescope/insight-panel";
 import { cn } from "@/lib/cn";
 import { classifyInsightCards } from "@/lib/insights/classify-insight-cards";
 import { insightAnchorId, useReturnTarget } from "@/lib/insights/return-target";
+import { summarizeTopCards, type SummarizedInsights } from "@/lib/insights/summarize-top-cards";
 import type { InsightCard } from "@/lib/api/home-intelligence";
 
 import type {
@@ -44,6 +45,7 @@ interface BusinessIntelligenceWorkspaceProps {
   projectIds: number[];
   cards: InsightCard[];
   running: boolean;
+  initialLoading?: boolean;
   lastUpdated: Date | null;
   snapshotFingerprint?: string | null;
   toolbar: IntelligenceStripProps;
@@ -73,6 +75,14 @@ const TABS: Array<{ id: BusinessInsightTab; label: string }> = [
   { id: "change", label: "Change summary" },
   { id: "analysis", label: "Deeper analysis" },
 ];
+
+/** Render a `SummarizedInsights` as an `InsightCard` for the preview tiles
+ * below, which read `.title`/`.summary`/`.insightId`/`.id` directly --
+ * carries the top card's own identity/severity/etc. through unchanged so
+ * navigation and the severity badge still point at something real. */
+function toDisplayCard(summary: SummarizedInsights): InsightCard {
+  return { ...summary.topCard, title: summary.title, summary: summary.summary };
+}
 
 function pinFingerprintKey(card: InsightCard): string | undefined {
   return (
@@ -179,6 +189,7 @@ export function BusinessIntelligenceWorkspace({
   projectIds,
   cards,
   running,
+  initialLoading = false,
   lastUpdated,
   snapshotFingerprint,
   toolbar,
@@ -272,44 +283,60 @@ export function BusinessIntelligenceWorkspace({
       : null,
   ].filter((item): item is NonNullable<typeof item> => item !== null);
 
+  // Each category's tile summarizes up to its top 10 cards by impact
+  // (severity/confidence/evidence -- see cardPriority, the same scoring the
+  // backend uses to rank cards at generation time) instead of whichever
+  // card happened to land first in the cross-project-concatenated array.
+  const riskSummary = useMemo(() => summarizeTopCards(risks, "risk"), [risks]);
+  const trendSummary = useMemo(() => summarizeTopCards(trends, "trend"), [trends]);
+  const opportunitySummary = useMemo(
+    () => summarizeTopCards(opportunities, "opportunity"),
+    [opportunities],
+  );
+
   const priorities = [
-    risks[0]
+    riskSummary
       ? {
-          card: risks[0],
-          label: `Risk · ${risks[0].severity}`,
+          card: toDisplayCard(riskSummary),
+          label: `Risk · ${riskSummary.topCard.severity}`,
           tab: "risks" as const,
         }
       : null,
-    trends[0]
-      ? { card: trends[0], label: "Trend · watch", tab: "trends" as const }
+    trendSummary
+      ? { card: toDisplayCard(trendSummary), label: "Trend · watch", tab: "trends" as const }
       : null,
-    opportunities[0]
+    opportunitySummary
       ? {
-          card: opportunities[0],
+          card: toDisplayCard(opportunitySummary),
           label: "Opportunity",
           tab: "opportunities" as const,
         }
       : null,
   ].filter((item): item is NonNullable<typeof item> => item !== null);
 
-  // The cross-project synthesis object describes the mechanics and scope of
-  // the analysis run (project and insight counts). The Executive Brief is a
-  // decision surface, so use the highest-ranked AI insight instead. The
-  // classifier preserves the ranking order within each category.
-  const executiveBriefCard =
-    risks[0] ?? opportunities[0] ?? trends[0] ?? analysis[0] ?? null;
+  // The Executive Brief summarizes the top 10 most impactful findings across
+  // every category (not just whichever category happened to be checked
+  // first), the same way each Priority insights tile does above.
+  const executiveBriefSummary = useMemo(
+    () => summarizeTopCards([...risks, ...trends, ...opportunities, ...analysis], "material finding"),
+    [risks, trends, opportunities, analysis],
+  );
   const executiveBriefHeadline =
-    executiveBriefCard?.title ??
-    (running
-      ? "AI is evaluating the most pressing matters"
-      : "No pressing matters require executive attention");
+    executiveBriefSummary?.title ??
+    (initialLoading
+      ? "Loading the executive briefing…"
+      : running
+        ? "AI is evaluating the most pressing matters"
+        : "No pressing matters require executive attention");
   const executiveBriefBody =
-    executiveBriefCard?.summary ??
-    (running
-      ? "The executive summary will appear when the current insight analysis is complete."
-      : scope === "project"
-        ? "No material risk, trend, or opportunity was identified in the selected project."
-        : "No material risk, trend, or opportunity was identified in the currently selected projects.");
+    executiveBriefSummary?.summary ??
+    (initialLoading
+      ? "Fetching the latest insight analysis…"
+      : running
+        ? "The executive summary will appear when the current insight analysis is complete."
+        : scope === "project"
+          ? "No material risk, trend, or opportunity was identified in the selected project."
+          : "No material risk, trend, or opportunity was identified in the currently selected projects.");
 
   const cardGridProps = {
     loading: running,

@@ -207,7 +207,14 @@ describe("ProjectInsightScreen executive layout", () => {
     ).toBeTruthy();
     expect(screen.getByText("Executive perspective · AI briefing")).toBeTruthy();
     expect(screen.getByText("Executive brief")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: RISK_CARD.title })).toBeTruthy();
+    // The Executive Brief now summarizes the top-ranked cards across all
+    // categories (RISK_CARD wins on severity: "critical") rather than
+    // showing exactly one card's own title verbatim -- see
+    // summarizeTopCards. With cards from 3 categories present, the headline
+    // is "N material findings — led by <top title>".
+    expect(
+      screen.getByRole("heading", { name: new RegExp(RISK_CARD.title) }),
+    ).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Priority insights" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Key developments" })).toBeTruthy();
 
