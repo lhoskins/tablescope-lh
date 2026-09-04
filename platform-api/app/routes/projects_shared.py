@@ -158,4 +158,5 @@ async def _is_project_admin(
     if project.owner_id == context.user_id:
         return True
     member = await session.get(ProjectMember, (project.id, context.user_id))
-    return member is not None and member.role == "admin"
+    # TS-ISO-003: a member demoted or deactivated must not keep admin rights.
+    return member is not None and member.is_active and member.role == "admin"
