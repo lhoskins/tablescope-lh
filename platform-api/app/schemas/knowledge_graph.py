@@ -69,6 +69,11 @@ class KnowledgeGraphVersionRead(BaseModel):
     superseded_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    # KG-11/KG-15: validation errors/warnings plus the per-source-type
+    # coverage manifest (total/included/excluded/failed/pending), so a
+    # "succeeded" build can never silently conceal truncated, failed, or
+    # still-processing sources.
+    validation_summary: dict[str, Any] | None = None
 
 
 class KnowledgeGraphHealthCheckRead(BaseModel):

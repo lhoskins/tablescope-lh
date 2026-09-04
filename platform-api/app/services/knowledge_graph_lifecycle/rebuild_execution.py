@@ -22,6 +22,7 @@ from app.services.knowledge_graph_builder import (
     _precache_center_cards,
     _snapshot_source_counts,
 )
+from app.services.knowledge_graph_context import compute_source_coverage
 
 from .base import LifecycleBase
 from .state import logger
@@ -123,6 +124,9 @@ class RebuildExecutionMixin(LifecycleBase):
             )
 
             validation = self._validate_payload(payload, version)
+            validation["source_coverage"] = await compute_source_coverage(
+                self.session, tenant_id=build.tenant_id, project_id=build.project_id,
+            )
             version.validation_summary = validation
             version.disconnected_component_count = validation.get(
                 "disconnected_components", 0
@@ -296,6 +300,9 @@ class RebuildExecutionMixin(LifecycleBase):
             await self.session.flush()
 
             validation = self._validate_payload(payload, version)
+            validation["source_coverage"] = await compute_source_coverage(
+                self.session, tenant_id=build.tenant_id, project_id=build.project_id,
+            )
             version.validation_summary = validation
             version.disconnected_component_count = validation.get(
                 "disconnected_components", 0

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .collectors import collect_structural_graph as collect_structural_graph
 from .collectors import logger as logger
+from .coverage import compute_source_coverage as compute_source_coverage
 from .graph_primitives import _KPI_EDGE_TYPES as _KPI_EDGE_TYPES
 from .graph_primitives import _KPI_PHRASE_MIN as _KPI_PHRASE_MIN
 from .graph_primitives import _MAX_PER_KIND as _MAX_PER_KIND
