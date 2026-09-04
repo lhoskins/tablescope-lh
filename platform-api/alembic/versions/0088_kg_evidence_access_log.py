@@ -5,8 +5,8 @@ collection, recording which node/document/query ids (and the active KG
 version) informed a given AI-generated answer for a given user/surface, so
 an administrator can reconstruct exactly what evidence grounded it.
 
-Revision ID: 0087
-Revises: 0086
+Revision ID: 0088
+Revises: 0087
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from alembic import op
 
-revision: str = "0087"
-down_revision: str | None = "0086"
+revision: str = "0088"
+down_revision: str | None = "0087"
 branch_labels: tuple[str, ...] | None = None
 depends_on: tuple[str, ...] | None = None
 
