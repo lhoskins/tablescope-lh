@@ -18,6 +18,9 @@ from app.models import (
     ProjectBusinessContext,
 )
 from app.services.knowledge_graph_lifecycle import KnowledgeGraphLifecycleManager
+from app.services.knowledge_graph_lifecycle.structural_integrity import (
+    evaluate_structural_integrity,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -150,54 +153,13 @@ class KnowledgeGraphHealthService:
         edges: list[dict[str, Any]],
         version: KnowledgeGraphVersion,
     ) -> dict[str, Any]:
-        errors: list[str] = []
-        warnings: list[str] = []
-
-        if not nodes:
-            errors.append("Graph contains no nodes")
-
-        project_nodes = [n for n in nodes if n.get("node_type") == "project"]
-        if not project_nodes:
-            errors.append("Missing required project hub node")
-        elif len(project_nodes) > 1:
-            warnings.append(f"Multiple project hub nodes found ({len(project_nodes)})")
-
-        node_ids = {n.get("id") for n in nodes if n.get("id") is not None}
-        edge_refs = set()
-        dangling_edges = 0
-        for e in edges:
-            from_id = e.get("from_node_id")
-            to_id = e.get("to_node_id")
-            if from_id not in node_ids:
-                dangling_edges += 1
-            if to_id not in node_ids:
-                dangling_edges += 1
-            edge_refs.add(from_id)
-            edge_refs.add(to_id)
-
-        if dangling_edges:
-            warnings.append(f"{dangling_edges} edge references point to missing nodes")
-
-        orphan_ids = node_ids - edge_refs - {"project"}
-        orphan_ratio = (len(orphan_ids) / len(nodes)) if nodes else 0.0
-        if orphan_ratio > 0.5:
-            warnings.append(f"High orphan ratio: {orphan_ratio:.2%}")
-
-        disconnected = version.disconnected_component_count or 0
-        if disconnected > 5:
-            warnings.append(f"Many disconnected components: {disconnected}")
-
-        return {
-            "node_count": len(nodes),
-            "edge_count": len(edges),
-            "project_node_count": len(project_nodes),
-            "dangling_edge_refs": dangling_edges,
-            "orphan_ratio": orphan_ratio,
-            "orphan_count": len(orphan_ids),
-            "disconnected_components": disconnected,
-            "errors": errors,
-            "warnings": warnings,
-        }
+        """KG-21/22/23: shares its structural-integrity logic with the
+        activation gate in rebuild_execution.py (see structural_integrity.py)
+        so the two can't silently disagree on what counts as healthy, and the
+        disconnected-component count is actually computed from this
+        version's own graph rather than read back from a field that was
+        never populated with a real value."""
+        return evaluate_structural_integrity(nodes, edges)
 
     async def _source_alignment(
         self,

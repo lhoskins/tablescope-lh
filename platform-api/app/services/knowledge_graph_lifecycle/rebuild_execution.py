@@ -26,6 +26,7 @@ from app.services.knowledge_graph_context import compute_source_coverage
 
 from .base import LifecycleBase
 from .state import logger
+from .structural_integrity import evaluate_structural_integrity
 
 
 class RebuildExecutionMixin(LifecycleBase):
@@ -440,48 +441,26 @@ class RebuildExecutionMixin(LifecycleBase):
     def _validate_payload(
         self, payload: dict[str, Any], version: KnowledgeGraphVersion
     ) -> dict[str, Any]:
-        errors: list[str] = []
-        warnings: list[str] = []
-
+        """KG-21/22/23/47: delegate to the same structural-integrity check
+        the health service reports with, so a candidate can't be activated
+        only to immediately fail its first post-build health check, and a
+        missing project hub, dangling edge reference, or materially high
+        orphan ratio blocks activation instead of merely warning about it.
+        """
         full_graph = payload.get("fullGraph") or {}
         nodes = full_graph.get("nodes") or []
         edges = full_graph.get("edges") or []
 
-        if not nodes:
-            errors.append("Graph contains no nodes")
-
-        project_nodes = [n for n in nodes if n.get("node_type") == "project"]
-        if len(project_nodes) != 1:
-            warnings.append(f"Expected exactly one project node, found {len(project_nodes)}")
+        result = evaluate_structural_integrity(nodes, edges)
 
         source_counts = payload.get("sourceCounts") or {}
         if not source_counts:
-            warnings.append("No source counts in payload")
+            result["warnings"].append("No source counts in payload")
 
-        # Very simple connectivity check: count orphan-ish nodes with no edge refs.
-        node_ids = {n.get("id") for n in nodes if n.get("id")}
-        edge_refs = set()
-        for e in edges:
-            edge_refs.add(e.get("from_node_id"))
-            edge_refs.add(e.get("to_node_id"))
-        orphan_ids = node_ids - edge_refs - {"project"}
-        orphan_ratio = (len(orphan_ids) / len(nodes)) if nodes else 0.0
-
-        if orphan_ratio > 0.5:
-            warnings.append(f"High orphan ratio: {orphan_ratio:.2%}")
-
-        disconnected = version.disconnected_component_count or 0
-
-        return {
-            "valid": not errors,
-            "errors": errors,
-            "warnings": warnings,
-            "node_count": len(nodes),
-            "edge_count": len(edges),
-            "orphan_ratio": orphan_ratio,
-            "disconnected_components": disconnected,
-            "summary": "; ".join(errors) if errors else "Candidate graph is valid",
-        }
+        result["summary"] = (
+            "; ".join(result["errors"]) if result["errors"] else "Candidate graph is valid"
+        )
+        return result
 
 
     async def _transition_build(
