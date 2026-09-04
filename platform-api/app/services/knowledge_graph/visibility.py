@@ -62,6 +62,43 @@ async def _hidden_project_asset_ids(
     }
 
 
+async def filter_raw_graph_for_user(
+    session: AsyncSession,
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    *,
+    tenant_id: int,
+    user_id: int | None,
+    role: str | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Strip private-document nodes/edges the given user can't read from a
+    raw (pre-enrichment) node/edge list (KG-06).
+
+    Used before the AI-enrichment payload is built, so a document private to
+    one project member never reaches the AI server as context for another
+    member's cached cards -- not just hidden from the response afterwards
+    (see ``filter_payload_for_viewer``), but never sent in the first place.
+    """
+    hidden_asset_ids = await _hidden_project_asset_ids(
+        session, nodes, tenant_id=tenant_id, user_id=user_id, role=role
+    )
+    if not hidden_asset_ids:
+        return nodes, edges
+
+    hidden_node_ids = {
+        n["id"]
+        for n in nodes
+        if n.get("source_type") == "project_asset" and n.get("source_id") in hidden_asset_ids
+    }
+    visible_nodes = [n for n in nodes if n["id"] not in hidden_node_ids]
+    visible_edges = [
+        e for e in edges
+        if e.get("from_node_id") not in hidden_node_ids
+        and e.get("to_node_id") not in hidden_node_ids
+    ]
+    return visible_nodes, visible_edges
+
+
 async def filter_payload_for_viewer(
     session: AsyncSession,
     payload: dict[str, Any],

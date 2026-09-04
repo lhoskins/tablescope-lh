@@ -51,6 +51,7 @@ def _center_eligible_keys(
 
 
 async def _precache_center_cards(
+    session: AsyncSession,
     raw_nodes: list[dict[str, Any]],
     raw_edges: list[dict[str, Any]],
     *,
@@ -65,8 +66,19 @@ async def _precache_center_cards(
     Enrichment runs with bounded concurrency. Centres are AI-only: a centre
     whose AI enrichment yields no grounded card is still cached (with an empty
     card list) so the read path serves it from cache without re-calling the AI.
+
+    KG-06: a document private to another project member is stripped before
+    it ever becomes AI context (role isn't known this deep in a background
+    rebuild, so this conservatively filters as a non-admin -- worst case a
+    tenant admin's own precache omits admin-only evidence, never the reverse).
     """
     from app.services.knowledge_graph_ai import enrich_payload_with_ai
+
+    from .visibility import filter_raw_graph_for_user
+
+    raw_nodes, raw_edges = await filter_raw_graph_for_user(
+        session, raw_nodes, raw_edges, tenant_id=tenant_id, user_id=user_id, role=None,
+    )
 
     center_keys = _center_eligible_keys(raw_nodes)
     if not center_keys:
@@ -134,7 +146,7 @@ async def rebuild_project_graph_snapshot(
     ai_cards_by_center: dict[str, Any] = {}
     if enrich_with_ai and user_id is not None:
         ai_cards_by_center = await _precache_center_cards(
-            raw_nodes, raw_edges,
+            session, raw_nodes, raw_edges,
             tenant_id=tenant_id, user_id=user_id, project_id=project_id,
         )
 

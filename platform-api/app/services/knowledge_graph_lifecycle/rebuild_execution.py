@@ -66,6 +66,7 @@ class RebuildExecutionMixin(LifecycleBase):
             if user_id is not None:
                 try:
                     ai_cards = await _precache_center_cards(
+                        self.session,
                         raw_nodes,
                         raw_edges,
                         tenant_id=build.tenant_id,
