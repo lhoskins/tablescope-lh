@@ -21,6 +21,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.kg_evidence_audit import evidence_ids_from_nodes, record_kg_evidence_access
 from app.services.knowledge_graph_builder import (
     _as_dict,
     _classify_relationship,
@@ -83,11 +84,20 @@ async def collect_knowledge_graph_ai_context(
     project_id: int,
     user_id: int | None = None,
     max_items: int = 20,
+    surface: str = "unspecified",
 ) -> dict[str, Any]:
     """Return a compact Knowledge Graph context block for AI generation.
 
     The block is safe to embed in an AI request: it is summarized, ranked by
     confidence, deduped, and scoped to the authorized tenant/project graph.
+
+    KG-07: ``surface`` names the feature this context is generated for
+    (business_insights | project_insights | dashboard_generation |
+    query_generation) -- every call records which node, document, and query
+    ids actually ended up in the returned context to
+    ``knowledge_graph_evidence_access``, so an administrator can later
+    reconstruct exactly what evidence informed that feature's answer for
+    this tenant/project/user.
     """
     empty: dict[str, Any] = {
         "risks": [], "opportunities": [], "gaps": [], "warnings": [],
@@ -148,6 +158,7 @@ async def collect_knowledge_graph_ai_context(
 
     def _finding(node: dict[str, Any]) -> dict[str, Any]:
         return {
+            "_id": node["id"],
             "title": node.get("label") or "",
             "severity": node.get("severity") or "",
             "summary": _summary(node),
@@ -183,6 +194,7 @@ async def collect_knowledge_graph_ai_context(
             gaps.append(_finding(node))
         elif ntype in _KPI_TYPES:
             kpi = {
+                "_id": node["id"],
                 "title": node.get("label") or "",
                 "summary": _summary(node),
                 "related_documents": _related(
@@ -200,18 +212,21 @@ async def collect_knowledge_graph_ai_context(
                 recommended_kpis.append(kpi)
         elif ntype in _REFERENCE_TYPES:
             reference_guidance.append({
+                "_id": node["id"],
                 "title": node.get("label") or "",
                 "summary": _summary(node),
                 "confidence": round(_node_conf(node), 4),
             })
         elif ntype in _GOVERNING_DOC_TYPES:
             governing_documents.append({
+                "_id": node["id"],
                 "title": node.get("label") or "",
                 "summary": _summary(node),
                 "confidence": round(_node_conf(node), 4),
             })
         elif ntype in _PROCESS_TYPES:
             processes.append({
+                "_id": node["id"],
                 "title": node.get("label") or "",
                 "summary": _summary(node),
                 "related_kpis": _related(node, _KPI_TYPES),
@@ -219,6 +234,7 @@ async def collect_knowledge_graph_ai_context(
             })
         elif ntype in _ENTITY_TYPES:
             entities.append({
+                "_id": node["id"],
                 "title": node.get("label") or "",
                 "type": ntype,
                 "confidence": round(_node_conf(node), 4),
@@ -239,6 +255,7 @@ async def collect_knowledge_graph_ai_context(
         conf = round(_edge_confidence(e), 4)
         if s_type in _QUERY_TYPES and t_type in (_KPI_TYPES | _DATASOURCE_TYPES):
             query_lineage.append({
+                "_ids": (s["id"], t["id"]),
                 "query": s.get("label") or "",
                 "relationship": rel,
                 "target": t.get("label") or "",
@@ -247,6 +264,7 @@ async def collect_knowledge_graph_ai_context(
             })
         elif s_type in _DASHBOARD_TYPES:
             dashboard_lineage.append({
+                "_ids": (s["id"], t["id"]),
                 "dashboard": s.get("label") or "",
                 "relationship": rel,
                 "target": t.get("label") or "",
@@ -255,13 +273,14 @@ async def collect_knowledge_graph_ai_context(
             })
         elif s_type in _DATASOURCE_TYPES and t_type in _QUERY_TYPES:
             datasource_relationships.append({
+                "_ids": (s["id"], t["id"]),
                 "datasource": s.get("label") or "",
                 "used_by": t.get("label") or "",
                 "confidence": conf,
             })
 
     kpi_cap = max(3, max_items // 2)
-    return {
+    bucketed = {
         "risks": _ranked(risks, max_items),
         "opportunities": _ranked(opportunities, max_items),
         "gaps": _ranked(gaps, max_items),
@@ -272,7 +291,39 @@ async def collect_knowledge_graph_ai_context(
         "reference_guidance": _ranked(reference_guidance, max_items),
         "processes": _ranked(processes, max_items),
         "entities": _ranked(entities, max_items),
+    }
+    lineage = {
         "query_lineage": query_lineage[:max_items],
         "dashboard_lineage": dashboard_lineage[:max_items],
         "datasource_relationships": datasource_relationships[:max_items],
     }
+
+    # KG-07: audit exactly the node ids that made it into this context (after
+    # ranking/capping), not the full candidate set that was merely considered.
+    used_node_ids: set[Any] = set()
+    for items in bucketed.values():
+        used_node_ids.update(item["_id"] for item in items)
+    for items in lineage.values():
+        for item in items:
+            used_node_ids.update(item["_ids"])
+    used_nodes = [by_id[nid] for nid in used_node_ids if nid in by_id]
+    audit_node_ids, document_ids, query_ids = evidence_ids_from_nodes(used_nodes)
+    await record_kg_evidence_access(
+        session,
+        tenant_id=tenant_id,
+        project_id=project_id,
+        user_id=user_id,
+        surface=surface,
+        node_ids=audit_node_ids,
+        document_ids=document_ids,
+        query_ids=query_ids,
+    )
+
+    for items in bucketed.values():
+        for item in items:
+            item.pop("_id", None)
+    for items in lineage.values():
+        for item in items:
+            item.pop("_ids", None)
+
+    return {**bucketed, **lineage}

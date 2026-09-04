@@ -70,7 +70,7 @@ async def generate_sql(
         # All query AI generation includes Knowledge Graph context so SQL targets
         # the risks/gaps/KPIs the graph surfaces (never Reference Library docs).
         "knowledge_graph_context": await _kg_context(
-            session, context, req.project_id,
+            session, context, req.project_id, surface="query_generation",
         ),
         "relationship_hints": relationship_hints,
     }

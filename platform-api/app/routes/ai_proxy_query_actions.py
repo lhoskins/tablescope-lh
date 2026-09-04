@@ -376,7 +376,7 @@ async def ai_generate_and_save_query(
                 # Knowledge Graph context steers generated SQL toward validated
                 # risks/gaps/measured KPIs surfaced by the graph.
                 "knowledge_graph_context": await _kg_context(
-                    session, context, req.project_id,
+                    session, context, req.project_id, surface="query_generation",
                 ),
                 "relationship_hints": relationship_hints,
             }

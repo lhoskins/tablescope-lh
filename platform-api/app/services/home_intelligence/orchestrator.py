@@ -120,6 +120,7 @@ async def run_ai_intelligence(
                 project_id=project.id,
                 user_id=user_id,
                 max_items=10,
+                surface="business_insights",
             )
         except Exception as exc:
             logger.warning(

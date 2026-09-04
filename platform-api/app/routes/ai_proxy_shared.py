@@ -224,12 +224,16 @@ async def _kg_context(
     context: RequestContext,
     project_id: int,
     *,
+    surface: str,
     max_items: int = 20,
 ) -> dict[str, Any]:
     """Collect the project's Knowledge Graph context for AI generation.
 
     Best-effort: a graph that fails to load must never block dashboard/query
     generation, so any error yields an empty context block.
+
+    ``surface`` (KG-07) names the feature this context feeds -- required so
+    the resulting evidence-access audit row is labeled correctly.
     """
     try:
         return await collect_knowledge_graph_ai_context(
@@ -238,6 +242,7 @@ async def _kg_context(
             project_id=project_id,
             user_id=context.user_id,
             max_items=max_items,
+            surface=surface,
         )
     except Exception:  # context is optional enrichment
         logger.exception(

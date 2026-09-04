@@ -82,7 +82,7 @@ async def ai_generate_and_save_dashboard(
         # Knowledge Graph context steers the plan toward validated risks, gaps,
         # measured/recommended KPIs, and governing documents.
         "knowledge_graph_context": await _kg_context(
-            session, context, req.project_id,
+            session, context, req.project_id, surface="dashboard_generation",
         ),
         # Evidence-backed join candidates (e.g. two monthly tables sharing a
         # "month" column) -- lets the planner combine measures that live in

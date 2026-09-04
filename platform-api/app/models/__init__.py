@@ -72,6 +72,7 @@ from app.models.grid_preference import GridPreference
 from app.models.home_pin import HomePin
 from app.models.insight_feedback import InsightFeedback, InsightFeedbackReviewEvent
 from app.models.intelligence_snapshot import IntelligenceSnapshot
+from app.models.knowledge_graph_evidence_access import KnowledgeGraphEvidenceAccess
 from app.models.knowledge_graph_lifecycle import (
     KnowledgeGraph,
     KnowledgeGraphBuild,
@@ -204,6 +205,7 @@ __all__ = [
     "IntelligenceSnapshot",
     "KnowledgeGraph",
     "KnowledgeGraphBuild",
+    "KnowledgeGraphEvidenceAccess",
     "KnowledgeGraphHealthCheck",
     "KnowledgeGraphVersion",
     "LLMArtifactFile",

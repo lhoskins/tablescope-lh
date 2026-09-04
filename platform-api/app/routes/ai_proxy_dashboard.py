@@ -50,7 +50,7 @@ async def suggest_dashboard(
         # Knowledge Graph context steers suggestions toward validated
         # risks/gaps/measured KPIs and governing documents.
         "knowledge_graph_context": await _kg_context(
-            session, context, req.project_id,
+            session, context, req.project_id, surface="dashboard_generation",
         ),
     }
     return await _forward_to_ai("/ai/dashboard/suggest", payload)

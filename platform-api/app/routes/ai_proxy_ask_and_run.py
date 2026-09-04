@@ -471,7 +471,7 @@ async def _generate_sql_for_question(
         source_catalog=source_catalog,
         preferred_sources=preferred_sources or [],
         relevant_columns=relevant_columns or [],
-        knowledge_graph_context=await _kg_context(session, context, project_id),
+        knowledge_graph_context=await _kg_context(session, context, project_id, surface="query_generation"),
         grounding_evidence=grounding_evidence,
         relationship_hints=relationship_hints,
         conversation_id=conversation_id,
@@ -878,7 +878,7 @@ async def _forward_prose_answer(
             include_query_history=include_query_history,
             include_dashboard_context=include_dashboard_context,
             history=history or [],
-            knowledge_graph_context=await _kg_context(session, context, project_id),
+            knowledge_graph_context=await _kg_context(session, context, project_id, surface="query_generation"),
             grounding_evidence=grounding_evidence,
         )
     except ai.AIUnavailableError:

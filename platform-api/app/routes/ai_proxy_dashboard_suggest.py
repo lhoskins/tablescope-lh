@@ -90,7 +90,9 @@ async def ai_suggest_dashboards(
     ).all()
     kpis = [k for k in kpi_rows if k]
 
-    kg_context = await _kg_context(session, context, req.project_id)
+    kg_context = await _kg_context(
+        session, context, req.project_id, surface="dashboard_generation",
+    )
 
     desired = max(3, int(req.desired_count or 3))
     payload = {

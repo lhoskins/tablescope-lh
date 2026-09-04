@@ -310,7 +310,8 @@ async def build_project_insight(
     dashboards_payload = [{"name": d.name} for d in dashboards]
 
     kg_context = await collect_knowledge_graph_ai_context(
-        session, tenant_id=tenant_id, project_id=project.id, user_id=user_id
+        session, tenant_id=tenant_id, project_id=project.id, user_id=user_id,
+        surface="project_insights",
     )
     kpi_names: list[str] = []
     for bucket in ("measured_kpis", "recommended_kpis"):
