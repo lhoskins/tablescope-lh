@@ -160,7 +160,7 @@ failure, restore) before being confirmed passing.
 | `pytest tests/test_knowledge_graph_lifecycle.py tests/test_knowledge_graph_rebuild.py tests/test_knowledge_graph_event_triggers.py tests/test_kg21_activation_validation.py tests/test_knowledge_graph_ai.py -q` | 43 passed, 0 regressions |
 | `ruff check` (touched files) | clean |
 | `mypy` (touched files) | clean |
-| Full `pytest -q` (whole platform-api suite) | pending final count — will match the ~1733 passed / 10 pre-existing-unrelated-failures baseline from every prior phase unless noted otherwise below |
+| Full `pytest -q` (whole platform-api suite) | **1748 passed, 4 skipped, 10 failed** — same 10 pre-existing/unrelated failures as every prior phase (dashboard visualization, percent-change summary statistics, business-insight snapshot staleness) — 0 new |
 
 ```bash
 cd platform-api
