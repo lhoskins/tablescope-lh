@@ -138,7 +138,7 @@ assertions that correctly pass either way — then restore and confirm all 13 pa
 | `pytest tests/test_knowledge_graph_lifecycle.py tests/test_knowledge_graph_rebuild.py tests/test_knowledge_graph_event_triggers.py tests/test_kg21_activation_validation.py tests/test_kg41*.py tests/test_kg42*.py tests/test_kg43*.py tests/test_kg44*.py tests/test_kg45*.py tests/test_kg46*.py -q` | 62 passed, 0 regressions |
 | `ruff check` (touched files) | clean |
 | `mypy` (touched files) | clean |
-| Full `pytest -q` (whole platform-api suite) | in progress at doc-write time — see follow-up commit for the confirmed count; expected to match the ~1748 passed / 10 pre-existing-unrelated-failures baseline from Phase 6 |
+| Full `pytest -q` (whole platform-api suite) | **1768 passed, 4 skipped, 10 failed** — same 10 pre-existing/unrelated failures as every prior phase (dashboard visualization, percent-change summary statistics, business-insight snapshot staleness) — 0 new |
 
 ```bash
 cd platform-api
