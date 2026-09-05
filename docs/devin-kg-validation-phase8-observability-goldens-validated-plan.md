@@ -133,7 +133,7 @@ correct the recorded expectation" during authoring, both traced to the real (cor
 | `pytest tests/test_knowledge_graph_lifecycle.py tests/test_knowledge_graph_rebuild.py tests/test_knowledge_graph_event_triggers.py tests/test_kg21_activation_validation.py tests/test_kg41*.py tests/test_kg42*.py tests/test_kg43*.py tests/test_kg44*.py tests/test_kg45*.py tests/test_kg46*.py tests/test_kg48*.py tests/test_kg49*.py -q` | 69 passed, 0 regressions |
 | `ruff check` (touched files) | clean |
 | `mypy` (touched files) | clean |
-| Full `pytest -q` (whole platform-api suite) | pending final count at doc-write time — see follow-up commit; expected to match the ~1768 passed / 10 pre-existing-unrelated-failures baseline from Phase 7 |
+| Full `pytest -q` (whole platform-api suite) | **1775 passed, 4 skipped, 10 failed** — same 10 pre-existing/unrelated failures as every prior phase (dashboard visualization, percent-change summary statistics, business-insight snapshot staleness) — 0 new |
 | `alembic heads` | single head `0089`, `down_revision="0088"` — chain intact |
 
 ```bash
