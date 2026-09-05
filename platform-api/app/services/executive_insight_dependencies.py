@@ -87,7 +87,7 @@ class ExecutiveInsightDependencyService:
             ready = False
         elif (
             graph.lifecycle_status in (STALE, DEGRADED)
-            or warnings
+            or hc.status != "healthy"
             or graph.lifecycle_status in (UNAVAILABLE, "missing")
         ):
             mode = "limited"
