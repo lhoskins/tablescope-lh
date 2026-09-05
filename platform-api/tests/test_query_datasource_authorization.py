@@ -204,3 +204,76 @@ async def test_table_name_path_rejects_a_table_outside_the_project(
         headers=_headers(tenant_id, owner_id),
     )
     assert r.status_code == 403
+
+
+async def test_a_saas_connector_table_is_not_rejected_as_unauthorized(
+    client, db_session, service_headers, monkeypatch
+):
+    """Regression test: ``project_table_schema`` (the source of
+    ``allowed_tables``) previously only covered uploaded-file sources, so a
+    database/SaaS connector table (e.g. a ServiceNow object registered as a
+    ``DatabaseDataSource``) was rejected as "Unauthorized table reference"
+    even though it's a real, project-scoped data source -- reproducing the
+    exact live scenario: a project with an uploaded CSV *and* a ServiceNow
+    connector table (the CSV is what makes ``allowed_tables`` non-empty, so
+    the allowlist check actually runs instead of no-op'ing on an empty
+    list)."""
+    tenant_id = await _tenant(client, service_headers, "qd-saas-table")
+    owner_id = await _user(client, service_headers, tenant_id, "owner@qd-saas-table.com")
+
+    project = Project(tenant_id=tenant_id, owner_id=owner_id, name="Mine", is_shared=False)
+    db_session.add(project)
+    db_session.add(
+        UserVDB(tenant_id=tenant_id, user_id=owner_id, vdb_id="owner-vdb", vdb_username="u", encrypted_password="p", is_active=True)
+    )
+    await db_session.commit()
+    await db_session.refresh(project)
+
+    from app.models.database_data_source import DatabaseDataSource
+    from app.models.file_source_meta import FileSourceMeta
+
+    db_session.add(
+        FileSourceMeta(
+            tenant_id=tenant_id, project_id=project.id, owner_id=owner_id,
+            view_name="example_csv", file_name="example.csv", column_types=[],
+        )
+    )
+    db_session.add(
+        DatabaseDataSource(
+            tenant_id=tenant_id, project_id=project.id, created_by=owner_id,
+            display_name="change_request", source_type="saas_object",
+            connector_type="servicenow", db_type="servicenow",
+            host="https://dev.service-now.com", port=0, database_name="",
+            schema_name="", table_name="change_request",
+            username="svc", teiid_model_name="ds_1_src", teiid_table_name="change_request",
+            teiid_view_name="change_request_SERVICENOW", teiid_jndi_name="java:/ds_1_servicenow",
+            status="active", archived=False,
+        )
+    )
+    await db_session.commit()
+
+    import app.routes.query as query_module
+
+    async def fake_run_sql(**kwargs):
+        return {"columns": ["number"], "rows": [], "rowCount": 0}
+
+    class _FakeEndpoint:
+        pg_host = "localhost"
+        pg_port = 5433
+
+    class _FakeResolver:
+        def __init__(self, session):
+            pass
+
+        async def resolve_for_org(self, tenant_id):
+            return _FakeEndpoint()
+
+    monkeypatch.setattr(query_module, "_run_sql", fake_run_sql)
+    monkeypatch.setattr(query_module, "TenantTeiidResolver", _FakeResolver)
+
+    r = await client.post(
+        "/api/query/datasource",
+        json={"project_id": project.id, "tableName": "change_request_SERVICENOW"},
+        headers=_headers(tenant_id, owner_id),
+    )
+    assert r.status_code != 403

@@ -6,7 +6,9 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
+from app.models.database_data_source import DatabaseDataSource
 from app.models.file_source_meta import FileSourceMeta
 
 
@@ -20,8 +22,20 @@ async def project_table_schema(
 
     Shape: ``[{"table": view, "columns": [{"name", "type"}]}]`` — the same
     contract the AI server's ``repair-sql-step`` endpoint consumes.
+
+    Covers both uploaded-file sources (``FileSourceMeta``) and database/SaaS
+    sources (``DatabaseDataSource`` -- JDBC database connectors and every
+    SaaS connector object, e.g. ServiceNow/HubSpot/Salesforce/QuickBooks).
+    This is also the source of ``allowed_tables`` for the SQL/table
+    authorization gate (TS-ISO-002): omitting ``DatabaseDataSource`` here
+    made every database/SaaS-sourced table reachable through
+    ``/api/query/datasource`` register as "unauthorized" once the project
+    also had at least one file-based source (and, worse, made the allowlist
+    check silently no-op for any project with zero file-based sources at
+    all, since ``authorize_sql`` only enforces the check when the list is
+    non-empty).
     """
-    rows = (
+    file_rows = (
         await session.scalars(
             select(FileSourceMeta).where(
                 FileSourceMeta.project_id == project_id,
@@ -31,7 +45,7 @@ async def project_table_schema(
         )
     ).all()
     schema: list[dict[str, Any]] = []
-    for ds in rows:
+    for ds in file_rows:
         columns = [
             {
                 "name": str(c.get("field") or c.get("name")),
@@ -41,6 +55,25 @@ async def project_table_schema(
             if isinstance(c, dict) and c.get("name")
         ]
         schema.append({"table": ds.view_name, "columns": columns})
+
+    db_rows = (
+        await session.scalars(
+            select(DatabaseDataSource)
+            .where(
+                DatabaseDataSource.project_id == project_id,
+                DatabaseDataSource.tenant_id == tenant_id,
+                DatabaseDataSource.status == "active",
+                DatabaseDataSource.archived.is_(False),
+            )
+            .options(selectinload(DatabaseDataSource.columns))
+        )
+    ).all()
+    for db_ds in db_rows:
+        columns = [
+            {"name": col.column_name, "type": col.data_type or ""}
+            for col in db_ds.columns
+        ]
+        schema.append({"table": db_ds.teiid_view_name, "columns": columns})
     return schema
 
 
