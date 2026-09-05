@@ -133,7 +133,7 @@ all 4 pass).
 | `pytest tests/test_kg07_evidence_audit.py tests/test_kg39_grounding_status.py tests/test_ai_ask_and_run.py tests/test_dashboard_suggest_preview_chart_type.py tests/test_ai_proxy_query_relationship_hints.py tests/test_business_insight_shared_cache.py tests/test_dashboards.py tests/test_project_insight.py tests/test_project_insight_rebuild.py tests/test_project_source_resolver.py tests/test_home_intelligence.py tests/test_kg50*.py -q` | 161 passed, 0 regressions across every touched surface |
 | `ruff check` (all 12 touched files) | clean |
 | `mypy` (all 12 touched files) | clean |
-| Full `pytest -q` (whole platform-api suite) | pending final count at doc-write time — see follow-up commit; expected to match the ~1775 passed / 10 pre-existing-unrelated-failures baseline from Phase 8 |
+| Full `pytest -q` (whole platform-api suite) | **1779 passed, 4 skipped, 10 failed** — same 10 pre-existing/unrelated failures as every prior phase (dashboard visualization, percent-change summary statistics, business-insight snapshot staleness) — 0 new |
 
 ```bash
 cd platform-api
