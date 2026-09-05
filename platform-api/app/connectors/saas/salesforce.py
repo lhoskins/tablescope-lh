@@ -83,6 +83,13 @@ def _safe_error(exc: Exception) -> str:
     return "Salesforce request failed."
 
 
+def _connector_error(exc: Exception) -> SaasConnectorError:
+    requires_reauth = (
+        isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (400, 401, 403)
+    )
+    return SaasConnectorError(_safe_error(exc), requires_reauth=requires_reauth)
+
+
 class SalesforceConnector(SaasConnector):
     connector_type = "salesforce"
 
@@ -113,7 +120,7 @@ class SalesforceConnector(SaasConnector):
                 data = resp.json()
         except Exception as exc:
             logger.warning("Salesforce auth failed: %s", exc)
-            raise SaasConnectorError(_safe_error(exc)) from exc
+            raise _connector_error(exc) from exc
         token = data.get("access_token")
         instance_url = data.get("instance_url")
         if not token or not instance_url:
@@ -151,7 +158,7 @@ class SalesforceConnector(SaasConnector):
                 data = resp.json()
         except Exception as exc:
             logger.warning("Salesforce describe failed: %s", exc)
-            raise SaasConnectorError(_safe_error(exc)) from exc
+            raise _connector_error(exc) from exc
 
         fields: list[FieldInfo] = []
         for f in data.get("fields", []):
@@ -227,7 +234,7 @@ class SalesforceConnector(SaasConnector):
             raise
         except Exception as exc:
             logger.warning("Salesforce fetch_records failed: %s", exc)
-            raise SaasConnectorError(_safe_error(exc)) from exc
+            raise _connector_error(exc) from exc
         return records
 
     def _normalize(self, item: dict, selected_fields: list[str]) -> dict:

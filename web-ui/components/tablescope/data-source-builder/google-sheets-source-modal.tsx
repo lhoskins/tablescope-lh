@@ -10,6 +10,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
+import { ApiError } from "@/lib/api-client";
 import type { SaasCredential } from "@/lib/api/connectors";
 import {
   listGoogleDriveFiles,
@@ -24,6 +25,11 @@ import {
   useBuilderStore,
   type SessionSource,
 } from "@/lib/stores/data-source-builder-store";
+import { GoogleSheetsConnectionModal } from "@/components/tablescope/database-connectors/google-sheets-connection-modal";
+
+function isReauthRequired(err: unknown): boolean {
+  return err instanceof ApiError && err.code === "CONNECTOR_REAUTH_REQUIRED";
+}
 
 export function GoogleSheetsSourceModal({
   credential,
@@ -42,6 +48,8 @@ export function GoogleSheetsSourceModal({
   const [files, setFiles] = useState<GoogleDriveFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [needsReauth, setNeedsReauth] = useState(false);
+  const [reauthorizing, setReauthorizing] = useState(false);
 
   const [selectedFile, setSelectedFile] = useState<GoogleDriveFile | null>(null);
   const [tabs, setTabs] = useState<GoogleSheetTab[]>([]);
@@ -56,6 +64,26 @@ export function GoogleSheetsSourceModal({
 
   const [confirming, setConfirming] = useState(false);
 
+  const loadFiles = () => {
+    setLoadingFiles(true);
+    setError(null);
+    setNeedsReauth(false);
+    return listGoogleDriveFiles(credential.id)
+      .then((res) => {
+        setFiles(res.files);
+      })
+      .catch((err) => {
+        if (isReauthRequired(err)) {
+          setNeedsReauth(true);
+          return;
+        }
+        setError(err instanceof Error ? err.message : "Could not load Google Drive files.");
+      })
+      .finally(() => {
+        setLoadingFiles(false);
+      });
+  };
+
   useEffect(() => {
     let cancelled = false;
     setLoadingFiles(true);
@@ -65,10 +93,12 @@ export function GoogleSheetsSourceModal({
         if (!cancelled) setFiles(res.files);
       })
       .catch((err) => {
-        if (!cancelled)
-          setError(
-            err instanceof Error ? err.message : "Could not load Google Drive files.",
-          );
+        if (cancelled) return;
+        if (isReauthRequired(err)) {
+          setNeedsReauth(true);
+          return;
+        }
+        setError(err instanceof Error ? err.message : "Could not load Google Drive files.");
       })
       .finally(() => {
         if (!cancelled) setLoadingFiles(false);
@@ -97,7 +127,11 @@ export function GoogleSheetsSourceModal({
         await selectTab(res.tabs[0], file);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load sheet tabs.");
+      if (isReauthRequired(err)) {
+        setNeedsReauth(true);
+      } else {
+        setError(err instanceof Error ? err.message : "Could not load sheet tabs.");
+      }
     } finally {
       setLoadingTabs(false);
     }
@@ -122,7 +156,11 @@ export function GoogleSheetsSourceModal({
       }
       setDisplayName(`${file.name} · ${tab.title}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not detect tables.");
+      if (isReauthRequired(err)) {
+        setNeedsReauth(true);
+      } else {
+        setError(err instanceof Error ? err.message : "Could not detect tables.");
+      }
     } finally {
       setLoadingTables(false);
     }
@@ -221,7 +259,22 @@ export function GoogleSheetsSourceModal({
           </button>
         </div>
 
-        {error && (
+        {needsReauth && (
+          <div className="flex items-center justify-between gap-3 border-b border-danger/20 bg-danger-bg/30 px-4 py-2">
+            <p className="text-[12px] text-danger">
+              Google Drive access has expired for {credential.display_name}.
+            </p>
+            <Button
+              variant="primary"
+              onClick={() => setReauthorizing(true)}
+              disabled={reauthorizing}
+            >
+              Reauthorize
+            </Button>
+          </div>
+        )}
+
+        {error && !needsReauth && (
           <div className="border-b border-danger/20 bg-danger-bg/30 px-4 py-2 text-[12px] text-danger">
             {error}
           </div>
@@ -394,6 +447,17 @@ export function GoogleSheetsSourceModal({
           </Button>
         </div>
       </div>
+
+      {reauthorizing && (
+        <GoogleSheetsConnectionModal
+          credentialId={credential.id}
+          onClose={() => setReauthorizing(false)}
+          onSaved={() => {
+            setReauthorizing(false);
+            void loadFiles();
+          }}
+        />
+      )}
     </div>
   );
 }

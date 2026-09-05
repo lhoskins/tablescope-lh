@@ -96,6 +96,13 @@ def _safe_error(exc: Exception) -> str:
     return "ServiceNow request failed."
 
 
+def _connector_error(exc: Exception) -> SaasConnectorError:
+    requires_reauth = (
+        isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (401, 403)
+    )
+    return SaasConnectorError(_safe_error(exc), requires_reauth=requires_reauth)
+
+
 class ServiceNowConnector(SaasConnector):
     connector_type = "servicenow"
 
@@ -174,7 +181,7 @@ class ServiceNowConnector(SaasConnector):
                 resp.raise_for_status()
         except Exception as exc:
             logger.warning("ServiceNow test_connection failed: %s", exc)
-            raise SaasConnectorError(_safe_error(exc)) from exc
+            raise _connector_error(exc) from exc
         return {"instance_url": base_url, "authenticated": True}
 
     async def list_objects(self, config: dict) -> list[ObjectInfo]:
@@ -201,7 +208,7 @@ class ServiceNowConnector(SaasConnector):
                 data = resp.json()
         except Exception as exc:
             logger.warning("ServiceNow list_objects failed: %s", exc)
-            raise SaasConnectorError(_safe_error(exc)) from exc
+            raise _connector_error(exc) from exc
 
         objects: list[ObjectInfo] = []
         seen: set[str] = set()
@@ -246,7 +253,7 @@ class ServiceNowConnector(SaasConnector):
             raise
         except Exception as exc:
             logger.warning("ServiceNow list_fields failed: %s", exc)
-            raise SaasConnectorError(_safe_error(exc)) from exc
+            raise _connector_error(exc) from exc
 
         fields: list[FieldInfo] = []
         seen: set[str] = set()
@@ -334,7 +341,7 @@ class ServiceNowConnector(SaasConnector):
             raise
         except Exception as exc:
             logger.warning("ServiceNow fetch_records failed: %s", exc)
-            raise SaasConnectorError(_safe_error(exc)) from exc
+            raise _connector_error(exc) from exc
         return records
 
     _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")

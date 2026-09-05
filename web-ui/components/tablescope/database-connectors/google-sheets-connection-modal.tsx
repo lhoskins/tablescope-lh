@@ -8,9 +8,13 @@ import { authorizeGoogleSheets } from "@/lib/api/connectors";
 export function GoogleSheetsConnectionModal({
   onClose,
   onSaved,
+  credentialId,
 }: {
   onClose: () => void;
   onSaved: () => void;
+  /** When set, reauthorizes this existing connection in place instead of
+   * creating a new one (used for reconnecting after a token expires). */
+  credentialId?: number;
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +45,7 @@ export function GoogleSheetsConnectionModal({
     setLoading(true);
     setError(null);
     try {
-      const res = await authorizeGoogleSheets();
+      const res = await authorizeGoogleSheets(credentialId);
       setAuthUrl(res.authorizationUrl);
       const width = 480;
       const height = 640;
@@ -83,9 +87,13 @@ export function GoogleSheetsConnectionModal({
       >
         <div className="mb-4 flex items-start justify-between">
           <div>
-            <h2 className="text-h2 text-ink-primary">Connect Google Drive</h2>
+            <h2 className="text-h2 text-ink-primary">
+              {credentialId != null ? "Reconnect Google Drive" : "Connect Google Drive"}
+            </h2>
             <p className="text-small text-ink-tertiary">
-              Authorize Tablescope to read your Google Sheets and Drive files.
+              {credentialId != null
+                ? "Your Google Drive access has expired. Reauthorize to continue."
+                : "Authorize Tablescope to read your Google Sheets and Drive files."}
             </p>
           </div>
           <button
@@ -127,7 +135,7 @@ export function GoogleSheetsConnectionModal({
               disabled={loading || Boolean(authUrl)}
             >
               {loading && <IconLoader2 size={14} className="mr-1 animate-spin" />}
-              Authorize Google Drive
+              {credentialId != null ? "Reauthorize Google Drive" : "Authorize Google Drive"}
             </Button>
           </div>
         </div>

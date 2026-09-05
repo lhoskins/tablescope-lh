@@ -78,6 +78,28 @@ async def _load_credential(
     return credential
 
 
+#: Matches the frontend's existing ``payload.detail.code`` convention
+#: (``lib/api-client.ts``), so a caller can reliably branch on this without
+#: parsing English error text.
+CONNECTOR_REAUTH_REQUIRED = "CONNECTOR_REAUTH_REQUIRED"
+
+
+def _reauth_required_error(message: str) -> HTTPException:
+    """A structured 409 the frontend can reliably detect to prompt
+    reconnecting Google Drive from the same place the user hit the failure,
+    instead of a dead-end error message."""
+    return HTTPException(
+        status_code=409,
+        detail={"code": CONNECTOR_REAUTH_REQUIRED, "message": message},
+    )
+
+
+def _drive_http_error(exc: gd.GoogleOAuthError | gd.GoogleDriveError) -> HTTPException:
+    if exc.requires_reauth:
+        return _reauth_required_error(str(exc))
+    return HTTPException(status_code=502, detail=str(exc))
+
+
 async def _valid_access_token(
     session: AsyncSession, credential: ConnectorCredential
 ) -> str:
@@ -92,14 +114,13 @@ async def _valid_access_token(
 
     refresh_token = config.get("refresh_token")
     if not refresh_token:
-        raise HTTPException(
-            status_code=409,
-            detail="This connection has no refresh token; reconnect Google Drive.",
+        raise _reauth_required_error(
+            "This connection has no refresh token; reconnect Google Drive."
         )
     try:
         tokens = await gd.refresh_access_token(refresh_token=refresh_token)
     except gd.GoogleOAuthError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise _drive_http_error(exc) from exc
 
     config["access_token"] = tokens["access_token"]
     config["refresh_token"] = tokens.get("refresh_token", refresh_token)
@@ -110,6 +131,13 @@ async def _valid_access_token(
     return config["access_token"]
 
 
+class AuthorizeRequest(BaseModel):
+    # When set, this authorization reconnects an existing, already-broken
+    # connection (expired/revoked refresh token) in place, instead of
+    # creating a new ConnectorCredential row for the same account.
+    credential_id: int | None = None
+
+
 class AuthorizeResponse(BaseModel):
     authorizationUrl: str
     state: str
@@ -117,6 +145,8 @@ class AuthorizeResponse(BaseModel):
 
 @router.post("/authorize", response_model=AuthorizeResponse)
 async def start_authorization(
+    req: AuthorizeRequest | None = None,
+    session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> AuthorizeResponse:
     """Step 1 of the OAuth flow: return the URL to send the browser to.
@@ -131,7 +161,16 @@ async def start_authorization(
             status_code=503,
             detail="Google Drive connector is not configured on this server.",
         )
-    state = gd.create_state_token(tenant_id=context.tenant_id, user_id=context.user_id)
+    credential_id = req.credential_id if req is not None else None
+    if credential_id is not None:
+        # Validates the credential exists and belongs to this tenant before
+        # minting a state token for it.
+        await _load_credential(session, credential_id, context.tenant_id)
+    state = gd.create_state_token(
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        credential_id=credential_id,
+    )
     return AuthorizeResponse(
         authorizationUrl=gd.build_authorization_url(state=state), state=state
     )
@@ -149,10 +188,17 @@ async def complete_authorization(
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> dict[str, Any]:
-    """Step 2: exchange the authorization code and persist the connection."""
+    """Step 2: exchange the authorization code and persist the connection.
+
+    When the state token carries a ``credential_id`` (a reconnect/reauthorize
+    of an existing, broken connection), the fresh tokens replace that
+    credential's secret in place -- every ``SessionSource``/``FileSourceMeta``
+    already pointing at it keeps working under the same id, instead of a new,
+    duplicate connection appearing.
+    """
     _require_feature_enabled()
     try:
-        gd.verify_state_token(
+        credential_id = gd.verify_state_token(
             req.state, tenant_id=context.tenant_id, user_id=context.user_id
         )
     except gd.InvalidStateTokenError as exc:
@@ -163,15 +209,21 @@ async def complete_authorization(
     except gd.GoogleOAuthError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    credential = ConnectorCredential(
-        tenant_id=context.tenant_id,
-        created_by=context.user_id,
-        connector_type=_CONNECTOR_TYPE,
-        display_name=req.display_name,
-        secret_encrypted=encrypt_secret(json.dumps(tokens)),
-    )
-    session.add(credential)
-    await session.commit()
+    if credential_id is not None:
+        credential = await _load_credential(session, credential_id, context.tenant_id)
+        credential.secret_encrypted = encrypt_secret(json.dumps(tokens))
+        await session.commit()
+        await session.refresh(credential)
+    else:
+        credential = ConnectorCredential(
+            tenant_id=context.tenant_id,
+            created_by=context.user_id,
+            connector_type=_CONNECTOR_TYPE,
+            display_name=req.display_name,
+            secret_encrypted=encrypt_secret(json.dumps(tokens)),
+        )
+        session.add(credential)
+        await session.commit()
     return credential.to_dict()
 
 
@@ -222,7 +274,7 @@ async def list_files(
     try:
         return await client.list_supported_files(page_token=page_token)
     except gd.GoogleDriveError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise _drive_http_error(exc) from exc
 
 
 @router.get("/{connection_id}/files/{file_id}/tabs")
@@ -242,7 +294,7 @@ async def list_file_tabs(
     try:
         tabs = await client.list_sheet_tabs(file_id)
     except gd.GoogleDriveError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise _drive_http_error(exc) from exc
     return {"tabs": tabs}
 
 
@@ -268,7 +320,7 @@ async def preview_range(
     try:
         values = await client.get_range_values(file_id, req.range_a1)
     except gd.GoogleDriveError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise _drive_http_error(exc) from exc
     return {"rangeA1": req.range_a1, "values": values}
 
 
@@ -379,7 +431,7 @@ async def detect_tables(
             max_rows=req.max_rows,
         )
     except gd.GoogleDriveError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise _drive_http_error(exc) from exc
 
     if not detected_tables:
         raise HTTPException(status_code=404, detail="No tables detected on this sheet.")

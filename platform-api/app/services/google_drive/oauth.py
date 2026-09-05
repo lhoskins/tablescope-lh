@@ -39,7 +39,18 @@ _STATE_TOKEN_MAX_AGE_SECONDS = 600
 
 
 class GoogleOAuthError(Exception):
-    """Raised when Google's OAuth endpoints reject a request."""
+    """Raised when Google's OAuth endpoints reject a request.
+
+    ``requires_reauth`` marks a failure the stored credential itself cannot
+    recover from -- Google explicitly rejected the refresh grant (revoked/
+    expired), as opposed to a transient network/connectivity failure -- so a
+    caller can prompt the user to reconnect Google Drive instead of
+    surfacing a dead-end error.
+    """
+
+    def __init__(self, message: str, *, requires_reauth: bool = False) -> None:
+        super().__init__(message)
+        self.requires_reauth = requires_reauth
 
 
 class InvalidStateTokenError(GoogleOAuthError):
@@ -55,7 +66,9 @@ def is_configured() -> bool:
     )
 
 
-def create_state_token(*, tenant_id: int, user_id: int) -> str:
+def create_state_token(
+    *, tenant_id: int, user_id: int, credential_id: int | None = None
+) -> str:
     """An authenticated, single-use, time-boxed CSRF token for the OAuth
     redirect round-trip.
 
@@ -64,19 +77,29 @@ def create_state_token(*, tenant_id: int, user_id: int) -> str:
     the same Fernet primitive every other secret in this codebase is
     encrypted with. ``verify_state_token`` below re-derives and checks it on
     the way back from Google -- there is nothing else to keep server-side.
+
+    ``credential_id``, when given, round-trips through the same encrypted
+    payload so the callback can update that *existing* connection's tokens
+    in place (a reconnect/reauthorize) instead of always creating a new
+    ``ConnectorCredential`` row.
     """
     payload = {
         "tenant_id": tenant_id,
         "user_id": user_id,
+        "credential_id": credential_id,
         "nonce": secrets.token_urlsafe(16),
         "iat": datetime.now(UTC).timestamp(),
     }
     return encrypt_secret(json.dumps(payload))
 
 
-def verify_state_token(token: str, *, tenant_id: int, user_id: int) -> None:
+def verify_state_token(token: str, *, tenant_id: int, user_id: int) -> int | None:
     """Raise :class:`InvalidStateTokenError` unless ``token`` is a state
-    token this same tenant/user issued within the allowed window."""
+    token this same tenant/user issued within the allowed window.
+
+    Returns the ``credential_id`` the token was created for (or ``None`` for
+    a fresh-connection flow).
+    """
     try:
         payload = json.loads(decrypt_secret(token))
     except Exception as exc:
@@ -86,6 +109,7 @@ def verify_state_token(token: str, *, tenant_id: int, user_id: int) -> None:
     age = datetime.now(UTC).timestamp() - float(payload.get("iat", 0))
     if age < 0 or age > _STATE_TOKEN_MAX_AGE_SECONDS:
         raise InvalidStateTokenError("State token has expired.")
+    return payload.get("credential_id")
 
 
 def build_authorization_url(*, state: str) -> str:
@@ -167,7 +191,7 @@ async def refresh_access_token(*, refresh_token: str) -> dict[str, Any]:
             raise GoogleOAuthError(f"Failed to contact Google OAuth: {exc}") from exc
     if resp.status_code >= 400:
         logger.warning("Google OAuth token refresh rejected: %s", resp.text[:500])
-        raise GoogleOAuthError("Google rejected the refresh token.")
+        raise GoogleOAuthError("Google rejected the refresh token.", requires_reauth=True)
     tokens = resp.json()
     # A refresh grant does not always return a new refresh_token; keep the
     # caller's existing one in that case.

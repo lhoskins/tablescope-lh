@@ -4,18 +4,41 @@ import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { IconCheck, IconLoader2, IconSearch, IconX } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
+import { ApiError } from "@/lib/api-client";
 import {
   listSaaSFields,
   listSaaSObjects,
   type SaasObject,
 } from "@/lib/api/data-source-builder";
-import type { SaasCredential } from "@/lib/api/connectors";
+import {
+  connectorDisplayName,
+  type CreatedConnection,
+  type SaasCredential,
+} from "@/lib/api/connectors";
 import {
   useBuilderStore,
   type SessionSource,
   type SourceType,
 } from "@/lib/stores/data-source-builder-store";
 import { BrandLogo, connectorChip } from "../database-connectors/brand-logo";
+import { connectorSpec } from "../database-connectors/connector-fields";
+import { ConnectionModal } from "../database-connectors/connection-modal";
+
+function isReauthRequired(err: unknown): boolean {
+  return err instanceof ApiError && err.code === "CONNECTOR_REAUTH_REQUIRED";
+}
+
+function asCreatedConnection(credential: SaasCredential): CreatedConnection {
+  return {
+    kind: "saas",
+    id: credential.id,
+    friendlyName: credential.display_name,
+    connectorKey: credential.connector_type,
+    connectorName: connectorDisplayName(credential.connector_type),
+    hostOrAccount: connectorDisplayName(credential.connector_type),
+    lastTested: credential.last_tested_at ?? credential.created_at,
+  };
+}
 
 export function SaaSSourceModal({
   credential,
@@ -30,6 +53,8 @@ export function SaaSSourceModal({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
   const [search, setSearch] = useState("");
+  const [needsReauth, setNeedsReauth] = useState(false);
+  const [reauthorizing, setReauthorizing] = useState(false);
 
   const { sources, addSource, markCreated } = useBuilderStore(
     useShallow((s) => ({
@@ -52,6 +77,26 @@ export function SaaSSourceModal({
     [sources, credential.id],
   );
 
+  const loadObjects = () => {
+    setLoading(true);
+    setError(null);
+    setNeedsReauth(false);
+    return listSaaSObjects(credential.id)
+      .then((res) => {
+        setObjects(res);
+      })
+      .catch((err) => {
+        if (isReauthRequired(err)) {
+          setNeedsReauth(true);
+          return;
+        }
+        setError(err instanceof Error ? err.message : "Could not load objects");
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  };
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -61,8 +106,12 @@ export function SaaSSourceModal({
         if (!cancelled) setObjects(res);
       })
       .catch((err) => {
-        if (!cancelled)
-          setError(err instanceof Error ? err.message : "Could not load objects");
+        if (cancelled) return;
+        if (isReauthRequired(err)) {
+          setNeedsReauth(true);
+          return;
+        }
+        setError(err instanceof Error ? err.message : "Could not load objects");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -128,7 +177,11 @@ export function SaaSSourceModal({
       }
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create source");
+      if (isReauthRequired(err)) {
+        setNeedsReauth(true);
+      } else {
+        setError(err instanceof Error ? err.message : "Could not create source");
+      }
     } finally {
       setCreating(false);
     }
@@ -238,7 +291,22 @@ export function SaaSSourceModal({
           )}
         </div>
 
-        {error && (
+        {needsReauth && (
+          <div className="flex items-center justify-between gap-3 border-t border-line-tertiary bg-danger-bg/30 px-4 py-2">
+            <p className="text-[12px] text-danger">
+              {credential.display_name}&apos;s connection has expired.
+            </p>
+            <Button
+              variant="primary"
+              onClick={() => setReauthorizing(true)}
+              disabled={reauthorizing}
+            >
+              Reconnect
+            </Button>
+          </div>
+        )}
+
+        {error && !needsReauth && (
           <div className="border-t border-line-tertiary px-4 py-2 text-[12px] text-danger">
             {error}
           </div>
@@ -266,6 +334,23 @@ export function SaaSSourceModal({
           </div>
         </div>
       </div>
+
+      {reauthorizing &&
+        (() => {
+          const spec = connectorSpec(credential.connector_type);
+          if (!spec) return null;
+          return (
+            <ConnectionModal
+              spec={spec}
+              editTarget={asCreatedConnection(credential)}
+              onClose={() => setReauthorizing(false)}
+              onSaved={() => {
+                setReauthorizing(false);
+                void loadObjects();
+              }}
+            />
+          );
+        })()}
     </div>
   );
 }

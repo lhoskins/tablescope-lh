@@ -152,3 +152,65 @@ def test_staging_pg_type_validation():
         assert staging._validate_pg_type(ok) == ok
     with pytest.raises(ValueError):
         staging._validate_pg_type("text; drop table")
+
+
+# ── requires_reauth: rejected credentials must be distinguishable from a ──
+# ── transient/network failure, so a caller can prompt reconnection      ──
+# ── instead of surfacing a dead-end error.                              ──
+
+def _http_status_error(status: int):
+    import httpx
+
+    request = httpx.Request("GET", "https://example.test")
+    response = httpx.Response(status, request=request)
+    return httpx.HTTPStatusError("boom", request=request, response=response)
+
+
+def test_servicenow_connector_error_marks_401_and_403_as_requires_reauth():
+    from app.connectors.saas.servicenow import _connector_error
+
+    for status in (401, 403):
+        err = _connector_error(_http_status_error(status))
+        assert err.requires_reauth is True
+    err = _connector_error(_http_status_error(500))
+    assert err.requires_reauth is False
+
+
+def test_hubspot_connector_error_marks_401_and_403_as_requires_reauth():
+    from app.connectors.saas.hubspot import _connector_error
+
+    for status in (401, 403):
+        err = _connector_error(_http_status_error(status))
+        assert err.requires_reauth is True
+    err = _connector_error(_http_status_error(429))
+    assert err.requires_reauth is False
+
+
+def test_quickbooks_connector_error_marks_401_and_403_as_requires_reauth():
+    from app.connectors.saas.quickbooks import _connector_error
+
+    for status in (401, 403):
+        err = _connector_error(_http_status_error(status))
+        assert err.requires_reauth is True
+    err = _connector_error(_http_status_error(500))
+    assert err.requires_reauth is False
+
+
+def test_salesforce_connector_error_marks_400_401_403_as_requires_reauth():
+    from app.connectors.saas.salesforce import _connector_error
+
+    for status in (400, 401, 403):
+        err = _connector_error(_http_status_error(status))
+        assert err.requires_reauth is True
+    err = _connector_error(_http_status_error(500))
+    assert err.requires_reauth is False
+
+
+def test_connector_error_is_false_for_a_network_failure():
+    import httpx
+
+    from app.connectors.saas.servicenow import _connector_error
+
+    request = httpx.Request("GET", "https://example.test")
+    err = _connector_error(httpx.ConnectError("refused", request=request))
+    assert err.requires_reauth is False
