@@ -256,6 +256,11 @@ class KnowledgeGraphHealthCheck(Base, TimestampMixin):
     structural_checks: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
     source_alignment: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
     dependency_checks: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    # KG-30: per-source-type coverage (total/included/excluded/failed/pending
+    # + coverage_percent), unifying structural validity and coverage into one
+    # health report instead of coverage living only inside a version's
+    # untyped validation_summary blob.
+    source_coverage: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
     node_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     edge_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     orphan_ratio: Mapped[float | None] = mapped_column(sa.Float, nullable=True)

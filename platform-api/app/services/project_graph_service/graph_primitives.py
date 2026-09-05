@@ -65,7 +65,15 @@ async def _upsert_typed_node(
     source_type: str | None = None,
     source_id: int | None = None,
 ) -> int | None:
-    where = "tenant_id=:tid AND project_id=:pid AND node_type=:nt AND name=:nm"
+    # KG-27: case/whitespace-insensitive so an entity extracted as "CMX",
+    # "cmx", or " CMX " resolves to the same node instead of creating a
+    # near-duplicate that differs only by casing or incidental whitespace
+    # -- exact identifier/alias/context-based resolution (the fuller ask)
+    # is a materially larger, separate effort.
+    where = (
+        "tenant_id=:tid AND project_id=:pid AND node_type=:nt "
+        "AND LOWER(TRIM(name))=LOWER(TRIM(:nm))"
+    )
     params: dict[str, Any] = {"tid": tenant_id, "pid": project_id, "nt": node_type, "nm": name}
     if source_type and source_id:
         where += " AND source_type=:st AND source_id=:sid"

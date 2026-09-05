@@ -15,7 +15,7 @@ from app.models.project import Project
 from app.models.project_asset import ProjectAsset
 from app.models.reference_library import ReferenceDocument
 from app.models.saved_query import SavedQuery
-from app.services.sql_lineage import extract_referenced_tables
+from app.services.sql_lineage import extract_join_keys, extract_referenced_tables
 
 from .graph_primitives import (
     _KPI_EDGE_TYPES,
@@ -284,6 +284,17 @@ async def collect_structural_graph(
                 q.left_datasource, q.right_datasource,
             ),
         ))
+        query_properties: dict[str, Any] = {
+            "graph_key": f"query:{q.id}",
+            "summary": (q.description or "")[:300],
+        }
+        # KG-28: join-key evidence parsed from the query's own SQL --
+        # documents which columns a join actually keys on, complementing
+        # (and available even without) the join-builder's own
+        # left_column/right_column fields.
+        join_keys = extract_join_keys(q.sql_text)
+        if join_keys:
+            query_properties["join_keys"] = join_keys
         nodes.append(
             _node(
                 nid,
@@ -291,10 +302,7 @@ async def collect_structural_graph(
                 q.name or f"query {q.id}",
                 source_type="saved_query",
                 source_id=q.id,
-                properties={
-                    "graph_key": f"query:{q.id}",
-                    "summary": (q.description or "")[:300],
-                },
+                properties=query_properties,
             )
         )
         edges.append(
@@ -590,6 +598,14 @@ async def collect_structural_graph(
                     "summary": (r.ai_summary or "")[:300],
                     "tier": r.tier,
                     "issuing_body": r.issuing_body or "",
+                    # KG-29: carried on the node itself (not just used as a
+                    # collection-time filter, KG-20) so a card citing this
+                    # document as evidence can be checked for temporal
+                    # validity at render time too -- a cached card built
+                    # before this document's expiration keeps citing it
+                    # until the next rebuild otherwise.
+                    "effective_date": r.effective_date.isoformat() if r.effective_date else None,
+                    "expiration_date": r.expiration_date.isoformat() if r.expiration_date else None,
                 },
             )
         )

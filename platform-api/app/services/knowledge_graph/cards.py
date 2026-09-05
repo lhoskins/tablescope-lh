@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Any
 
 from .constants import (
@@ -68,6 +69,29 @@ def _dedupe(items: list[str]) -> list[str]:
     return result
 
 
+def _evidence_has_expired_reference(
+    evidence_neighbors: list[tuple[dict[str, Any], dict[str, Any]]],
+) -> bool:
+    """KG-29: true if any evidence neighbor is a reference document whose
+    own ``expiration_date`` has passed.
+
+    A freshly-built graph already excludes an expired reference document
+    from the *active* set (KG-20, ``active_reference_document_conditions``)
+    -- but a card built and cached before that document expired keeps
+    citing it as evidence until the project's next rebuild, with nothing
+    marking the citation stale in between. Re-checking the document's own
+    date here, at card-render time, catches exactly that window.
+    """
+    today = date.today().isoformat()
+    for other, _e in evidence_neighbors:
+        if other.get("type") != "reference_document":
+            continue
+        expiration = (other.get("properties") or {}).get("expiration_date")
+        if expiration and str(expiration) < today:
+            return True
+    return False
+
+
 def _build_card_for_node(
     node: dict[str, Any],
     edges: list[dict[str, Any]],
@@ -120,6 +144,10 @@ def _build_card_for_node(
         "sourceDashboards": sources["dashboards"],
         "supportedKpis": sources["kpis"],
         "recommendedAction": recommended,
+        # KG-29: surfaces when this card's evidence includes a reference
+        # document past its own expiration_date -- an insight must not be
+        # presented as currently justified by guidance that has expired.
+        "evidenceExpired": _evidence_has_expired_reference(evidence_neighbors),
         "traceToEvidence": {
             "nodeIds": evidence_node_ids,
             "edgeIds": evidence_edge_ids,

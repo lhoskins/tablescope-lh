@@ -97,6 +97,7 @@ class KnowledgeGraphHealthCheckRead(BaseModel):
     structural_checks: dict[str, Any] | None
     source_alignment: dict[str, Any] | None
     dependency_checks: dict[str, Any] | None
+    source_coverage: dict[str, Any] | None
     warnings: list[str] | None
     errors: list[str] | None
     started_at: datetime | None

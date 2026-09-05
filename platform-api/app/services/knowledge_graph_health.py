@@ -17,6 +17,10 @@ from app.models import (
     Project,
     ProjectBusinessContext,
 )
+from app.services.knowledge_graph_context.coverage import (
+    compute_source_coverage,
+    summarize_coverage_gaps,
+)
 from app.services.knowledge_graph_lifecycle import KnowledgeGraphLifecycleManager
 from app.services.knowledge_graph_lifecycle.structural_integrity import (
     evaluate_structural_integrity,
@@ -107,10 +111,17 @@ class KnowledgeGraphHealthService:
         structural_checks = self._structural_checks(nodes, edges, version)
         source_alignment = await self._source_alignment(graph, version, project_id)
         dependency_checks = self._dependency_checks(nodes)
+        # KG-30: percentage coverage alongside structural validity, in the
+        # same health report rather than only inside a build version's
+        # untyped validation_summary blob.
+        source_coverage = await compute_source_coverage(
+            self.session, tenant_id=project.tenant_id, project_id=project_id,
+        )
 
         hc.structural_checks = structural_checks
         hc.source_alignment = source_alignment
         hc.dependency_checks = dependency_checks
+        hc.source_coverage = source_coverage
         hc.orphan_ratio = structural_checks.get("orphan_ratio")
         hc.disconnected_components = structural_checks.get(
             "disconnected_components", 0
@@ -131,6 +142,14 @@ class KnowledgeGraphHealthService:
             hc.status = WARNING
         else:
             hc.status = HEALTHY
+
+        # KG-30: named missing areas, appended after status is decided so
+        # incomplete-but-not-broken coverage (e.g. a project with no
+        # dashboards yet) informs the report without demoting a
+        # structurally healthy graph to "warning" on its own.
+        coverage_gaps = summarize_coverage_gaps(source_coverage)
+        if coverage_gaps:
+            hc.warnings = (hc.warnings or []) + coverage_gaps
 
         hc.completed_at = datetime.now(UTC)
         self.session.add(hc)

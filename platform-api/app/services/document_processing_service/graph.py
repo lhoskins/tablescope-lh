@@ -208,8 +208,15 @@ async def _upsert_node(
 ) -> int | None:
     """Create or get a graph node, return its ID."""
 
-    # Check if exists
-    where_clause = "tenant_id=:tid AND project_id=:pid AND node_type=:nt AND name=:nm"
+    # Check if exists. KG-27: case/whitespace-insensitive so an entity
+    # extracted as "CMX", "cmx", or " CMX " resolves to the same node
+    # instead of creating a near-duplicate that differs only by casing or
+    # incidental whitespace -- exact identifier/alias/context-based
+    # resolution (the fuller ask) is a materially larger, separate effort.
+    where_clause = (
+        "tenant_id=:tid AND project_id=:pid AND node_type=:nt "
+        "AND LOWER(TRIM(name))=LOWER(TRIM(:nm))"
+    )
     params: dict[str, Any] = {"tid": tenant_id, "pid": project_id, "nt": node_type, "nm": name}
     if source_type and source_id:
         where_clause += " AND source_type=:st AND source_id=:sid"
