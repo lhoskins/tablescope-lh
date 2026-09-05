@@ -92,6 +92,7 @@ async def ai_suggest_dashboards(
 
     kg_context = await _kg_context(
         session, context, req.project_id, surface="dashboard_generation",
+        question=req.prompt,
     )
 
     desired = max(3, int(req.desired_count or 3))
@@ -199,6 +200,9 @@ async def ai_suggest_dashboards(
         "suggestions": suggestions,
         "previewNote": preview_note,
         "model_used": ai_result.get("model_used", ""),
+        # KG-50: the active KG version + evidence ids that grounded these
+        # suggestions.
+        "kgGrounding": kg_context.get("kg_grounding"),
     }
 
 

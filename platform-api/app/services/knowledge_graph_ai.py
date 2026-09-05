@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from app.models.reference_library import TIER_COMPANY, TIER_PROJECT
 from app.services import ai_intelligence_client as ai
 from app.services.evidence_severity import REFERENCE_NODE_TYPES, gate_severity
 
@@ -193,12 +194,25 @@ def _map_card(
         return None
 
     evidence_nodes = [nodes_by_key[k] for k in evidence_keys]
-    evidence_ids = {center["id"], *[n["id"] for n in evidence_nodes]}
+    # KG-34: an order-preserving sequence (center first, then each evidence
+    # node in the order it was resolved) -- a plain set here had no
+    # guaranteed order at all, so a "trace path" built from it couldn't be
+    # a real, reproducible sequence.
+    evidence_ids = list(dict.fromkeys([center["id"], *[n["id"] for n in evidence_nodes]]))
+    evidence_id_set = set(evidence_ids)
     grounding_edges = [
         e for e in edges
-        if e["source"] in evidence_ids and e["target"] in evidence_ids
+        if e["source"] in evidence_id_set and e["target"] in evidence_id_set
     ]
     edge_ids = [e["id"] for e in grounding_edges]
+    hops = [
+        {
+            "fromNodeId": e["source"],
+            "toNodeId": e["target"],
+            "relationshipType": e.get("type") or "",
+        }
+        for e in grounding_edges
+    ]
 
     def _labels(types: set[str]) -> list[str]:
         out: list[str] = []
@@ -220,9 +234,21 @@ def _map_card(
     has_project_evidence = any(
         n["type"] not in REFERENCE_NODE_TYPES for n in evidence_nodes
     )
+    # KG-36: approved company policy and project-tier reference documents rank
+    # above generic industry references in the stated source-authority order,
+    # so a card grounded only in one of those shouldn't be capped the same way
+    # as one grounded only in a generic industry standard. A reference
+    # document with no tier recorded at all is not proof of authority -- only
+    # an explicit company/project tier counts.
+    has_authoritative_non_industry_evidence = any(
+        n["type"] in REFERENCE_NODE_TYPES
+        and n["properties"].get("tier") in (TIER_COMPANY, TIER_PROJECT)
+        for n in evidence_nodes
+    )
     severity = gate_severity(
         str(raw.get("severity", "info")),
         has_project_evidence=has_project_evidence,
+        has_authoritative_non_industry_evidence=has_authoritative_non_industry_evidence,
     )
     try:
         model_confidence = max(0.0, min(1.0, float(raw.get("confidence", 0.0))))
@@ -261,19 +287,30 @@ def _map_card(
         "supportedKpis": supported_kpis,
         "recommendedAction": str(raw.get("recommendedAction", "")),
         "traceToEvidence": {
-            "nodeIds": list(evidence_ids),
+            "nodeIds": evidence_ids,
             "edgeIds": edge_ids,
             "nodeKeys": evidence_keys,
+            "hops": hops,
         },
         "aiGenerated": True,
     }
 
 
 def _clear_cards(payload: dict[str, Any]) -> dict[str, Any]:
-    """Strip all insight cards from a payload (AI-only: no deterministic fallback)."""
-    payload["insightCards"] = []
-    payload["tracePaths"] = []
+    """KG-40: AI enrichment is unavailable or rejected every result -- fall
+    back to the deterministic, evidence-grounded structural cards
+    ``build_graph_payload`` already computed into this same ``payload``
+    (``insightCards``/``tracePaths`` are left untouched) instead of wiping
+    them to an empty list. ``aiGenerated`` still reports whether the
+    cards currently shown are AI-enriched (``False`` here); the new
+    ``aiEnrichmentStatus`` (mirroring KG-39's ``grounding_status``
+    convention) reports *why* separately, so a caller/UI can show "AI
+    enrichment unavailable, showing structural relationships" rather than
+    an unexplained empty panel or, worse, confusing structural fallback
+    content for a fully AI-enriched result.
+    """
     payload["aiGenerated"] = False
+    payload["aiEnrichmentStatus"] = "unavailable"
     return payload
 
 
@@ -350,9 +387,11 @@ async def enrich_payload_with_ai(
             "fromNodeKey": c["nodeKey"],
             "nodeIds": c["traceToEvidence"]["nodeIds"],
             "edgeIds": c["traceToEvidence"]["edgeIds"],
+            "hops": c["traceToEvidence"].get("hops", []),
         }
         for c in cards
     ]
     payload["aiGenerated"] = True
+    payload["aiEnrichmentStatus"] = "ok"
     payload["pipeline_version"] = PIPELINE_VERSION_AI
     return payload

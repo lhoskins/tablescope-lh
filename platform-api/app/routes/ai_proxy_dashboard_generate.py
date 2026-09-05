@@ -73,6 +73,10 @@ async def ai_generate_and_save_dashboard(
     allowed_tables = [ds.view_name for ds in sources]
 
     # Step 1 — Plan: ask the AI server for an insight-first dashboard plan.
+    kg_context = await _kg_context(
+        session, context, req.project_id, surface="dashboard_generation",
+        question=req.prompt,
+    )
     payload = {
         "tenant_id": context.tenant_id,
         "user_id": context.user_id,
@@ -81,9 +85,7 @@ async def ai_generate_and_save_dashboard(
         "allowed_tables": allowed_tables,
         # Knowledge Graph context steers the plan toward validated risks, gaps,
         # measured/recommended KPIs, and governing documents.
-        "knowledge_graph_context": await _kg_context(
-            session, context, req.project_id, surface="dashboard_generation",
-        ),
+        "knowledge_graph_context": kg_context,
         # Evidence-backed join candidates (e.g. two monthly tables sharing a
         # "month" column) -- lets the planner combine measures that live in
         # separate sources instead of being restricted to one table per widget.
@@ -509,4 +511,7 @@ async def ai_generate_and_save_dashboard(
         "queries_created": created_queries,
         "queries_reused": reused_queries,
         "model_used": ai_result.get("model_used", ""),
+        # KG-50: the active KG version + evidence ids that grounded this
+        # dashboard's plan.
+        "kgGrounding": kg_context.get("kg_grounding"),
     }

@@ -24,6 +24,9 @@ from app.models.database_data_source import DatabaseDataSource
 from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project
 from app.models.project_asset import ProjectAsset
+from app.models.project_context.goals import ProjectGoal
+from app.models.project_context.metrics import ProjectMetric
+from app.models.project_context.risks import ProjectRisk
 from app.models.reference_library import (
     TIER_COMPANY,
     TIER_INDUSTRY,
@@ -33,6 +36,20 @@ from app.models.reference_library import (
 from app.models.saved_query import SavedQuery
 
 from .graph_primitives import _MAX_PER_KIND
+
+# KG-30: human labels for a bucket with no/partial coverage, used to name
+# the specific missing area rather than reporting only an aggregate score.
+_LABELS = {
+    "file_sources": "file data sources",
+    "data_sources": "database data sources",
+    "assets": "project documents",
+    "reference_documents": "reference-library documents",
+    "saved_queries": "saved queries",
+    "dashboards": "dashboards",
+    "goals": "project goals",
+    "metrics": "KPIs/metrics",
+    "risks": "project risks",
+}
 
 # ProjectAsset.ai_status values reached while a document is still being
 # processed (see document_processing_service) -- not yet a terminal
@@ -49,34 +66,74 @@ async def _all_statuses(session: AsyncSession, stmt: Any) -> list[Any]:
     return list((await session.execute(stmt)).scalars().all())
 
 
-def _bucket(statuses: list[Any], *, pending: set[str], failed: set[str]) -> dict[str, int]:
+def _bucket(statuses: list[Any], *, pending: set[str], failed: set[str]) -> dict[str, Any]:
     total = len(statuses)
+    included = min(total, _MAX_PER_KIND)
     return {
         "total": total,
-        "included": min(total, _MAX_PER_KIND),
+        "included": included,
         "excluded": max(0, total - _MAX_PER_KIND),
         "failed": sum(1 for s in statuses if s in failed),
         "pending": sum(1 for s in statuses if s in pending),
+        # KG-30: a project with nothing expected of this kind is reported as
+        # fully (100%) covered, not as a division-by-zero or a false gap --
+        # "0 of 0 dashboards" is not a missing area.
+        "coverage_percent": round((included / total) * 100, 1) if total else 100.0,
     }
+
+
+def summarize_coverage_gaps(coverage: dict[str, dict[str, Any]]) -> list[str]:
+    """KG-30: human-readable "named missing areas" for any source type that
+    isn't fully covered -- zero rows found at all, some excluded by the
+    per-kind cap, or some failed/still-pending (``included`` only reflects
+    the cap, not whether a row actually finished processing successfully).
+    """
+    gaps: list[str] = []
+    for key, bucket in coverage.items():
+        total = bucket.get("total", 0)
+        label = _LABELS.get(key, key)
+        if total == 0:
+            gaps.append(f"No {label} found for this project")
+            continue
+        excluded = max(0, total - bucket.get("included", 0))
+        failed = bucket.get("failed", 0)
+        pending = bucket.get("pending", 0)
+        if not (excluded or failed or pending):
+            continue
+        parts = []
+        if excluded:
+            parts.append(f"{excluded} excluded by the per-kind cap")
+        if failed:
+            parts.append(f"{failed} failed")
+        if pending:
+            parts.append(f"{pending} still pending")
+        gaps.append(
+            f"{label}: {bucket.get('coverage_percent', 0.0):.0f}% coverage "
+            f"({', '.join(parts)} of {total})"
+        )
+    return gaps
 
 
 async def compute_source_coverage(
     session: AsyncSession, *, tenant_id: int, project_id: int,
-) -> dict[str, dict[str, int]]:
+) -> dict[str, dict[str, Any]]:
     """Return a ``{source_type: {total, included, excluded, failed, pending}}``
     manifest for everything ``collect_structural_graph`` draws on for this
     project. Best-effort per source type: one query failing never blocks the
     others or the build itself.
     """
-    coverage: dict[str, dict[str, int]] = {}
+    coverage: dict[str, dict[str, Any]] = {}
 
     async def _safe(key: str, coro: Any) -> None:
         try:
             coverage[key] = await coro
         except Exception:
-            coverage[key] = {"total": 0, "included": 0, "excluded": 0, "failed": 0, "pending": 0}
+            coverage[key] = {
+                "total": 0, "included": 0, "excluded": 0, "failed": 0, "pending": 0,
+                "coverage_percent": 100.0,
+            }
 
-    async def _file_sources() -> dict[str, int]:
+    async def _file_sources() -> dict[str, Any]:
         statuses = await _all_statuses(
             session,
             select(FileSourceMeta.ai_profile_status).where(
@@ -89,7 +146,7 @@ async def compute_source_coverage(
         # anything that never reached "profiled" is reported as pending.
         return _bucket(statuses, pending={"pending"}, failed=set())
 
-    async def _data_sources() -> dict[str, int]:
+    async def _data_sources() -> dict[str, Any]:
         statuses = await _all_statuses(
             session,
             select(DatabaseDataSource.last_test_status).where(
@@ -103,7 +160,7 @@ async def compute_source_coverage(
         bucket["failed"] = sum(1 for s in statuses if s and s != "success")
         return bucket
 
-    async def _assets() -> dict[str, int]:
+    async def _assets() -> dict[str, Any]:
         statuses = await _all_statuses(
             session,
             select(ProjectAsset.ai_status).where(
@@ -115,7 +172,7 @@ async def compute_source_coverage(
             statuses, pending=_ASSET_PENDING_STATUSES, failed=_ASSET_FAILED_STATUSES,
         )
 
-    async def _reference_documents() -> dict[str, int]:
+    async def _reference_documents() -> dict[str, Any]:
         # Same tier scope as collect_structural_graph -- project docs,
         # tenant-wide company docs, and global industry standards.
         stmt = select(ReferenceDocument.status).where(
@@ -130,7 +187,7 @@ async def compute_source_coverage(
         statuses = await _all_statuses(session, stmt)
         return _bucket(statuses, pending={"draft", "processing"}, failed=set())
 
-    async def _no_pipeline(model: Any, *, has_tenant_id: bool) -> dict[str, int]:
+    async def _no_pipeline(model: Any, *, has_tenant_id: bool) -> dict[str, Any]:
         """Saved queries and dashboards are user-authored, not ingested --
         there's no extraction pipeline for them to fail or leave pending, but
         the truncation-cap manifest (total/included/excluded) still applies."""
@@ -150,4 +207,12 @@ async def compute_source_coverage(
     await _safe("reference_documents", _reference_documents())
     await _safe("saved_queries", _no_pipeline(SavedQuery, has_tenant_id=False))
     await _safe("dashboards", _no_pipeline(Dashboard, has_tenant_id=True))
+    # KG-30: goals/metrics(KPIs)/risks are graph-relevant sources
+    # (compute_source_fingerprint already hashes them) that had no
+    # coverage measurement of any kind before -- user-authored rows like
+    # saved queries/dashboards, not an ingestion pipeline that can fail or
+    # leave something pending.
+    await _safe("goals", _no_pipeline(ProjectGoal, has_tenant_id=True))
+    await _safe("metrics", _no_pipeline(ProjectMetric, has_tenant_id=True))
+    await _safe("risks", _no_pipeline(ProjectRisk, has_tenant_id=True))
     return coverage

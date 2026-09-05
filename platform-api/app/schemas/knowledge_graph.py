@@ -41,6 +41,10 @@ class KnowledgeGraphBuildRead(BaseModel):
     candidate_version_id: int | None
     source_checkpoint: dict[str, Any] | None
     affected_entity_summary: dict[str, Any] | None
+    # KG-48: per-stage duration breakdown (ms) + source counts, so an
+    # operator can see which stage was slow or where a build failed without
+    # reading raw logs.
+    stage_metrics: dict[str, Any] | None = None
     queued_at: datetime | None
     started_at: datetime | None
     completed_at: datetime | None
@@ -93,6 +97,7 @@ class KnowledgeGraphHealthCheckRead(BaseModel):
     structural_checks: dict[str, Any] | None
     source_alignment: dict[str, Any] | None
     dependency_checks: dict[str, Any] | None
+    source_coverage: dict[str, Any] | None
     warnings: list[str] | None
     errors: list[str] | None
     started_at: datetime | None

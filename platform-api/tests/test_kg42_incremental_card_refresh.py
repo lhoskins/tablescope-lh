@@ -194,8 +194,12 @@ async def test_incremental_rebuild_only_reenriches_the_changed_center(db_session
     await manager.run_incremental_rebuild(inc_build.id)
     await db_session.commit()
 
-    # Only the changed centre's card was re-enriched -- not the untouched one.
-    assert calls == ["risk:alpha"]
+    # doc:beta's structural card legitimately traces evidence through
+    # risk:alpha (their real "related" edge) -- KG-40 keeps that structural
+    # fallback content on cache instead of wiping it, so affected_center_keys
+    # correctly detects doc:beta's cached evidence trace also touches the
+    # changed node and re-enriches it too, not just risk:alpha itself.
+    assert set(calls) == {"risk:alpha", "doc:beta"}
 
     new_snapshot = await get_project_graph_snapshot(
         db_session, tenant_id=tenant_id, project_id=project.id,

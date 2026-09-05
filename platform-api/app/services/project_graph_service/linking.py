@@ -7,6 +7,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.knowledge_graph.schema_registry import is_reserved_structural_type
+
 from .graph_primitives import (
     AUTO_LINK_THRESHOLD,
     FAMILY_RELATIONSHIP_TYPES,
@@ -76,6 +78,13 @@ async def create_family_relationship_edges(
         if rel_type not in FAMILY_RELATIONSHIP_TYPES:
             rel_type = "related_family_member"
         target_type = str(rel.get("target_type", "")).strip().lower() or "process"
+        # KG-24: an LLM-supplied target_type must never claim a reserved
+        # structural node type (e.g. "dashboard", "project") -- a fake node
+        # with that type but no real source_id/source_type would be
+        # indistinguishable from, and could graph_key-collide with, the
+        # actual structural node for this project.
+        if is_reserved_structural_type(target_type):
+            target_type = "process"
 
         target_node_id = await _upsert_typed_node(
             session, tenant_id, project_id, created_by,

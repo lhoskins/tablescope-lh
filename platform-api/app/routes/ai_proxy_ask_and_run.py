@@ -462,6 +462,9 @@ async def _generate_sql_for_question(
     # collapsing both into the same generic failure is what let an AI-server
     # outage silently resolve to a matched Insight Card instead of a clear
     # error, with no way for the caller to know that's what happened.
+    kg_context = await _kg_context(
+        session, context, project_id, surface="query_generation", question=question,
+    )
     ai_result = await ai.generate_sql(
         tenant_id=context.tenant_id,
         user_id=context.user_id,
@@ -471,7 +474,7 @@ async def _generate_sql_for_question(
         source_catalog=source_catalog,
         preferred_sources=preferred_sources or [],
         relevant_columns=relevant_columns or [],
-        knowledge_graph_context=await _kg_context(session, context, project_id, surface="query_generation"),
+        knowledge_graph_context=kg_context,
         grounding_evidence=grounding_evidence,
         relationship_hints=relationship_hints,
         conversation_id=conversation_id,
@@ -480,6 +483,10 @@ async def _generate_sql_for_question(
     if not isinstance(ai_result, dict):
         raise ai.AIUnavailableError("AI server returned an invalid response")
     ai_result["_allowed_tables"] = allowed_tables
+    # KG-50: carried as a private field so the caller can lift it into its own
+    # response envelope as "kgGrounding" -- the active KG version + evidence
+    # ids that grounded this generated query.
+    ai_result["_kg_grounding"] = kg_context.get("kg_grounding")
     return ai_result
 
 
@@ -604,6 +611,7 @@ async def _ask_and_run_core(
                 "error": friendly,
                 "errorDetails": details,
                 "groundingManifest": grounding_manifest,
+                "kgGrounding": None,
             }
         # A genuine outage (unreachable, timed out, busy): a matched Insight
         # Card or KG prose answer would be standing in for the AI, not
@@ -622,6 +630,7 @@ async def _ask_and_run_core(
             "error": "The AI service is currently unavailable. Please try again shortly.",
             "errorDetails": {"aiError": str(exc)},
             "groundingManifest": grounding_manifest,
+            "kgGrounding": None,
         }
     except HTTPException as exc:
         friendly, details = _ai_generation_error(exc.detail)
@@ -637,9 +646,11 @@ async def _ask_and_run_core(
             "error": friendly,
             "errorDetails": details,
             "groundingManifest": grounding_manifest,
+            "kgGrounding": None,
         }
 
     allowed_tables = ai_result.pop("_allowed_tables", [])
+    kg_grounding = ai_result.pop("_kg_grounding", None)
     sql = (ai_result.get("sql") or "").strip().rstrip(";")
     if not sql or not _is_read_only_select(sql):
         return {
@@ -654,6 +665,7 @@ async def _ask_and_run_core(
             "error": "We could not safely build a query for this question.",
             "errorDetails": {"sql": sql} if sql else {},
             "groundingManifest": grounding_manifest,
+            "kgGrounding": kg_grounding,
         }
 
     table_schema = await _project_table_schema(
@@ -683,6 +695,7 @@ async def _ask_and_run_core(
                 "executionError": exec_error,
             },
             "groundingManifest": grounding_manifest,
+            "kgGrounding": kg_grounding,
         }
 
     columns = result.get("columns", [])
@@ -698,6 +711,7 @@ async def _ask_and_run_core(
         "dataSourcesUsed": [used] if used else [],
         "status": "success",
         "error": None,
+        "kgGrounding": kg_grounding,
         "groundingManifest": ai_result.get("grounding_manifest") or grounding_manifest,
     }
     decision = _classify_intent_safe(question, columns, rows)
@@ -868,6 +882,9 @@ async def _forward_prose_answer(
     fall further back from, but "we could not even ask" must surface as a
     hard error instead of silently degrading to whatever fallback runs next.
     """
+    kg_context = await _kg_context(
+        session, context, project_id, surface="query_generation", question=question,
+    )
     try:
         result = await ai.ask(
             tenant_id=context.tenant_id,
@@ -878,7 +895,7 @@ async def _forward_prose_answer(
             include_query_history=include_query_history,
             include_dashboard_context=include_dashboard_context,
             history=history or [],
-            knowledge_graph_context=await _kg_context(session, context, project_id, surface="query_generation"),
+            knowledge_graph_context=kg_context,
             grounding_evidence=grounding_evidence,
         )
     except ai.AIUnavailableError:
@@ -886,6 +903,9 @@ async def _forward_prose_answer(
     return {
         "answer": _strip_model_markup(str((result or {}).get("answer") or "")),
         "model_used": (result or {}).get("model_used", ""),
+        # KG-50: the active KG version + evidence ids that grounded this
+        # prose answer.
+        "kgGrounding": kg_context.get("kg_grounding"),
     }
 
 
@@ -977,6 +997,8 @@ async def ai_ask_and_run(
                     "proposedActions": card_match.proposed_actions,
                 },
                 "groundingManifest": grounding_manifest,
+                # Matched from an existing Insight Card, not fresh KG context.
+                "kgGrounding": None,
             }
             _attach_presentation(match_result)
             return match_result
@@ -1002,6 +1024,7 @@ async def ai_ask_and_run(
                 "answerType": "text",
                 "error": None,
                 "groundingManifest": grounding_manifest,
+                "kgGrounding": prose.get("kgGrounding"),
             }
             _attach_presentation(prose_result)
             return prose_result
@@ -1052,6 +1075,7 @@ async def ai_generate_query_preview(
                 "status": "generation_error",
                 "error": friendly,
                 "errorDetails": details,
+                "kgGrounding": None,
             }
         return {
             "title": title,
@@ -1065,6 +1089,7 @@ async def ai_generate_query_preview(
             "status": "ai_unavailable",
             "error": "The AI service is currently unavailable. Please try again shortly.",
             "errorDetails": {"aiError": str(exc)},
+            "kgGrounding": None,
         }
     except HTTPException as exc:
         friendly, details = _ai_generation_error(exc.detail)
@@ -1080,9 +1105,11 @@ async def ai_generate_query_preview(
             "status": "generation_error",
             "error": friendly,
             "errorDetails": details,
+            "kgGrounding": None,
         }
 
     allowed_tables = ai_result.pop("_allowed_tables", [])
+    kg_grounding = ai_result.pop("_kg_grounding", None)
     sql = (ai_result.get("sql") or "").strip().rstrip(";")
     if not sql or not _is_read_only_select(sql):
         return {
@@ -1097,6 +1124,7 @@ async def ai_generate_query_preview(
             "status": "generation_error",
             "error": "We could not safely build a query for this recommendation.",
             "errorDetails": {"sql": sql} if sql else {},
+            "kgGrounding": kg_grounding,
         }
 
     table_schema = await _project_table_schema(
@@ -1126,6 +1154,7 @@ async def ai_generate_query_preview(
                 "sql": sql,
                 "executionError": exec_error,
             },
+            "kgGrounding": kg_grounding,
         }
 
     columns = result.get("columns", [])
@@ -1142,6 +1171,7 @@ async def ai_generate_query_preview(
         "explanation": ai_result.get("explanation", ""),
         "status": "success",
         "error": None,
+        "kgGrounding": kg_grounding,
     }
     # M4 fast-follow: an executed preview is a structured result — stamp the
     # shared ResponseEnvelope so the modal renders via the same ResponsePresenter

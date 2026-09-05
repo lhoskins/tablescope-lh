@@ -226,6 +226,7 @@ async def _kg_context(
     *,
     surface: str,
     max_items: int = 20,
+    question: str | None = None,
 ) -> dict[str, Any]:
     """Collect the project's Knowledge Graph context for AI generation.
 
@@ -234,6 +235,11 @@ async def _kg_context(
 
     ``surface`` (KG-07) names the feature this context feeds -- required so
     the resulting evidence-access audit row is labeled correctly.
+
+    ``question`` (KG-37) is the user's free-text prompt, when the calling
+    surface has one -- it lets the context ranking favor items relevant to
+    what was actually asked instead of confidence alone. Omit it for a
+    surface with no free-text ask (e.g. a fixed-shape dashboard request).
     """
     try:
         kg_context = await collect_knowledge_graph_ai_context(
@@ -243,6 +249,7 @@ async def _kg_context(
             user_id=context.user_id,
             max_items=max_items,
             surface=surface,
+            question=question,
         )
         if kg_context.get("grounding_status") == "unavailable":
             # KG-39: fail-open by design (generation proceeds without KG

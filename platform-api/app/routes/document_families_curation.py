@@ -18,6 +18,7 @@ from app.routes.document_families_reads import (
     _require_asset,
     _require_project,
 )
+from app.services.ai_confidence_audit import record_ai_confidence_decision
 from app.services.project_graph_service import (
     archive_empty_family,
     deactivate_document_edges,
@@ -26,6 +27,22 @@ from app.services.project_graph_service import (
     normalize_family_key,
     upsert_document_family_node,
 )
+
+_CONFIDENCE_SOURCE_PIPELINE = "document_family"
+
+
+def _ai_confidence(meta: dict) -> float | None:
+    """The AI-suggested confidence recorded on this asset, if any -- read
+    before the decision below overwrites ``document_family`` on ``meta``.
+    """
+    suggested = meta.get("document_family")
+    if not isinstance(suggested, dict):
+        return None
+    conf = suggested.get("confidence")
+    try:
+        return float(conf) if conf is not None else None
+    except (TypeError, ValueError):
+        return None
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects/{project_id}", tags=["document-families"])
@@ -66,6 +83,7 @@ async def accept_family(
     meta = asset.ai_metadata if isinstance(asset.ai_metadata, dict) else {}
     suggested_raw = meta.get("document_family")
     suggested: dict[str, Any] = suggested_raw if isinstance(suggested_raw, dict) else {}
+    ai_confidence_at_decision = _ai_confidence(meta)
 
     family_name = (body.family_name or suggested.get("family_name") or "").strip()
     if not family_name:
@@ -106,6 +124,12 @@ async def accept_family(
         family_node_id=family_node_id, family_name=family_name,
         confidence=confidence, action_source="user_accept", user_id=context.user_id,
     )
+    await record_ai_confidence_decision(
+        session, tenant_id=context.tenant_id, project_id=project_id, asset_id=asset_id,
+        source_pipeline=_CONFIDENCE_SOURCE_PIPELINE,
+        ai_confidence_at_decision=ai_confidence_at_decision,
+        human_decision="accepted", decided_by=context.user_id,
+    )
     await session.commit()
     return {"status": "accepted", "family_node_id": family_node_id, "family_name": family_name}
 
@@ -130,6 +154,7 @@ async def change_family(
     reason = body.reason or "User moved document to another family."
     confidence = body.confidence if body.confidence is not None else 1.0
     meta = asset.ai_metadata if isinstance(asset.ai_metadata, dict) else {}
+    ai_confidence_at_decision = _ai_confidence(meta)
     business_domain = str(meta.get("business_domain", "")).strip()
 
     doc_node_id = await _get_or_create_document_node(
@@ -168,6 +193,12 @@ async def change_family(
         family_node_id=family_node_id, family_name=family_name,
         action_source="user_change", user_id=context.user_id,
     )
+    await record_ai_confidence_decision(
+        session, tenant_id=context.tenant_id, project_id=project_id, asset_id=asset_id,
+        source_pipeline=_CONFIDENCE_SOURCE_PIPELINE,
+        ai_confidence_at_decision=ai_confidence_at_decision,
+        human_decision="changed", decided_by=context.user_id,
+    )
     await session.commit()
     return {"status": "changed", "family_node_id": family_node_id, "family_name": family_name}
 
@@ -201,6 +232,7 @@ async def remove_family(
             await archive_empty_family(session, context.tenant_id, project_id, fid)
 
     meta = asset.ai_metadata if isinstance(asset.ai_metadata, dict) else {}
+    ai_confidence_at_decision = _ai_confidence(meta)
     if meta.get("document_family"):
         new_meta = dict(meta)
         new_meta["document_family"] = None
@@ -210,6 +242,12 @@ async def remove_family(
         "document_family_removed",
         tenant_id=context.tenant_id, project_id=project_id, asset_id=asset_id,
         user_id=context.user_id,
+    )
+    await record_ai_confidence_decision(
+        session, tenant_id=context.tenant_id, project_id=project_id, asset_id=asset_id,
+        source_pipeline=_CONFIDENCE_SOURCE_PIPELINE,
+        ai_confidence_at_decision=ai_confidence_at_decision,
+        human_decision="removed", decided_by=context.user_id,
     )
     await session.commit()
     return {"status": "removed", "asset_id": asset_id}

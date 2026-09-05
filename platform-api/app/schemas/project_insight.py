@@ -80,6 +80,12 @@ class ProjectInsightResponse(BaseModel):
     # tell that it did so without KG grounding, not silently treat it as
     # fully grounded.
     kgGroundingDegraded: bool = False
+    # KG-50: the active KG version + evidence node/document/query ids that
+    # grounded this specific report -- {"kgVersionId", "nodeIds",
+    # "documentIds", "queryIds"} -- or None when there was nothing to ground
+    # on. Lets a caller verify (or an evaluation prove) which evidence
+    # actually informed this answer without a separate audit-table query.
+    kgGrounding: dict[str, Any] | None = None
 
 
 class AcknowledgeInsightRequest(BaseModel):

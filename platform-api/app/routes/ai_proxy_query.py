@@ -58,6 +58,10 @@ async def generate_sql(
         session, context, project_id=req.project_id
     )
 
+    kg_context = await _kg_context(
+        session, context, req.project_id, surface="query_generation",
+        question=req.prompt,
+    )
     payload = {
         "tenant_id": context.tenant_id,
         "user_id": context.user_id,
@@ -69,14 +73,14 @@ async def generate_sql(
         "relevant_columns": [],
         # All query AI generation includes Knowledge Graph context so SQL targets
         # the risks/gaps/KPIs the graph surfaces (never Reference Library docs).
-        "knowledge_graph_context": await _kg_context(
-            session, context, req.project_id, surface="query_generation",
-        ),
+        "knowledge_graph_context": kg_context,
         "relationship_hints": relationship_hints,
     }
     result = await _forward_to_ai("/ai/query/generate", payload)
     if isinstance(result, dict) and isinstance(result.get("sql"), str):
         result["sql"] = rebuild_group_by_from_select(result["sql"])
+    # KG-50: the active KG version + evidence ids that grounded this query.
+    result["kgGrounding"] = kg_context.get("kg_grounding")
     return result
 
 

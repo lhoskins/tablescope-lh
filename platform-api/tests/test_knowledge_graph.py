@@ -721,19 +721,24 @@ def test_ai_card_grounded_only_in_reference_doc_is_capped_to_watch():
     assert card["severity"] == "watch"
 
 
-def test_from_snapshot_shows_no_cards_for_uncached_center():
-    # AI-only: a centre with no cached AI bundle shows no cards (no
-    # deterministic fallback), never another centre's cached cards.
+def test_from_snapshot_falls_back_to_structural_cards_for_uncached_center():
+    # KG-40: a centre with no cached AI bundle falls back to its own
+    # deterministic structural cards, never another centre's cached cards.
     cards = {
         "insightCards": [{"id": "ai-1", "category": "risk", "title": "AI risk"}],
         "gaps": [], "recommendedActions": [], "tracePaths": [], "aiGenerated": True,
     }
     snap = _full_snapshot(aiCardsByCenter={"project:proj": cards})
+    structural = build_graph_payload(
+        _nodes(), _edges(), center_node="process:corrective_action_process",
+    )
     payload = build_node_centric_graph_from_snapshot(
         snap, center_node="process:corrective_action_process",
     )
-    assert payload["insightCards"] == []
+    assert payload["insightCards"] == structural["insightCards"]
+    assert payload["insightCards"] != cards["insightCards"]
     assert payload["aiGenerated"] is False
+    assert payload["aiEnrichmentStatus"] == "unavailable"
 
 
 def test_get_snapshot_normalizes_legacy_single_center_cache():

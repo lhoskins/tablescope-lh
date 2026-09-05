@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.knowledge_graph.schema_registry import detect_contradictory_direction_edges
+
 # A candidate whose orphan ratio (nodes with no edge at all) exceeds this
 # fraction is rejected outright rather than merely warned about. No
 # per-project-type/coverage-based threshold tiers exist in this codebase yet
@@ -102,6 +104,7 @@ def evaluate_structural_integrity(
             "project_node_count": 0, "dangling_edge_refs": 0,
             "orphan_ratio": 0.0, "orphan_count": 0,
             "disconnected_components": 0, "isolated_node_count": 0,
+            "contradictory_direction_count": 0,
         }
 
     node_ids = {n.get("id") for n in nodes if n.get("id") is not None}
@@ -142,6 +145,17 @@ def evaluate_structural_integrity(
     if component_count > _WARN_DISCONNECTED_COMPONENTS:
         warnings.append(f"Many disconnected components: {component_count}")
 
+    # KG-25: a same-type relationship asserted in both directions between
+    # the same two nodes (A--rel-->B and B--rel-->A) is a modeling error,
+    # not normal graph structure -- reported, not blocking, since it can't
+    # (yet) be resolved automatically to which direction is correct.
+    contradictions = detect_contradictory_direction_edges(edges)
+    if contradictions:
+        warnings.append(
+            f"{len(contradictions)} relationship(s) asserted in both directions "
+            "between the same two nodes"
+        )
+
     return {
         "valid": not errors,
         "errors": errors,
@@ -154,4 +168,5 @@ def evaluate_structural_integrity(
         "orphan_count": len(orphan_ids),
         "disconnected_components": component_count,
         "isolated_node_count": len(isolated_ids),
+        "contradictory_direction_count": len(contradictions),
     }

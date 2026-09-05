@@ -17,6 +17,7 @@ datasources.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -61,11 +62,64 @@ def _summary(node: dict[str, Any]) -> str:
     return str(node.get("summary") or node.get("businessValue") or "")[:400]
 
 
-def _ranked(items: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
-    """Highest-confidence first, capped, deduped by title."""
+# KG-37: common English words excluded from the question keyword set so a
+# question like "what is the status of on-time delivery?" ranks on
+# "status"/"on-time"/"delivery", not "what"/"is"/"the"/"of".
+_QUESTION_STOPWORDS = frozenset({
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+    "of", "in", "on", "at", "to", "for", "and", "or", "but", "with", "by",
+    "what", "which", "who", "whom", "how", "why", "when", "where",
+    "does", "do", "did", "can", "could", "should", "would", "will",
+    "this", "that", "these", "those", "our", "us", "we", "me", "my",
+    "show", "tell", "give", "get", "about",
+})
+
+
+def _question_keywords(question: str | None) -> frozenset[str]:
+    """KG-37: a small, explainable keyword set extracted from a free-text
+    question -- lowercased word tokens with stopwords and single/double
+    letter words dropped. No embeddings/ML: a caller with no question
+    (or one that yields no keywords) gets ``frozenset()``, which makes
+    ``_ranked`` fall back to its original confidence-only ordering exactly.
+    """
+    if not question:
+        return frozenset()
+    words = re.findall(r"[a-z0-9]+", question.lower())
+    return frozenset(w for w in words if len(w) > 2 and w not in _QUESTION_STOPWORDS)
+
+
+def _question_relevance(item: dict[str, Any], keywords: frozenset[str]) -> float:
+    """Fraction of question keywords appearing in this item's own text."""
+    if not keywords:
+        return 0.0
+    hay = f"{item.get('title', '')} {item.get('summary', '')}".lower()
+    hits = sum(1 for kw in keywords if kw in hay)
+    return hits / len(keywords)
+
+
+def _ranked(
+    items: list[dict[str, Any]],
+    limit: int,
+    *,
+    keywords: frozenset[str] = frozenset(),
+) -> list[dict[str, Any]]:
+    """Question-relevance first (when a question was asked), then
+    highest-confidence, capped, deduped by title.
+
+    KG-37: previously this only ever ranked by the node's own static
+    confidence, so a question like "what's blocking on-time delivery?"
+    could see its most relevant risk pushed out of a capped bucket by an
+    unrelated but higher-confidence one. ``keywords`` (from
+    ``_question_keywords``) is empty for any caller that has no question
+    text, which reduces the sort key back to confidence-only -- identical
+    to the previous behavior.
+    """
+    def sort_key(it: dict[str, Any]) -> tuple[float, float]:
+        return (_question_relevance(it, keywords), it.get("confidence") or 0.0)
+
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
-    for it in sorted(items, key=lambda x: x.get("confidence") or 0.0, reverse=True):
+    for it in sorted(items, key=sort_key, reverse=True):
         title = str(it.get("title") or "").strip().lower()
         if title and title in seen:
             continue
@@ -85,11 +139,19 @@ async def collect_knowledge_graph_ai_context(
     user_id: int | None = None,
     max_items: int = 20,
     surface: str = "unspecified",
+    question: str | None = None,
 ) -> dict[str, Any]:
     """Return a compact Knowledge Graph context block for AI generation.
 
     The block is safe to embed in an AI request: it is summarized, ranked by
     confidence, deduped, and scoped to the authorized tenant/project graph.
+
+    KG-37: ``question`` is the user's free-text prompt/ask, when the calling
+    surface has one. When given, each bucket is ranked by relevance to the
+    question's own keywords first, confidence second, instead of confidence
+    alone -- so a capped bucket keeps the items that actually answer what was
+    asked. Omitting it (the default) keeps the original confidence-only
+    ranking exactly.
 
     KG-07: ``surface`` names the feature this context is generated for
     (business_insights | project_insights | dashboard_generation |
@@ -98,6 +160,12 @@ async def collect_knowledge_graph_ai_context(
     ``knowledge_graph_evidence_access``, so an administrator can later
     reconstruct exactly what evidence informed that feature's answer for
     this tenant/project/user.
+
+    KG-50: the same record is also returned inline as ``kg_grounding``
+    (``{"kgVersionId", "nodeIds", "documentIds", "queryIds"}``, or ``None``
+    when there's nothing to ground on) so the caller can attach it to its
+    own response envelope directly -- proving which KG version and evidence
+    grounded *this* answer doesn't require a separate audit-table query.
 
     KG-39: the returned block always carries ``grounding_status`` --
     ``"ok"`` for both a real result and a project that legitimately has no
@@ -117,6 +185,14 @@ async def collect_knowledge_graph_ai_context(
         "query_lineage": [], "dashboard_lineage": [],
         "datasource_relationships": [],
         "grounding_status": "ok",
+        # KG-50: the active KG version + evidence ids that grounded this
+        # context, so a caller can attach them to its own response envelope.
+        # None when there is no graph content to ground on.
+        "kg_grounding": None,
+        # KG-38: per-bucket {"available", "selected"} counts, empty here
+        # because there was nothing to count for either an unavailable or a
+        # legitimately empty graph.
+        "context_coverage": {},
     }
 
     try:
@@ -291,23 +367,44 @@ async def collect_knowledge_graph_ai_context(
                 "confidence": conf,
             })
 
+    keywords = _question_keywords(question)
     kpi_cap = max(3, max_items // 2)
     bucketed = {
-        "risks": _ranked(risks, max_items),
-        "opportunities": _ranked(opportunities, max_items),
-        "gaps": _ranked(gaps, max_items),
-        "warnings": _ranked(warnings, max_items),
-        "recommended_kpis": _ranked(recommended_kpis, kpi_cap),
-        "measured_kpis": _ranked(measured_kpis, kpi_cap),
-        "governing_documents": _ranked(governing_documents, max_items),
-        "reference_guidance": _ranked(reference_guidance, max_items),
-        "processes": _ranked(processes, max_items),
-        "entities": _ranked(entities, max_items),
+        "risks": _ranked(risks, max_items, keywords=keywords),
+        "opportunities": _ranked(opportunities, max_items, keywords=keywords),
+        "gaps": _ranked(gaps, max_items, keywords=keywords),
+        "warnings": _ranked(warnings, max_items, keywords=keywords),
+        "recommended_kpis": _ranked(recommended_kpis, kpi_cap, keywords=keywords),
+        "measured_kpis": _ranked(measured_kpis, kpi_cap, keywords=keywords),
+        "governing_documents": _ranked(governing_documents, max_items, keywords=keywords),
+        "reference_guidance": _ranked(reference_guidance, max_items, keywords=keywords),
+        "processes": _ranked(processes, max_items, keywords=keywords),
+        "entities": _ranked(entities, max_items, keywords=keywords),
     }
     lineage = {
         "query_lineage": query_lineage[:max_items],
         "dashboard_lineage": dashboard_lineage[:max_items],
         "datasource_relationships": datasource_relationships[:max_items],
+    }
+
+    # KG-38: a caller could never previously tell "the graph had nothing to
+    # say here" apart from "there was more evidence than fit in this
+    # request's cap" -- both looked like the same short bucket. Counting the
+    # raw candidate list before ranking/capping against what actually made it
+    # through makes truncation visible instead of silent.
+    raw_by_bucket: dict[str, list[dict[str, Any]]] = {
+        "risks": risks, "opportunities": opportunities, "gaps": gaps,
+        "warnings": warnings, "recommended_kpis": recommended_kpis,
+        "measured_kpis": measured_kpis, "governing_documents": governing_documents,
+        "reference_guidance": reference_guidance, "processes": processes,
+        "entities": entities, "query_lineage": query_lineage,
+        "dashboard_lineage": dashboard_lineage,
+        "datasource_relationships": datasource_relationships,
+    }
+    selected_by_bucket: dict[str, list[dict[str, Any]]] = {**bucketed, **lineage}
+    context_coverage = {
+        key: {"available": len(raw_by_bucket[key]), "selected": len(selected_by_bucket[key])}
+        for key in raw_by_bucket
     }
 
     # KG-07: audit exactly the node ids that made it into this context (after
@@ -320,7 +417,7 @@ async def collect_knowledge_graph_ai_context(
             used_node_ids.update(item["_ids"])
     used_nodes = [by_id[nid] for nid in used_node_ids if nid in by_id]
     audit_node_ids, document_ids, query_ids = evidence_ids_from_nodes(used_nodes)
-    await record_kg_evidence_access(
+    recorded = await record_kg_evidence_access(
         session,
         tenant_id=tenant_id,
         project_id=project_id,
@@ -330,6 +427,16 @@ async def collect_knowledge_graph_ai_context(
         document_ids=document_ids,
         query_ids=query_ids,
     )
+    kg_grounding = (
+        {
+            "kgVersionId": recorded["kg_version_id"],
+            "nodeIds": recorded["node_ids"],
+            "documentIds": recorded["document_ids"],
+            "queryIds": recorded["query_ids"],
+        }
+        if recorded is not None
+        else None
+    )
 
     for items in bucketed.values():
         for item in items:
@@ -338,4 +445,9 @@ async def collect_knowledge_graph_ai_context(
         for item in items:
             item.pop("_ids", None)
 
-    return {**bucketed, **lineage, "grounding_status": "ok"}
+    return {
+        **bucketed, **lineage,
+        "grounding_status": "ok",
+        "kg_grounding": kg_grounding,
+        "context_coverage": context_coverage,
+    }

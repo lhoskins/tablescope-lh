@@ -3,12 +3,16 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date
 from typing import Any
+
+from sqlalchemy import ColumnElement, and_, or_
 
 from app.models.reference_library import (
     TIER_COMPANY,
     TIER_INDUSTRY,
     TIER_PROJECT,
+    ReferenceDocument,
 )
 
 # Caps keep the structural graph readable for very large projects.
@@ -28,6 +32,14 @@ _REL_RECOMMENDED_KPI = "recommended_kpi"
 # Measured KPIs are connected to the query/dashboard that depicts them.
 _REL_QUERY_MEASURES = "measures"
 _REL_DASHBOARD_VISUALIZES = "visualizes"
+# KG-18: a dashboard widget's own stored ``dataSource.queryId`` binding,
+# resolved to a direct edge -- distinct from ``_REL_DASHBOARD_VISUALIZES``,
+# which is inferred from KPI phrase matching rather than a stored reference.
+_REL_DASHBOARD_USES_QUERY = "uses_query"
+# KG-16: a document's own chunk/passage-level evidence, so a claim can be
+# traced to the specific passage that supports it instead of only "this
+# document, somewhere."
+_REL_HAS_PASSAGE = "has_passage"
 
 # Edge types that mean a document/process/family references or defines a KPI.
 _KPI_EDGE_TYPES = ("supports_kpi", "measures", "defines", "tracks", "monitors")
@@ -36,6 +48,45 @@ _REF_REL_BY_TIER = {
     TIER_COMPANY: "company_reference",
     TIER_INDUSTRY: "industry_standard",
 }
+
+
+def active_reference_document_conditions(
+    tenant_id: int, project_id: int,
+) -> list[ColumnElement[bool]]:
+    """KG-20: the tier/status/supersession/expiration filter for a reference
+    document currently authoritative for this tenant/project.
+
+    Shared by ``collect_structural_graph`` (what's actually included in the
+    graph) and the lifecycle fingerprint/watermark (what would make it
+    stale) so the two can't silently diverge on which reference documents
+    count -- a document that expires or gets superseded must both drop out
+    of the graph *and* mark it stale, and a document that stays current must
+    never be excluded from either.
+    """
+    return [
+        ReferenceDocument.status == "active",
+        # A document that has itself been superseded must never outrank the
+        # version that replaced it, even if whatever created the newer
+        # version forgot to flip this one's own status.
+        ReferenceDocument.superseded_by_id.is_(None),
+        # A version past its own expiration date is equally obsolete, even
+        # with no successor recorded yet.
+        or_(
+            ReferenceDocument.expiration_date.is_(None),
+            ReferenceDocument.expiration_date >= date.today(),
+        ),
+        or_(
+            ReferenceDocument.tier == TIER_INDUSTRY,
+            and_(
+                ReferenceDocument.tier == TIER_COMPANY,
+                ReferenceDocument.tenant_id == tenant_id,
+            ),
+            and_(
+                ReferenceDocument.tier == TIER_PROJECT,
+                ReferenceDocument.project_id == project_id,
+            ),
+        ),
+    ]
 
 
 def _norm(value: str | None) -> str:

@@ -129,6 +129,7 @@ def build_graph_payload(
                     "fromNodeKey": node["graphKey"],
                     "nodeIds": card["traceToEvidence"]["nodeIds"],
                     "edgeIds": card["traceToEvidence"]["edgeIds"],
+                    "hops": card["traceToEvidence"].get("hops", []),
                 })
         if node["type"] in _GAP_TYPES:
             gap = _build_gap_finding(node, kept_edges, kept_by_id)
@@ -309,11 +310,12 @@ def build_node_centric_graph_from_snapshot(
     if bundle:
         _overlay_card_bundle(payload, bundle)
     else:
-        # No cached AI bundle for this centre — show no cards (no deterministic
-        # fallback). Severity-filtered/structural fields stay as built.
-        payload["insightCards"] = []
-        payload["tracePaths"] = []
+        # KG-40: no cached AI bundle for this centre (never enriched, or
+        # enrichment hasn't run since the last rebuild) -- keep the
+        # deterministic structural cards `build_graph_payload` already
+        # computed above rather than wiping them to an empty list.
         payload["aiGenerated"] = False
+        payload["aiEnrichmentStatus"] = "unavailable"
     return payload
 
 
