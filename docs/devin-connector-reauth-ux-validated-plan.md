@@ -149,7 +149,7 @@ files.
 | `npm run typecheck` (web-ui) | clean |
 | `npm run lint` (web-ui) | clean — pre-existing `max-lines`/`exhaustive-deps` warnings on unrelated files only |
 | `npm run build` (web-ui) | succeeds |
-| Full `pytest -q` (whole platform-api suite) | _fill in after full run completes_ |
+| Full `pytest -q` (whole platform-api suite) | 1894 passed, 12 failed, 4 skipped in 1061s. All 12 failures confirmed pre-existing on `UX-design-03` (identical to the 12 documented in the `fix/query-authorization-database-datasources` merge doc): `test_billing.py::test_provision_isolated_data_plane`/`test_provision_isolated_vpn_awaits_details` (broken by the tenant-private-S3 data-plane feature's fail-closed storage resolver, unrelated), `test_visualization_engine.py::test_many_categories_is_horizontal_bar`, `test_percent_change_summary.py` (4 tests), `test_ai_dashboard_pipeline.py::test_correct_widget_converts_oversized_pie`, `test_ask_pipeline.py::test_matrix_resolves_to_heatmap_not_a_narrowed_bar`, `test_business_insight_phase1.py` (3 snapshot-staleness tests) — none touch any file this branch changes. |
 
 ```bash
 cd platform-api
