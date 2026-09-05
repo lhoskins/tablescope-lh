@@ -173,7 +173,7 @@ and after with the correct value in each case.
 | KG-focused regression sweep (`pytest -k "knowledge_graph or kg or project_graph or document_families or document_processing" -q`) | 331 passed, 2 failed (same pre-existing `test_business_insight_phase1.py` Redis-connection failures as every prior phase — this sandbox has no Redis running; unrelated) |
 | `ruff check` (all touched/new files) | clean |
 | `mypy` (all touched/new files) | clean |
-| Full `pytest -q` (whole platform-api suite) | **FULL_SUITE_RESULT_PLACEHOLDER** |
+| Full `pytest -q` (whole platform-api suite) | 1844 passed, 11 failed, 4 skipped in 1112s. All 11 failures are pre-existing and unrelated to this phase's changes (confirmed by rerunning each in isolation with the same result): `test_business_insight_phase1.py`/`test_executive_insight_dependencies.py` (Redis-dependent snapshot-staleness tests, same as every prior phase), `test_percent_change_summary.py`, `test_visualization_engine.py`, `test_ai_dashboard_pipeline.py::test_correct_widget_converts_oversized_pie`, `test_ask_pipeline.py::test_matrix_resolves_to_heatmap_not_a_narrowed_bar` (all chart/dashboard-presentation logic, no relation to the knowledge graph). Skips are the VPN/SMB live E2E tests (require an external URL not set in this sandbox). |
 
 ```bash
 cd platform-api
