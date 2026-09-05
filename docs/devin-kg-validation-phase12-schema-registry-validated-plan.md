@@ -143,7 +143,7 @@ mismatch before the fix.
 | KG-focused regression sweep (`pytest -k "knowledge_graph or kg or project_graph or document_families" -q`) | 309 passed, 2 failed (same pre-existing `test_business_insight_phase1.py` Redis-connection failures as every prior phase — this sandbox has no Redis running; unrelated) |
 | `ruff check` (all touched/new files) | clean |
 | `mypy` (all touched/new files) | clean |
-| Full `pytest -q` (whole platform-api suite) | **FULL_SUITE_RESULT_PLACEHOLDER** |
+| Full `pytest -q` (whole platform-api suite) | **1826 passed, 4 skipped, 10 failed** — same 10 pre-existing/unrelated failures as every prior phase (dashboard visualization, percent-change summary statistics, business-insight snapshot staleness) — 0 new |
 
 ```bash
 cd platform-api
