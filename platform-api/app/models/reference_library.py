@@ -75,6 +75,10 @@ class ReferenceDocument(TimestampMixin, Base):
     applicability_tag: Mapped[str | None] = mapped_column(String(100), nullable=True)
     source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     effective_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # KG-20: when set, this version stops being authoritative on this date --
+    # collect_structural_graph excludes it from the active reference set from
+    # that point on, same as an explicit supersession.
+    expiration_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     version_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_verified_at: Mapped[date | None] = mapped_column(Date, nullable=True)
 
@@ -118,6 +122,7 @@ class ReferenceDocument(TimestampMixin, Base):
             "applicabilityTag": self.applicability_tag,
             "sourceUrl": self.source_url,
             "effectiveDate": self.effective_date.isoformat() if self.effective_date else None,
+            "expirationDate": self.expiration_date.isoformat() if self.expiration_date else None,
             "versionLabel": self.version_label,
             "lastVerifiedAt": self.last_verified_at.isoformat() if self.last_verified_at else None,
             "status": self.status,

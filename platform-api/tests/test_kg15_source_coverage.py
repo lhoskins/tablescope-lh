@@ -44,7 +44,10 @@ async def test_file_sources_report_pending_when_never_profiled(db_session):
 
     coverage = await compute_source_coverage(db_session, tenant_id=tenant_id, project_id=project_id)
     bucket = coverage["file_sources"]
-    assert bucket == {"total": 2, "included": 2, "excluded": 0, "failed": 0, "pending": 1}
+    assert bucket == {
+        "total": 2, "included": 2, "excluded": 0, "failed": 0, "pending": 1,
+        "coverage_percent": 100.0,
+    }
 
 
 async def test_assets_report_failed_and_pending_separately(db_session):
@@ -71,7 +74,10 @@ async def test_assets_report_failed_and_pending_separately(db_session):
 
     coverage = await compute_source_coverage(db_session, tenant_id=tenant_id, project_id=project_id)
     bucket = coverage["assets"]
-    assert bucket == {"total": 3, "included": 3, "excluded": 0, "failed": 1, "pending": 1}
+    assert bucket == {
+        "total": 3, "included": 3, "excluded": 0, "failed": 1, "pending": 1,
+        "coverage_percent": 100.0,
+    }
 
 
 async def test_data_sources_untested_are_pending_failed_test_is_failed(db_session):
@@ -97,7 +103,10 @@ async def test_data_sources_untested_are_pending_failed_test_is_failed(db_sessio
 
     coverage = await compute_source_coverage(db_session, tenant_id=tenant_id, project_id=project_id)
     bucket = coverage["data_sources"]
-    assert bucket == {"total": 3, "included": 3, "excluded": 0, "failed": 1, "pending": 1}
+    assert bucket == {
+        "total": 3, "included": 3, "excluded": 0, "failed": 1, "pending": 1,
+        "coverage_percent": 100.0,
+    }
 
 
 async def test_reference_documents_scoped_by_tier_like_the_collector(db_session):
@@ -125,7 +134,10 @@ async def test_reference_documents_scoped_by_tier_like_the_collector(db_session)
 
     coverage = await compute_source_coverage(db_session, tenant_id=tenant_id, project_id=project_id)
     bucket = coverage["reference_documents"]
-    assert bucket == {"total": 4, "included": 4, "excluded": 0, "failed": 0, "pending": 1}
+    assert bucket == {
+        "total": 4, "included": 4, "excluded": 0, "failed": 0, "pending": 1,
+        "coverage_percent": 100.0,
+    }
 
 
 async def test_truncation_cap_is_reported_when_a_source_type_exceeds_it(db_session, monkeypatch):

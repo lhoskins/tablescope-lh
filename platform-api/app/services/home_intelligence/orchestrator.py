@@ -69,6 +69,7 @@ async def run_ai_intelligence(
     max_analyses: int = 15,
     granularity: int = 3,
     plan_semaphore: asyncio.Semaphore | None = None,
+    grounding_sink: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]] | None:
     """LLM-driven analyst loop. Returns cards, or ``None`` to signal fallback.
 
@@ -78,6 +79,14 @@ async def run_ai_intelligence(
 
     Returns ``None`` only when AI is disabled. An unavailable initial plan raises
     so streaming callers report a project failure; a valid empty plan returns [].
+
+    KG-50: when a caller passes ``grounding_sink`` (a plain dict), this
+    writes ``grounding_sink["kg_grounding"]`` -- the KG version + evidence ids
+    that grounded this run's plan -- so the caller can attach it to its own
+    response envelope. An output parameter rather than a return-type change:
+    this function's cards-or-None return is depended on by more than one
+    caller (this module's own report-building reuse included), so widening it
+    to a tuple would ripple further than this item's concrete ask.
     """
     from app.services import ai_intelligence_client as ai
 
@@ -137,6 +146,9 @@ async def run_ai_intelligence(
             logger.warning(
                 "Failed to collect KG context for project %s: %s", project.id, exc
             )
+
+    if grounding_sink is not None:
+        grounding_sink["kg_grounding"] = kg_context.get("kg_grounding")
 
     ai_call_limit = max(
         1, get_settings().home_intelligence_max_concurrent_ai_calls_per_project

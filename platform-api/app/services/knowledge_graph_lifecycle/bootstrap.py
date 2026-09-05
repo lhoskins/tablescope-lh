@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, select
 
 from app.models import (
     Dashboard,
@@ -16,23 +17,54 @@ from app.models import (
     ProjectAsset,
     ProjectBusinessContext,
     ProjectGoal,
+    ProjectMember,
     ProjectMetric,
     ProjectRisk,
     RepositoryConnection,
     RepositoryScan,
     SavedQuery,
 )
-from app.models.reference_library import (
-    TIER_COMPANY,
-    TIER_INDUSTRY,
-    TIER_PROJECT,
-    ReferenceDocument,
-)
+from app.models.reference_library import ReferenceDocument
 from app.services.knowledge_graph_builder import (
     SNAPSHOT_PIPELINE_VERSION,
 )
+from app.services.knowledge_graph_context import active_reference_document_conditions
 
 from .base import LifecycleBase
+
+# KG-13/KG-44: the canonical set of graph-relevant sources -- both
+# ``compute_source_fingerprint`` (staleness hashing) and
+# ``current_source_watermark`` (checkpoint verification) iterate this same
+# list, so the two can no longer silently diverge on which sources count.
+#
+# KG-14: the 5th element names the field(s) whose *content* -- not just id
+# and updated_at -- must be folded into the fingerprint. IDs and timestamps
+# alone miss a content edit that doesn't bump updated_at (a bad clock, an
+# import that preserves timestamps, direct SQL). FileSourceMeta/ProjectAsset
+# already store their own content hash (content_sha256/file_hash) computed
+# from the actual file bytes -- reused verbatim rather than re-derived.
+_FINGERPRINT_MODELS: list[tuple[Any, str, str, str, tuple[str, ...]]] = [
+    (ProjectGoal, "goals", "id", "updated_at", ("title", "description", "category", "priority", "status")),
+    (ProjectMetric, "metrics", "id", "updated_at", ("name", "description", "business_definition", "aggregation", "expression", "source_mapping")),
+    (ProjectRisk, "risks", "id", "updated_at", ("title", "description", "mitigation", "contingency", "severity")),
+    (DatabaseDataSource, "data_sources", "id", "updated_at", ("table_name", "schema_name")),
+    (FileSourceMeta, "file_sources", "id", "updated_at", ("content_sha256",)),
+    (SavedQuery, "saved_queries", "id", "updated_at", ("sql_text",)),
+    (Dashboard, "dashboards", "id", "updated_at", ("config",)),
+    (ProjectAsset, "assets", "id", "updated_at", ("file_hash",)),
+]
+
+
+def _content_hash(row: Any, fields: tuple[str, ...]) -> str:
+    """Stable hash of the named fields' current values (KG-14)."""
+    parts: list[str] = []
+    for field in fields:
+        value = getattr(row, field, None)
+        if isinstance(value, dict | list):
+            value = json.dumps(value, sort_keys=True, default=str)
+        parts.append(str(value) if value is not None else "")
+    combined = "\x1f".join(parts)
+    return hashlib.sha256(combined.encode("utf-8")).hexdigest()
 
 
 class BootstrapMixin(LifecycleBase):
@@ -99,6 +131,7 @@ class BootstrapMixin(LifecycleBase):
             "assets": [],
             "reference_documents": [],
             "repository_scans": [],
+            "project_members": [],
             "pipeline_version": SNAPSHOT_PIPELINE_VERSION,
         }
 
@@ -111,27 +144,19 @@ class BootstrapMixin(LifecycleBase):
         if settings:
             parts["project_version"] = settings.version
 
-        fingerprint_models: list[tuple[Any, str, str, str]] = [
-            (ProjectGoal, "goals", "id", "updated_at"),
-            (ProjectMetric, "metrics", "id", "updated_at"),
-            (ProjectRisk, "risks", "id", "updated_at"),
-            (DatabaseDataSource, "data_sources", "id", "updated_at"),
-            (FileSourceMeta, "file_sources", "id", "updated_at"),
-            (SavedQuery, "saved_queries", "id", "updated_at"),
-            (Dashboard, "dashboards", "id", "updated_at"),
-            (ProjectAsset, "assets", "id", "updated_at"),
-        ]
-        for model, key, id_attr, ts_attr in fingerprint_models:
-            id_col = getattr(model, id_attr)
-            ts_col = getattr(model, ts_attr)
-            stmt = select(id_col, ts_col).where(model.project_id == project_id)
+        for model, key, id_attr, ts_attr, content_fields in _FINGERPRINT_MODELS:
+            stmt = select(model).where(model.project_id == project_id)
             if hasattr(model, "tenant_id"):
                 stmt = stmt.where(model.tenant_id == tenant_id)
-            rows = (await self.session.execute(stmt)).all()
+            rows = (await self.session.scalars(stmt)).all()
             parts[key] = sorted(
                 [
-                    (r[0], r[1].isoformat() if r[1] else None)
-                    for r in rows
+                    (
+                        getattr(row, id_attr),
+                        (getattr(row, ts_attr).isoformat() if getattr(row, ts_attr) else None),
+                        _content_hash(row, content_fields),
+                    )
+                    for row in rows
                 ],
                 key=lambda x: x[0],
             )
@@ -144,24 +169,31 @@ class BootstrapMixin(LifecycleBase):
         ref_rows = (
             await self.session.execute(
                 select(ReferenceDocument.id, ReferenceDocument.updated_at).where(
-                    ReferenceDocument.status == "active",
-                    or_(
-                        ReferenceDocument.tier == TIER_INDUSTRY,
-                        and_(
-                            ReferenceDocument.tier == TIER_COMPANY,
-                            ReferenceDocument.tenant_id == tenant_id,
-                        ),
-                        and_(
-                            ReferenceDocument.tier == TIER_PROJECT,
-                            ReferenceDocument.project_id == project_id,
-                        ),
-                    ),
+                    *active_reference_document_conditions(tenant_id, project_id),
                 )
             )
         ).all()
         parts["reference_documents"] = sorted(
             [(r[0], r[1].isoformat() if r[1] else None) for r in ref_rows],
             key=lambda x: x[0],
+        )
+
+        # KG-09: membership grants/revocations previously never marked the
+        # graph stale at all -- ProjectMember has no single-column id or
+        # updated_at (composite (project_id, user_id) key, no timestamp), so
+        # it can't join _FINGERPRINT_MODELS's shape; it's hashed here
+        # directly instead. This only feeds the fingerprint (polled every
+        # 15 minutes by evaluate_stale_graphs), not current_source_watermark,
+        # which has no timestamp column to read for this source.
+        member_rows = (
+            await self.session.execute(
+                select(ProjectMember.user_id, ProjectMember.role, ProjectMember.is_active).where(
+                    ProjectMember.project_id == project_id
+                )
+            )
+        ).all()
+        parts["project_members"] = sorted(
+            [(r[0], r[1], r[2]) for r in member_rows], key=lambda x: x[0]
         )
 
         conn_ids = (
@@ -184,5 +216,66 @@ class BootstrapMixin(LifecycleBase):
 
         serialized = json.dumps(parts, sort_keys=True, default=str)
         return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+    async def current_source_watermark(
+        self, project_id: int, tenant_id: int,
+    ) -> datetime | None:
+        """KG-44: latest ``updated_at`` across every graph-relevant source.
+
+        ``_verify_source_checkpoint`` previously only watched
+        ``AIProjectGraphNode``/``AIProjectGraphEdge`` staging-table
+        ``created_at`` -- a row *update* never bumps ``created_at`` (those
+        tables have no ``updated_at`` column), and a change to any
+        non-staging source (a goal/metric/risk edit, a file/query/dashboard
+        rename, a reference-library update, a repository scan) was never
+        watched at all, so a coalesced build could start before such a
+        change was actually visible to the builder. This iterates the same
+        source list ``compute_source_fingerprint`` hashes, so the two can't
+        drift apart on which sources count as graph-relevant.
+        """
+        watermarks: list[datetime] = []
+
+        for model, _key, _id_attr, ts_attr, _content_fields in _FINGERPRINT_MODELS:
+            ts_col = getattr(model, ts_attr)
+            stmt = select(func.max(ts_col)).where(model.project_id == project_id)
+            if hasattr(model, "tenant_id"):
+                stmt = stmt.where(model.tenant_id == tenant_id)
+            ts = await self.session.scalar(stmt)
+            if ts is not None:
+                watermarks.append(ts)
+
+        ref_ts = await self.session.scalar(
+            select(func.max(ReferenceDocument.updated_at)).where(
+                *active_reference_document_conditions(tenant_id, project_id),
+            )
+        )
+        if ref_ts is not None:
+            watermarks.append(ref_ts)
+
+        scan_ts = await self.session.scalar(
+            select(func.max(RepositoryScan.updated_at))
+            .join(
+                RepositoryConnection,
+                RepositoryScan.connection_id == RepositoryConnection.id,
+            )
+            .where(
+                RepositoryConnection.project_id == project_id,
+                RepositoryConnection.tenant_id == tenant_id,
+            )
+        )
+        if scan_ts is not None:
+            watermarks.append(scan_ts)
+
+        context_ts = await self.session.scalar(
+            select(func.max(ProjectBusinessContext.updated_at)).where(
+                ProjectBusinessContext.project_id == project_id,
+                ProjectBusinessContext.tenant_id == tenant_id,
+            )
+        )
+        if context_ts is not None:
+            watermarks.append(context_ts)
+
+        return max(watermarks) if watermarks else None
 
 

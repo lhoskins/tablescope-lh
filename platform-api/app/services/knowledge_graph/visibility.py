@@ -62,6 +62,30 @@ async def _hidden_project_asset_ids(
     }
 
 
+def _hidden_node_ids(nodes: list[dict[str, Any]], hidden_asset_ids: set[int]) -> set[int]:
+    """Node ids to hide given a set of hidden ``ProjectAsset`` ids.
+
+    Covers both the document node itself (``source_type == "project_asset"``)
+    and any chunk/passage node derived from it (KG-08/KG-16:
+    ``source_type == "ai_document_chunk"``, tagged with its parent's id at
+    ``properties.asset_id`` in ``collect_structural_graph``) -- a passage IS
+    its parent document's evidence, so it can never be visible to a viewer
+    the parent itself is hidden from. Shared by both filter functions below
+    so this can't drift between the pre-enrichment and post-build paths.
+    """
+    if not hidden_asset_ids:
+        return set()
+    ids: set[int] = set()
+    for n in nodes:
+        source_type = n.get("source_type")
+        if source_type == "project_asset" and n.get("source_id") in hidden_asset_ids:
+            ids.add(n["id"])
+        elif source_type == "ai_document_chunk":
+            if (n.get("properties") or {}).get("asset_id") in hidden_asset_ids:
+                ids.add(n["id"])
+    return ids
+
+
 async def filter_raw_graph_for_user(
     session: AsyncSession,
     nodes: list[dict[str, Any]],
@@ -85,11 +109,7 @@ async def filter_raw_graph_for_user(
     if not hidden_asset_ids:
         return nodes, edges
 
-    hidden_node_ids = {
-        n["id"]
-        for n in nodes
-        if n.get("source_type") == "project_asset" and n.get("source_id") in hidden_asset_ids
-    }
+    hidden_node_ids = _hidden_node_ids(nodes, hidden_asset_ids)
     visible_nodes = [n for n in nodes if n["id"] not in hidden_node_ids]
     visible_edges = [
         e for e in edges
@@ -118,11 +138,7 @@ async def filter_payload_for_viewer(
     if not hidden_asset_ids:
         return payload
 
-    hidden_node_ids = {
-        n["id"]
-        for n in nodes
-        if n.get("source_type") == "project_asset" and n.get("source_id") in hidden_asset_ids
-    }
+    hidden_node_ids = _hidden_node_ids(nodes, hidden_asset_ids)
     hidden_graph_keys = {
         n.get("graphKey") for n in nodes if n["id"] in hidden_node_ids and n.get("graphKey")
     }

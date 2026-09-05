@@ -6,6 +6,7 @@ from app.models.ai_asset_metadata import (
     AIAssetTag,
     AIAssetTagSuggestion,
 )
+from app.models.ai_confidence_decision import AiConfidenceDecision
 from app.models.ai_conversation import (
     AiConversation,
     AiConversationMessage,
@@ -163,6 +164,7 @@ __all__ = [
     "AIReferenceCatalog",
     "AIReferenceKPI",
     "AIReferenceTag",
+    "AiConfidenceDecision",
     "AiConversation",
     "AiConversationMessage",
     "AnalyticalMethod",

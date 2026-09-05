@@ -23,6 +23,9 @@ from .graph_primitives import _kpi_phrases as _kpi_phrases
 from .graph_primitives import _node as _node
 from .graph_primitives import _norm as _norm
 from .graph_primitives import _phrase_in as _phrase_in
+from .graph_primitives import (
+    active_reference_document_conditions as active_reference_document_conditions,
+)
 
 """Evidence Collector for the Insight-First Knowledge Graph.
 

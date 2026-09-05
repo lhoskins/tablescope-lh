@@ -338,6 +338,11 @@ async def ai_generate_and_save_query(
     # match is auto-selected; several plausible matches ask the user to choose.
     ai_result: dict[str, Any] = {}
     generated_sql = ""
+    # KG-50: stays empty (so kg_grounding is None) on any path that never
+    # actually calls the AI server with KG context -- a fuzzy source-name
+    # match or the offline heuristic fallback below is correctly *not*
+    # KG-grounded, and the response envelope must say so honestly.
+    kg_context: dict[str, Any] = {}
     if not existing_query and allowed_tables:
         strong, close = _resolve_prompt_source(base_prompt, allowed_tables)
         if len(strong) == 1 and not close:
@@ -364,6 +369,10 @@ async def ai_generate_and_save_query(
             source_catalog = await _build_source_catalog(
                 session, context, project_id=req.project_id
             )
+            kg_context = await _kg_context(
+                session, context, req.project_id, surface="query_generation",
+                question=req.prompt,
+            )
             payload = {
                 "tenant_id": context.tenant_id,
                 "user_id": context.user_id,
@@ -375,9 +384,7 @@ async def ai_generate_and_save_query(
                 "relevant_columns": [],
                 # Knowledge Graph context steers generated SQL toward validated
                 # risks/gaps/measured KPIs surfaced by the graph.
-                "knowledge_graph_context": await _kg_context(
-                    session, context, req.project_id, surface="query_generation",
-                ),
+                "knowledge_graph_context": kg_context,
                 "relationship_hints": relationship_hints,
             }
             ai_result = await _forward_to_ai("/ai/query/generate", payload)
@@ -436,6 +443,7 @@ async def ai_generate_and_save_query(
             "query_id": existing_query.id,
             "name": existing_query.name,
             "sql_text": existing_query.sql_text,
+            "kgGrounding": kg_context.get("kg_grounding"),
         }
 
     # Step 2: Derive a name if not provided (from the cleaned prompt, so the
@@ -470,4 +478,5 @@ async def ai_generate_and_save_query(
         "model_used": ai_result.get("model_used", ""),
         "selected_sources": ai_result.get("selected_sources", []),
         "repaired": ai_result.get("repaired", False),
+        "kgGrounding": kg_context.get("kg_grounding"),
     }
