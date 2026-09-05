@@ -58,6 +58,19 @@ class VpnMetadata:
     routing_type: str | None = None
 
 
+@dataclass(slots=True)
+class StorageMetadata:
+    s3_bucket_name: str
+    s3_region: str
+    s3_prefix: str
+    s3_access_point_arn: str
+    s3_vpc_endpoint_id: str
+    s3_endpoint_url: str
+    s3_kms_key_arn: str
+    s3_role_arn: str
+    s3_force_private: bool = True
+
+
 class TenantProvisioningService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -95,6 +108,7 @@ class TenantProvisioningService:
         *,
         tenant_id: str,
         tenant_name: str,
+        s3_region: str,
         allowed_onprem_cidrs: list[str],
         org_tenant_id: int | None = None,
         routing_type: str = "static",
@@ -119,6 +133,7 @@ class TenantProvisioningService:
             org_tenant_id=org_tenant_id,
             isolation_mode=DEFAULT_ISOLATION_MODE,
             vpn_mode=vpn_mode,
+            s3_region=s3_region,
             shared_ec2_instance_id=shared_ec2_instance_id,
             shared_services_vpc_id=shared_services_vpc_id,
             routing_type=routing_type,
@@ -132,7 +147,8 @@ class TenantProvisioningService:
             teiid_mgmt_port=layout.host_mgmt_port,
             vdb_host_path=layout.vdb_host_path,
             allowed_onprem_cidrs=allowed_onprem_cidrs,
-            status="provisioning",
+            status="storage_pending",
+            storage_status="unconfigured",
         )
         self._session.add(plane)
         await self._session.flush()
@@ -170,13 +186,35 @@ class TenantProvisioningService:
         await self._session.flush()
         return plane
 
+    async def attach_storage_metadata(
+        self, tenant_id: str, meta: StorageMetadata
+    ) -> TenantDataPlane:
+        plane = await self.get(tenant_id)
+        for fieldname in (
+            "s3_bucket_name",
+            "s3_region",
+            "s3_prefix",
+            "s3_access_point_arn",
+            "s3_vpc_endpoint_id",
+            "s3_endpoint_url",
+            "s3_kms_key_arn",
+            "s3_role_arn",
+            "s3_force_private",
+        ):
+            setattr(plane, fieldname, getattr(meta, fieldname))
+        plane.storage_status = "pending_validation"
+        plane.storage_validated_at = None
+        plane.status = "storage_pending"
+        await self._session.flush()
+        return plane
+
     def layout_for(self, plane: TenantDataPlane) -> TenantLayout:
         """Reconstruct the layout for an existing plane from its subnet index."""
         third = int(plane.docker_subnet_cidr.split(".")[2])
         return compute_layout(plane.tenant_id, third // 10)
 
     def render_compose(self, plane: TenantDataPlane) -> str:
-        return TenantComposeService().render(self.layout_for(plane))
+        return TenantComposeService().render(self.layout_for(plane), plane=plane)
 
     async def render_firewall_script(self) -> str:
         """Render the combined firewall script across all registered tenants."""

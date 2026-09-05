@@ -43,7 +43,6 @@ from app.services.tenant_provisioning_service import (
     TenantNotFound,
     TenantProvisioningService,
 )
-from app.services.tenant_teiid_resolver import TenantTeiidResolver
 from app.services.vdb_management import VDBManagementService, VDBProvisioningError
 
 logger = logging.getLogger(__name__)
@@ -71,6 +70,7 @@ async def _provision_vdbs_for_tenant(
     *,
     org_tenant_id: int,
     user_id: int | None,
+    strict: bool = False,
 ) -> None:
     """Create the shared (and optional user) VDBs inside the tenant's container.
 
@@ -79,12 +79,7 @@ async def _provision_vdbs_for_tenant(
     Failures are non-fatal (logged) so a not-yet-running container doesn't block
     the tenant record.
     """
-    endpoint = await TenantTeiidResolver(session).resolve_for_org(org_tenant_id)
-    vdb_svc = VDBManagementService(
-        servlet_url=endpoint.servlet_url,
-        pg_host=endpoint.pg_host,
-        pg_port=endpoint.pg_port,
-    )
+    vdb_svc = await VDBManagementService.for_org(session, org_tenant_id)
     try:
         shared_result = await vdb_svc.create_shared_vdb(org_id=org_tenant_id)
         session.add(SharedVDB(
@@ -99,6 +94,8 @@ async def _provision_vdbs_for_tenant(
         ))
         logger.info("Shared VDB created for org tenant %s: %s", org_tenant_id, shared_result.vdb_id)
     except VDBProvisioningError as exc:
+        if strict:
+            raise
         logger.warning("Shared VDB not created for org %s (container may not be up): %s", org_tenant_id, exc)
     finally:
         await vdb_svc.aclose()
@@ -106,11 +103,7 @@ async def _provision_vdbs_for_tenant(
     if user_id is None:
         return
 
-    vdb_svc = VDBManagementService(
-        servlet_url=endpoint.servlet_url,
-        pg_host=endpoint.pg_host,
-        pg_port=endpoint.pg_port,
-    )
+    vdb_svc = await VDBManagementService.for_org(session, org_tenant_id)
     try:
         user_result = await vdb_svc.create_user_vdb(org_id=org_tenant_id, user_id=user_id)
         session.add(UserVDB(
@@ -126,6 +119,8 @@ async def _provision_vdbs_for_tenant(
         ))
         logger.info("User VDB created for user %s: %s", user_id, user_result.vdb_id)
     except VDBProvisioningError as exc:
+        if strict:
+            raise
         logger.warning("User VDB not created for user %s (container may not be up): %s", user_id, exc)
     finally:
         await vdb_svc.aclose()
@@ -190,6 +185,7 @@ async def create_data_plane(
         plane, _layout = await svc.create(
             tenant_id=payload.tenant_id,
             tenant_name=payload.tenant_name,
+            s3_region=payload.s3_region,
             allowed_onprem_cidrs=payload.allowed_onprem_cidrs,
             org_tenant_id=payload.org_tenant_id,
             routing_type=payload.routing_type,
@@ -214,14 +210,10 @@ async def create_data_plane(
             admin_email=payload.app_tenant_admin_email,
             admin_password=payload.app_tenant_admin_password,
         )
-        # Bind the data plane to this app tenant, then provision its VDBs in
-        # the dedicated container. Flush so the resolver (which looks the plane
-        # up by org_tenant_id) sees the binding when routing the VDB creation.
+        # Bind now, but do not create a VDB until Terraform metadata and the
+        # live private-S3 validation have completed.
         plane.org_tenant_id = tenant.id
         await session.flush()
-        await _provision_vdbs_for_tenant(
-            session, org_tenant_id=tenant.id, user_id=root_user.id
-        )
 
     await session.commit()
     await session.refresh(plane)
@@ -320,11 +312,18 @@ async def bind_app_tenant(
             )
         org_id = existing_tenant.id
 
-    # Flush so the resolver sees the new binding when routing VDB creation to
-    # the dedicated container.
+    # Binding is allowed before infrastructure is ready. Provisioning is
+    # explicitly deferred, preventing any write to the global S3 fallback.
     plane.org_tenant_id = org_id
     await session.flush()
-    await _provision_vdbs_for_tenant(session, org_tenant_id=org_id, user_id=root_user_id)
+    if plane.storage_status == "ready" and plane.status == "infrastructure_ready":
+        await _provision_vdbs_for_tenant(
+            session,
+            org_tenant_id=org_id,
+            user_id=root_user_id,
+            strict=True,
+        )
+        plane.status = "active"
 
     await session.commit()
     await session.refresh(plane)
@@ -387,7 +386,8 @@ async def delete_data_plane(
         "Run the teardown script on the EC2 host to remove the isolated "
         f"container ({layout.teiid_container_name}), the tenant network "
         f"({layout.docker_network_name}) and the on-host VDB directory "
-        f"({layout.tenant_root})."
+        f"({layout.tenant_root}). The dedicated S3 bucket and KMS key are retained by default "
+        "for recovery and must be removed through an approved data-retention workflow."
     )
     return DeleteDataPlaneResponse(
         tenant_id=tenant_id,

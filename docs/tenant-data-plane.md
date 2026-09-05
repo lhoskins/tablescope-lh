@@ -1,99 +1,45 @@
-# Tenant VPN / Data-Plane Architecture
+# Tenant data-plane and private S3 architecture
 
-Cost-conscious enterprise isolation tier: **one shared EC2 host** runs the
-control plane and every tenant's Teiid container, while each tenant gets its
-own VPC, Site-to-Site VPN, Docker network/subnet, VDB directory, secrets, and
-host-firewall egress policy. Stronger than Docker-only separation, much cheaper
-than one EC2 per tenant.
+Every registered isolated data plane—whether `none` or `customer_vpn`—owns a
+dedicated versioned S3 bucket, rotating KMS key, IAM role, VPC-only S3 access
+point, and interface endpoint inside its tenant VPC.
 
-```
- customer on-prem ── IPsec VPN ── tenant VPC ─┐
-                                              ├─ Transit Gateway ─ shared services VPC ─ EC2 host
- customer on-prem ── IPsec VPN ── tenant VPC ─┘                                          ├─ control plane (web/api/worker/pg/redis)
-                                                                                         ├─ tenant-acme-teiid  (172.30.10.0/24, ports 18095/15442/19990 @127.0.0.1)
-                                                                                         └─ tenant-globex-teiid(172.30.20.0/24, ports 28095/25442/29990 @127.0.0.1)
+```mermaid
+flowchart TD
+  R["Shared API / worker"] -->|"assume tenant role"| T["Tenant VPC endpoint"]
+  T --> A["VPC-only access point"]
+  A --> B["Tenant bucket + CMK"]
+  V["Optional customer VPN"] --> T
 ```
 
-## Key decisions (isolation vs. cost)
+The shared runtime has permission only to assume tenant storage roles. Each
+role is restricted to its access point and CMK. Endpoint, access-point, bucket,
+and KMS policies independently constrain the same path. Bucket policy denies
+unencrypted transport, traffic outside the tenant VPCE, direct bucket access,
+and writes without the exact tenant CMK.
 
-- **Transit Gateway, not VPC peering.** Traffic from a customer's on-prem network
-  enters AWS through the tenant VPN and must reach the shared services VPC where
-  the EC2 host lives. VPC peering does not support that transitive (edge-to-edge)
-  routing through a VPN attachment; a TGW does. One shared TGW serves all tenants.
-- **Static VPN routes, not BGP.** Simpler and no extra cost; BGP is available per
-  tenant via `customer_bgp_asn` / `vpn_routing_type = "dynamic"` if needed later.
-- **Per-tenant Teiid bound to `127.0.0.1` only.** The tenant ports are published
-  on the host loopback only (never publicly). Because the platform API runs as a
-  container, it cannot use those host-loopback ports; instead it reaches each
-  tenant's Teiid directly over the tenant Docker network using the container's
-  fixed IP + container-internal ports (`tenant_teiid_in_cluster=true`, the
-  default). The control plane is attached to each tenant network at provision
-  time (`docker network connect tenant_<id>_net tablescope-platform-api-1`). The
-  127.0.0.1 host ports remain for host-level debugging.
-- **Secrets as references, never plaintext.** `tenant_secret_refs` stores a
-  reference; the Teiid API key is injected into the tenant container via an env
-  var (`TENANT_<ID>_TEIID_API_KEY`). No plaintext in compose, DB, or logs.
-- **Host firewall enforces egress.** Docker isolation alone is insufficient, so a
-  per-tenant `iptables` chain (`TABLESCOPE-TENANT-<ID>`) allows only that tenant's
-  on-prem CIDRs, denies other tenants' subnets/CIDRs and the metadata endpoint,
-  and defaults to deny. The jump is hooked into Docker's `DOCKER-USER` chain
-  (evaluated *before* Docker's own per-network ACCEPT rules) — appending to
-  `FORWARD` would be silently preempted by Docker. Persisted via a systemd unit
-  so it survives reboots.
+## Lifecycle
 
-## Deterministic layout
+1. Register a data plane with its S3 region. Status is `storage_pending`.
+2. Apply Terraform and import the non-secret storage and network outputs.
+3. Render/apply the isolated Teiid container and host firewall.
+4. Run health. A write/head/read/delete probe must pass and report the exact
+   CMK before storage changes to `ready`.
+5. Bind the application tenant and explicitly provision VDBs. The plane can
+   then become `active`.
 
-All host-facing values derive from a 1-based tenant index (`app/services/tenant_layout.py`),
-so compose / firewall / resolver can never drift:
+Tenant-scoped upload, attachment, VDB creation, and VDB redeploy paths resolve
+the binding from the organization. A bound but incomplete/unvalidated plane
+raises `StorageIsolationError`; it never selects the global bucket.
 
-| index | docker subnet     | teiid IP      | servlet | pg wire | mgmt  |
-|-------|-------------------|---------------|---------|---------|-------|
-| 1     | `172.30.10.0/24`  | `172.30.10.10`| 18095   | 15442   | 19990 |
-| 2     | `172.30.20.0/24`  | `172.30.20.10`| 28095   | 25442   | 29990 |
+Organizations without a data-plane record retain legacy shared storage for
+backward compatibility.
 
-Paths: `/opt/tablescope/tenants/<tenant_id>/{vdb,logs,secrets,mounts,compose}`.
+## Boundary limitation
 
-## Components
+The VPC endpoint places S3 traffic in the customer's dedicated network and the
+AWS policies prevent cross-tenant access. The API and worker still run on a
+shared EC2 host, which is therefore trusted. Tenant-resident compute is needed
+when the threat model includes compromise of the shared host/root account.
 
-| Layer | Location |
-|-------|----------|
-| Terraform TGW hub | `terraform/modules/network-hub` |
-| Terraform per-tenant VPC + VPN | `terraform/modules/tenant-vpc` |
-| Terraform orchestration | `terraform/tenants.tf`, `tenant-variables.tf`, `tenant-outputs.tf` |
-| Registry tables | `tenant_data_planes`, `tenant_secret_refs` (migration `0011`) |
-| Provisioning / layout / compose / firewall / resolver / health | `platform-api/app/services/tenant_*.py` |
-| Admin API | `platform-api/app/routes/tenant_data_planes.py` (`/api/tenant-data-planes`, super-admin) |
-
-## Onboarding a tenant
-
-1. **Register the data plane** (allocates index, subnet, ports, paths):
-   ```
-   POST /api/tenant-data-planes
-   { "tenant_id": "acme", "tenant_name": "Acme Co", "allowed_onprem_cidrs": ["10.10.0.0/16"] }
-   ```
-2. **Provision AWS** — add the tenant to `terraform.tfvars` `tenants` map (see
-   `terraform.tfvars.example`) and `terraform apply`. Each VPN bills ~$0.05/hr.
-3. **Attach VPN metadata** from the Terraform outputs:
-   ```
-   POST /api/tenant-data-planes/acme/vpn-metadata
-   { "tenant_vpc_id": "...", "vpn_connection_id": "...", "vpn_tunnel1_address": "...", ... }
-   ```
-4. **Render + apply the container** on the EC2 host:
-   `POST /api/tenant-data-planes/acme/provision-container` returns the compose
-   file + directory list; create the dirs, write the compose, set the API key
-   env var, `docker compose -f <file> up -d`. Then connect the control plane to
-   the tenant network so the containerized API can reach the tenant Teiid:
-   `docker network connect tenant_<id>_net tablescope-platform-api-1`
-   (and `...-worker-1`).
-5. **Apply host firewall** — `GET /api/tenant-data-planes/firewall-script` returns
-   the idempotent script + systemd unit; install and enable on the host.
-6. **Hand the customer their config** — `GET /api/tenant-data-planes/acme/onboarding-package`.
-7. **Verify** — `POST /api/tenant-data-planes/acme/health` reports VPN, Teiid,
-   firewall, VDB-path, and optional on-prem connectivity probes.
-
-## Backward compatibility
-
-With an empty Terraform `tenants` map no tenant infra is created and the existing
-single-host deployment is untouched. The Teiid resolver falls back to the global
-settings when a tenant has no data plane, so existing single-tenant / dev-mode
-data-source creation keeps working.
+See `docs/devin-private-s3-merge-deploy.md` for deployment and negative tests.

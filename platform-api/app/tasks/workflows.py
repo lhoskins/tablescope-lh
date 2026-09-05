@@ -134,28 +134,29 @@ async def process_upload(
             "user_id": user_id,
         }
 
-    teiid = VDBManagementService()
-    try:
-        await teiid.redeploy_vdb(vdb_id=vdb_id)
-        pool = await create_pool(_redis_settings())
+    async with SessionLocal() as session:
+        teiid = await VDBManagementService.for_org(session, tenant_id)
         try:
-            await pool.enqueue_job(
-                "index_for_search",
-                tenant_id=tenant_id,
-                vdb_id=vdb_id,
-                path=path,
-            )
+            await teiid.redeploy_vdb(vdb_id=vdb_id)
         finally:
-            await pool.close()
-        return {
-            "status": "redeployed",
-            "vdb_id": vdb_id,
-            "path": path,
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-        }
+            await teiid.aclose()
+    pool = await create_pool(_redis_settings())
+    try:
+        await pool.enqueue_job(
+            "index_for_search",
+            tenant_id=tenant_id,
+            vdb_id=vdb_id,
+            path=path,
+        )
     finally:
-        await teiid.aclose()
+        await pool.close()
+    return {
+        "status": "redeployed",
+        "vdb_id": vdb_id,
+        "path": path,
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+    }
 
 
 async def enqueue_scan_repository_connection(

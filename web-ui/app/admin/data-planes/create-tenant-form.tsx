@@ -7,6 +7,8 @@ type CreateTenantFormProps = {
   setTenantId: (value: string) => void;
   tenantName: string;
   setTenantName: (value: string) => void;
+  s3Region: string;
+  setS3Region: (value: string) => void;
   vpnMode: VpnMode;
   setVpnMode: (value: VpnMode) => void;
   cidrs: string;
@@ -32,6 +34,8 @@ export function CreateTenantForm({
   setTenantId,
   tenantName,
   setTenantName,
+  s3Region,
+  setS3Region,
   vpnMode,
   setVpnMode,
   cidrs,
@@ -96,6 +100,24 @@ export function CreateTenantForm({
             placeholder="Acme Corporation"
           />
         </div>
+      </div>
+
+      <div className="mt-5">
+        <label className="block text-sm font-medium text-slate-700">
+          Dedicated S3 Region <span className="text-red-500">*</span>
+        </label>
+        <input
+          type="text"
+          value={s3Region}
+          onChange={(e) => setS3Region(e.target.value.trim())}
+          required
+          placeholder="us-west-1"
+          className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+        />
+        <p className="mt-1 text-xs text-slate-500">
+          Every isolated data plane—including No VPN—requires a tenant bucket,
+          CMK, IAM role, VPC-only access point, and S3 interface endpoint.
+        </p>
       </div>
 
       <div className="mt-5">

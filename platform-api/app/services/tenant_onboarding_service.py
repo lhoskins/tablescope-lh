@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.models.billing import (
     BillingCustomer,
     BillingSubscription,
@@ -37,7 +38,7 @@ from app.services.tenant_provisioning_service import (
     TenantAlreadyExists,
     TenantProvisioningService,
 )
-from app.services.tenant_teiid_resolver import TenantTeiidResolver
+from app.services.tenant_storage_resolver import StorageIsolationError
 from app.services.vdb_management import VDBManagementService, VDBProvisioningError
 
 
@@ -254,12 +255,13 @@ class TenantOnboardingService:
                 org_tenant_id=tenant.id,
                 routing_type="static",
                 vpn_mode=vpn_mode,
+                s3_region=get_settings().s3_region,
             )
         except TenantAlreadyExists:
             # Idempotent replay: data plane already exists.
             pass
 
-        req.data_plane_status = "provisioned"
+        req.data_plane_status = "storage_pending"
         audit.audit(
             audit.ISOLATED_DATA_PLANE_PROVISIONED,
             tenant_id=tenant.id,
@@ -283,18 +285,13 @@ class TenantOnboardingService:
         VDBProvisioningError is logged but does not fail provisioning, mirroring
         the super-admin ``create_tenant`` path.
         """
-        endpoint = await TenantTeiidResolver(self._session).resolve_for_org(tenant.id)
-
         existing_shared = await self._session.scalar(
             select(SharedVDB).where(SharedVDB.tenant_id == tenant.id)
         )
         if existing_shared is None:
-            vdb_svc = VDBManagementService(
-                servlet_url=endpoint.servlet_url,
-                pg_host=endpoint.pg_host,
-                pg_port=endpoint.pg_port,
-            )
+            vdb_svc: VDBManagementService | None = None
             try:
+                vdb_svc = await VDBManagementService.for_org(self._session, tenant.id)
                 shared_result = await vdb_svc.create_shared_vdb(org_id=tenant.id)
                 self._session.add(
                     SharedVDB(
@@ -314,14 +311,15 @@ class TenantOnboardingService:
                     tenant_id=tenant.id,
                     vdb_id=shared_result.vdb_id,
                 )
-            except VDBProvisioningError as exc:
+            except (StorageIsolationError, VDBProvisioningError) as exc:
                 audit.audit(
                     audit.VDB_PROVISIONING_FAILED,
                     tenant_id=tenant.id,
                     error=str(exc)[:200],
                 )
             finally:
-                await vdb_svc.aclose()
+                if vdb_svc is not None:
+                    await vdb_svc.aclose()
 
         existing_user = await self._session.scalar(
             select(UserVDB).where(
@@ -329,12 +327,9 @@ class TenantOnboardingService:
             )
         )
         if existing_user is None:
-            vdb_svc = VDBManagementService(
-                servlet_url=endpoint.servlet_url,
-                pg_host=endpoint.pg_host,
-                pg_port=endpoint.pg_port,
-            )
+            vdb_svc = None
             try:
+                vdb_svc = await VDBManagementService.for_org(self._session, tenant.id)
                 user_result = await vdb_svc.create_user_vdb(
                     org_id=tenant.id, user_id=root_user.id
                 )
@@ -358,7 +353,7 @@ class TenantOnboardingService:
                     user_id=root_user.id,
                     vdb_id=user_result.vdb_id,
                 )
-            except VDBProvisioningError as exc:
+            except (StorageIsolationError, VDBProvisioningError) as exc:
                 audit.audit(
                     audit.VDB_PROVISIONING_FAILED,
                     tenant_id=tenant.id,
@@ -366,7 +361,8 @@ class TenantOnboardingService:
                     error=str(exc)[:200],
                 )
             finally:
-                await vdb_svc.aclose()
+                if vdb_svc is not None:
+                    await vdb_svc.aclose()
 
     async def _ensure_default_project(
         self, req: TenantProvisioningRequest, tenant: Tenant, owner: User

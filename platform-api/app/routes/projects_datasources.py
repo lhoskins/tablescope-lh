@@ -559,7 +559,7 @@ async def update_datasource_columns(
             )
         )
         if user_vdb is not None:
-            svc = VDBManagementService()
+            svc = await VDBManagementService.for_org(session, context.tenant_id)
             try:
                 await svc.redeploy_vdb(user_vdb.vdb_id)
             except Exception as exc:  # pragma: no cover - servlet failure
@@ -638,4 +638,3 @@ async def remove_datasource_from_project(
 
     await session.commit()
     return {"status": "ok"}
-

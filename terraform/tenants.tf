@@ -28,6 +28,13 @@ locals {
       }
     }
   ]...) : {}
+
+  shared_tenant_vpc_routes = local.tenants_enabled ? {
+    for tid, t in var.tenants : tid => {
+      route_table_id = data.aws_route_table.shared[0].id
+      cidr           = t.tenant_vpc_cidr
+    }
+  } : {}
 }
 
 module "network_hub" {
@@ -39,6 +46,14 @@ module "network_hub" {
   shared_route_table_onprem_cidrs = local.shared_onprem_routes
 }
 
+resource "aws_route" "shared_to_tenant_vpc" {
+  for_each = local.shared_tenant_vpc_routes
+
+  route_table_id         = each.value.route_table_id
+  destination_cidr_block = each.value.cidr
+  transit_gateway_id     = module.network_hub[0].transit_gateway_id
+}
+
 module "tenant" {
   source   = "./modules/tenant-vpc"
   for_each = var.tenants
@@ -47,6 +62,7 @@ module "tenant" {
   availability_zone          = var.availability_zone
   tenant_vpc_cidr            = each.value.tenant_vpc_cidr
   tenant_private_subnet_cidr = each.value.tenant_private_subnet_cidr
+  vpn_mode                   = each.value.vpn_mode
   customer_gateway_ip        = each.value.customer_gateway_ip
   customer_bgp_asn           = each.value.customer_bgp_asn
   customer_onprem_cidrs      = each.value.customer_onprem_cidrs
@@ -56,4 +72,8 @@ module "tenant" {
   shared_attachment_id  = module.network_hub[0].shared_attachment_id
   shared_route_table_id = module.network_hub[0].shared_route_table_id
   shared_vpc_cidr       = data.aws_vpc.selected.cidr_block
+  aws_region            = var.aws_region
+  runtime_principal_arn = aws_iam_role.tablescope_runtime.arn
+  storage_bucket_name   = each.value.storage_bucket_name
+  storage_force_destroy = each.value.storage_force_destroy
 }

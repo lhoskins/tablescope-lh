@@ -9,6 +9,7 @@ import { CreateTenantForm } from "./create-tenant-form";
 import { BindAppTenantModal } from "./bind-app-tenant-modal";
 import { DeleteTenantModal } from "./delete-tenant-modal";
 import { TeardownModal } from "./teardown-modal";
+import { HealthCell, StorageCell } from "./storage-health-cells";
 import type { DataPlane, HealthReport, DeleteResult, VpnMode, AppTenant } from "./types";
 
 export default function DataPlanesPage() {
@@ -33,6 +34,7 @@ function SuperAdminView() {
   const [showCreate, setShowCreate] = useState(false);
   const [tenantId, setTenantId] = useState("");
   const [tenantName, setTenantName] = useState("");
+  const [s3Region, setS3Region] = useState("us-west-1");
   const [vpnMode, setVpnMode] = useState<VpnMode>("none");
   const [cidrs, setCidrs] = useState("");
   const [createAppTenant, setCreateAppTenant] = useState(true);
@@ -119,6 +121,7 @@ function SuperAdminView() {
       setShowCreate(false);
       setTenantId("");
       setTenantName("");
+      setS3Region("us-west-1");
       setVpnMode("none");
       setCidrs("");
       setCreateAppTenant(true);
@@ -147,6 +150,17 @@ function SuperAdminView() {
       setNote(resp.note);
       queryClient.invalidateQueries({ queryKey: ["data-planes"] });
     },
+  });
+
+  const provisionVdbMutation = useMutation({
+    mutationFn: (id: string) =>
+      apiClient.post<DataPlane>(
+        `/api/tenant-data-planes/${id}/provision-vdbs`,
+        {},
+      ),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["data-planes"] }),
+    onError: (err: Error) => setNote(err.message),
   });
 
   const deleteMutation = useMutation({
@@ -186,6 +200,7 @@ function SuperAdminView() {
     const payload: Record<string, unknown> = {
       tenant_id: tenantId,
       tenant_name: tenantName,
+      s3_region: s3Region,
       vpn_mode: vpnMode,
       allowed_onprem_cidrs: list,
       create_app_tenant: createAppTenant,
@@ -208,7 +223,7 @@ function SuperAdminView() {
           </h1>
           <p className="text-sm text-slate-500">
             Provision per-tenant isolation (VPC + Site-to-Site VPN + Teiid
-            container + Docker network + VDB + firewall) on the shared EC2 host.
+            container + Docker network + VDB + firewall + private S3) on the shared EC2 host.
           </p>
         </div>
         <button
@@ -225,6 +240,8 @@ function SuperAdminView() {
           setTenantId={setTenantId}
           tenantName={tenantName}
           setTenantName={setTenantName}
+          s3Region={s3Region}
+          setS3Region={setS3Region}
           vpnMode={vpnMode}
           setVpnMode={setVpnMode}
           cidrs={cidrs}
@@ -284,6 +301,7 @@ function SuperAdminView() {
                   "Status",
                   "Subnet / IP",
                   "VPN",
+                  "Storage",
                   "Health",
                   "Actions",
                 ].map((h) => (
@@ -341,25 +359,8 @@ function SuperAdminView() {
                         <span className="text-xs text-slate-400">n/a</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-xs">
-                      {h ? (
-                        <div className="space-y-1">
-                          <div>
-                            teiid <StatusBadge value={h.teiid_status} />
-                          </div>
-                          <div>
-                            fw <StatusBadge value={h.firewall_status} />
-                          </div>
-                          <div>
-                            vdb <StatusBadge value={h.vdb_path_status} />
-                          </div>
-                        </div>
-                      ) : (
-                        <span className="text-slate-400">
-                          {p.last_health_status ?? "—"}
-                        </span>
-                      )}
-                    </td>
+                    <StorageCell plane={p} />
+                    <HealthCell plane={p} health={h} />
                     <td className="px-4 py-3 text-sm">
                       <div className="flex flex-col gap-1">
                         <button
@@ -381,6 +382,20 @@ function SuperAdminView() {
                           className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-50"
                         >
                           Provision container
+                        </button>
+                        <button
+                          onClick={() => provisionVdbMutation.mutate(p.tenant_id)}
+                          disabled={
+                            p.storage_status !== "ready" ||
+                            !["infrastructure_ready", "active"].includes(p.status) ||
+                            !p.org_tenant_id ||
+                            (provisionVdbMutation.isPending &&
+                              provisionVdbMutation.variables === p.tenant_id)
+                          }
+                          title="Requires a bound app tenant and successful private-S3 health probe"
+                          className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          Provision VDBs
                         </button>
                         {p.org_tenant_id ? (
                           <span className="inline-flex items-center justify-center rounded bg-green-50 px-2 py-1 text-xs font-medium text-green-700">

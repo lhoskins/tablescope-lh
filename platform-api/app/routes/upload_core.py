@@ -40,6 +40,8 @@ from app.services.file_sources import (
     display_source,
     prepare_upload_content,
 )
+from app.services.s3_storage import S3StorageService
+from app.services.tenant_storage_resolver import StorageIsolationError, TenantStorageResolver
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
 logger = logging.getLogger(__name__)
@@ -91,6 +93,15 @@ async def upload_file(
     )
 
     endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+    try:
+        storage_binding = await TenantStorageResolver(session).resolve_for_org(context.tenant_id)
+        storage = (
+            S3StorageService(storage_binding)
+            if get_settings().s3_enabled or storage_binding.dedicated
+            else None
+        )
+    except StorageIsolationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     servlet_url = (
         f"{endpoint.servlet_url}/TeiidExcelImporterTest/upload"
     )
@@ -151,17 +162,20 @@ async def upload_file(
         )
 
     # Sync uploaded file to S3 if enabled
-    settings_obj = get_settings()
     s3_location = None
-    if settings_obj.s3_enabled:
+    if storage is not None:
         try:
-            from app.services.s3_storage import S3StorageService
-            s3_svc = S3StorageService()
-            local_file_path = f"{settings_obj.customer_base_path}/{tenant.id}/{user.id}/uploads/{filename}"
-            s3_key = s3_svc.get_s3_key_for_upload(tenant.id, user.id, filename)
-            s3_location = s3_svc.upload_file(local_file_path, s3_key)
-        except Exception as e:
-            logger.warning("S3 upload sync failed (non-fatal): %s", e)
+            local_file_path = storage_binding.local_base / str(tenant.id) / str(user.id) / "uploads" / filename
+            s3_key = storage.get_s3_key_for_upload(tenant.id, user.id, filename)
+            s3_location = storage.upload_file(str(local_file_path), s3_key)
+            vdb_dir = storage_binding.local_base / str(tenant.id) / str(user.id) / "vdb"
+            synced = storage.sync_local_to_s3(str(vdb_dir), f"customers/{tenant.id}/{user.id}/vdb")
+            if storage_binding.dedicated and synced == 0:
+                raise StorageIsolationError("Teiid did not produce a VDB XML file for private storage")
+        except Exception as exc:
+            if storage_binding.dedicated:
+                raise HTTPException(status_code=503, detail=f"Private storage persistence failed: {exc}") from exc
+            logger.warning("S3 upload sync failed (non-fatal): %s", exc)
 
     # Detect per-column formatting types (currency/date/number) for item 6.
     column_types = detect_column_types(content, filename)
@@ -249,4 +263,3 @@ async def upload_file(
         "teiid": teiid_result,
         "s3_location": s3_location,
     }
-

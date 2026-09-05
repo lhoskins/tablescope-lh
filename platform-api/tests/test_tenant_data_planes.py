@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from app.models.tenant import Tenant
+from app.services.s3_storage import S3StorageService
 from app.services.tenant_compose_service import TenantComposeService
 from app.services.tenant_firewall_service import (
     TenantFirewallService,
@@ -14,6 +18,8 @@ from app.services.tenant_layout import (
     compute_layout,
     validate_tenant_id,
 )
+from app.services.tenant_provisioning_service import TenantProvisioningService
+from app.services.tenant_storage_resolver import StorageBinding, StorageIsolationError, TenantStorageResolver
 
 # --- Layout -----------------------------------------------------------------
 
@@ -123,7 +129,8 @@ async def test_create_list_get_and_artifacts(client, service_headers) -> None:
     assert plane["tenant_id"] == "acme"
     assert plane["docker_subnet_cidr"] == "172.30.10.0/24"
     assert plane["teiid_pg_port"] == 15442
-    assert plane["status"] == "provisioning"
+    assert plane["status"] == "storage_pending"
+    assert plane["storage_status"] == "unconfigured"
     # Defaults to the no-VPN (container-only) tier.
     assert plane["vpn_mode"] == "none"
 
@@ -252,10 +259,160 @@ async def test_health_endpoint_reports_dimensions(client, service_headers) -> No
     resp = await client.post("/api/tenant-data-planes/acme/health", json={}, headers=service_headers)
     assert resp.status_code == 200, resp.text
     report = resp.json()
-    for key in ("vpn_status", "teiid_status", "firewall_status", "vdb_path_status"):
+    for key in (
+        "vpn_status",
+        "teiid_status",
+        "firewall_status",
+        "vdb_path_status",
+        "storage_status",
+    ):
         assert key in report
     # Customer-VPN tier but no VPN metadata attached yet.
     assert report["vpn_status"] == "not_configured"
+    assert report["storage_status"] == "unconfigured"
+
+
+async def test_private_storage_metadata_is_strict_and_fail_closed(client, service_headers) -> None:
+    await client.post(
+        "/api/tenant-data-planes",
+        json={"tenant_id": "acme", "tenant_name": "Acme", "s3_region": "us-west-1"},
+        headers=service_headers,
+    )
+    invalid = await client.post(
+        "/api/tenant-data-planes/acme/storage-metadata",
+        json={
+            "s3_bucket_name": "acme-data",
+            "s3_region": "us-west-1",
+            "s3_access_point_arn": "arn:aws:s3:us-west-1:123456789012:accesspoint/acme",
+            "s3_vpc_endpoint_id": "vpce-123",
+            "s3_endpoint_url": "https://s3.us-west-1.amazonaws.com",
+            "s3_kms_key_arn": "arn:aws:kms:us-west-1:123456789012:key/abc",
+            "s3_role_arn": "arn:aws:iam::123456789012:role/acme",
+            "s3_force_private": True,
+        },
+        headers=service_headers,
+    )
+    assert invalid.status_code == 422
+
+    valid = await client.post(
+        "/api/tenant-data-planes/acme/storage-metadata",
+        json={
+            "s3_bucket_name": "acme-data",
+            "s3_region": "us-west-1",
+            "s3_prefix": "",
+            "s3_access_point_arn": "arn:aws:s3:us-west-1:123456789012:accesspoint/acme",
+            "s3_vpc_endpoint_id": "vpce-123",
+            "s3_endpoint_url": "https://vpce-123.s3.us-west-1.vpce.amazonaws.com",
+            "s3_kms_key_arn": "arn:aws:kms:us-west-1:123456789012:key/abc",
+            "s3_role_arn": "arn:aws:iam::123456789012:role/acme",
+            "s3_force_private": True,
+        },
+        headers=service_headers,
+    )
+    assert valid.status_code == 200, valid.text
+    assert valid.json()["storage_status"] == "pending_validation"
+
+    blocked = await client.post(
+        "/api/tenant-data-planes/acme/provision-vdbs",
+        headers=service_headers,
+    )
+    assert blocked.status_code == 409
+
+
+async def test_storage_resolver_never_falls_back_for_bound_plane(db_session) -> None:
+    tenant = Tenant(slug="acme", name="Acme")
+    db_session.add(tenant)
+    await db_session.flush()
+    plane, _ = await TenantProvisioningService(db_session).create(
+        tenant_id="acme",
+        tenant_name="Acme",
+        s3_region="us-west-1",
+        allowed_onprem_cidrs=[],
+        org_tenant_id=tenant.id,
+    )
+
+    with pytest.raises(StorageIsolationError, match="incomplete"):
+        await TenantStorageResolver(db_session).resolve_for_org(tenant.id)
+
+    plane.s3_bucket_name = "acme-private-data"
+    plane.s3_access_point_arn = "arn:aws:s3:us-west-1:123456789012:accesspoint/acme"
+    plane.s3_vpc_endpoint_id = "vpce-123"
+    plane.s3_endpoint_url = "https://vpce-123.s3.us-west-1.vpce.amazonaws.com"
+    plane.s3_kms_key_arn = "arn:aws:kms:us-west-1:123456789012:key/abc"
+    plane.s3_role_arn = "arn:aws:iam::123456789012:role/acme"
+    plane.storage_status = "ready"
+
+    binding = await TenantStorageResolver(db_session).resolve_for_org(tenant.id)
+    assert binding.dedicated is True
+    assert binding.bucket_name == "acme-private-data"
+    assert binding.endpoint_url == plane.s3_endpoint_url
+
+
+def test_private_s3_probe_uses_role_endpoint_access_point_and_exact_cmk(monkeypatch) -> None:
+    calls: dict[str, object] = {}
+
+    class Body:
+        def read(self) -> bytes:
+            return b"tablescope-storage-boundary-probe"
+
+    class Sts:
+        def assume_role(self, **kwargs):
+            calls["assume_role"] = kwargs
+            return {
+                "Credentials": {
+                    "AccessKeyId": "access",
+                    "SecretAccessKey": "secret",
+                    "SessionToken": "token",
+                }
+            }
+
+    class S3:
+        def put_object(self, **kwargs):
+            calls["put"] = kwargs
+
+        def head_object(self, **kwargs):
+            calls["head"] = kwargs
+            return {
+                "ServerSideEncryption": "aws:kms",
+                "SSEKMSKeyId": "arn:aws:kms:us-west-1:123456789012:key/acme",
+            }
+
+        def get_object(self, **kwargs):
+            calls["get"] = kwargs
+            return {"Body": Body()}
+
+        def delete_object(self, **kwargs):
+            calls["delete"] = kwargs
+
+    def client(service: str, **kwargs):
+        if service == "sts":
+            return Sts()
+        calls["s3_client"] = kwargs
+        return S3()
+
+    monkeypatch.setattr("app.services.s3_storage.boto3.client", client)
+    binding = StorageBinding(
+        bucket_name="acme-private",
+        region="us-west-1",
+        prefix="tenant-root",
+        local_base=Path("/tmp/acme"),
+        access_point_arn="arn:aws:s3:us-west-1:123456789012:accesspoint/acme",
+        vpc_endpoint_id="vpce-123",
+        endpoint_url="https://vpce-123.s3.us-west-1.vpce.amazonaws.com",
+        kms_key_arn="arn:aws:kms:us-west-1:123456789012:key/acme",
+        role_arn="arn:aws:iam::123456789012:role/acme-storage",
+        force_private=True,
+        dedicated=True,
+    )
+
+    S3StorageService(binding).validate_private_boundary()
+
+    assert calls["assume_role"]["RoleArn"] == binding.role_arn
+    assert calls["s3_client"]["endpoint_url"] == binding.endpoint_url
+    assert calls["put"]["Bucket"] == binding.access_point_arn
+    assert calls["put"]["Key"].startswith("tenant-root/.tablescope-health/")
+    assert calls["put"]["SSEKMSKeyId"] == binding.kms_key_arn
+    assert calls["delete"]["Bucket"] == binding.access_point_arn
 
 
 async def test_resolver_uses_incluster_address(db_session) -> None:

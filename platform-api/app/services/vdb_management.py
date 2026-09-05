@@ -17,11 +17,16 @@ import logging
 import secrets
 import string
 from dataclasses import dataclass
+from pathlib import Path
 
 import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.services.connection_pool import pool_manager
+from app.services.s3_storage import S3StorageService
+from app.services.tenant_storage_resolver import TenantStorageResolver
+from app.services.tenant_teiid_resolver import TenantTeiidResolver
 from app.services.vdb_warming import warm_vdb
 
 logger = logging.getLogger(__name__)
@@ -60,6 +65,10 @@ class VDBManagementService:
         servlet_url: str | None = None,
         pg_host: str | None = None,
         pg_port: int | None = None,
+        storage: S3StorageService | None = None,
+        storage_required: bool = False,
+        customer_base_path: str | None = None,
+        org_id: int | None = None,
     ) -> None:
         settings = get_settings()
         self._settings = settings
@@ -69,6 +78,10 @@ class VDBManagementService:
         self._servlet_url = servlet_url or settings.teiid_servlet_url
         self._pg_host = pg_host or settings.teiid_pg_host
         self._pg_port = pg_port or settings.teiid_pg_port
+        self._storage = storage
+        self._storage_required = storage_required
+        self._customer_base_path = Path(customer_base_path or settings.customer_base_path)
+        self._org_id = org_id
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(
             base_url=self._servlet_url,
@@ -76,9 +89,36 @@ class VDBManagementService:
             headers={"X-API-Key": settings.teiid_servlet_api_key} if settings.teiid_servlet_api_key else {},
         )
 
+    @classmethod
+    async def for_org(
+        cls,
+        session: AsyncSession,
+        org_id: int,
+        *,
+        client: httpx.AsyncClient | None = None,
+    ) -> VDBManagementService:
+        endpoint = await TenantTeiidResolver(session).resolve_for_org(org_id)
+        binding = await TenantStorageResolver(session).resolve_for_org(org_id)
+        settings = get_settings()
+        storage = S3StorageService(binding) if settings.s3_enabled or binding.dedicated else None
+        return cls(
+            client=client,
+            servlet_url=endpoint.servlet_url,
+            pg_host=endpoint.pg_host,
+            pg_port=endpoint.pg_port,
+            storage=storage,
+            storage_required=binding.dedicated,
+            customer_base_path=str(binding.local_base),
+            org_id=org_id,
+        )
+
     async def aclose(self) -> None:
         if self._owns_client:
             await self._client.aclose()
+
+    @property
+    def storage_required(self) -> bool:
+        return self._storage_required
 
     async def health(self) -> bool:
         try:
@@ -223,24 +263,49 @@ class VDBManagementService:
 
     def _sync_vdb_to_s3(self, org_id: int, vdb_id: str, *, vdb_type: str, user_id: int | None = None) -> None:
         """Sync VDB XML file to S3 after creation/modification."""
-        if not self._settings.s3_enabled:
+        if self._storage is None:
+            if self._storage_required:
+                raise VDBProvisioningError("tenant-private S3 storage is unavailable")
             return
         try:
-            from app.services.s3_storage import S3StorageService
-            s3_svc = S3StorageService()
             if vdb_type == "shared":
-                local_path = f"{self._settings.customer_base_path}/{org_id}/shared/vdb/{vdb_id}-vdb.xml"
-                s3_key = s3_svc.get_s3_key_for_shared_vdb(org_id, vdb_id)
+                local_path = self._customer_base_path / str(org_id) / "shared" / "vdb" / f"{vdb_id}-vdb.xml"
+                s3_key = self._storage.get_s3_key_for_shared_vdb(org_id, vdb_id)
             else:
-                local_path = f"{self._settings.customer_base_path}/{org_id}/{user_id}/vdb/{vdb_id}-vdb.xml"
-                s3_key = s3_svc.get_s3_key_for_vdb(org_id, user_id or 0, vdb_id)
-            import os
-            if os.path.exists(local_path):
-                s3_svc.upload_file(local_path, s3_key)
+                local_path = self._customer_base_path / str(org_id) / str(user_id) / "vdb" / f"{vdb_id}-vdb.xml"
+                s3_key = self._storage.get_s3_key_for_vdb(org_id, user_id or 0, vdb_id)
+            if local_path.exists():
+                self._storage.upload_file(str(local_path), s3_key)
             else:
-                logger.warning("VDB file not found for S3 sync: %s", local_path)
-        except Exception as e:
-            logger.warning("S3 VDB sync failed (non-fatal): %s", e)
+                message = f"VDB file not found for S3 sync: {local_path}"
+                if self._storage_required:
+                    raise VDBProvisioningError(message)
+                logger.warning(message)
+        except Exception as exc:
+            if self._storage_required:
+                raise VDBProvisioningError(f"Tenant-private S3 VDB sync failed: {exc}") from exc
+            logger.warning("S3 VDB sync failed (non-fatal): %s", exc)
+
+    def _sync_redeployed_vdb_to_s3(self, vdb_id: str) -> None:
+        if self._storage is None:
+            if self._storage_required:
+                raise VDBProvisioningError("tenant-private S3 storage is unavailable")
+            return
+        search_root = (
+            self._customer_base_path / str(self._org_id)
+            if self._org_id is not None
+            else self._customer_base_path
+        )
+        candidates = list(search_root.glob(f"**/{vdb_id}-vdb.xml"))
+        if len(candidates) != 1:
+            message = f"expected one local XML for VDB {vdb_id}; found {len(candidates)}"
+            if self._storage_required:
+                raise VDBProvisioningError(message)
+            logger.warning(message)
+            return
+        local_path = candidates[0]
+        relative = local_path.relative_to(self._customer_base_path).as_posix()
+        self._storage.upload_file(str(local_path), f"customers/{relative}")
 
     async def redeploy_vdb(
         self, vdb_id: str, *, vdb_file_path: str | None = None
@@ -280,6 +345,8 @@ class VDBManagementService:
             max_attempts=1,
             retry_delay=2.0,
         )
+
+        self._sync_redeployed_vdb_to_s3(vdb_id)
 
     async def delete_vdb(
         self,

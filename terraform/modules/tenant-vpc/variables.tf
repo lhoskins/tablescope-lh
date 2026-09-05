@@ -21,6 +21,18 @@ variable "tenant_private_subnet_cidr" {
 variable "customer_gateway_ip" {
   description = "Public IPv4 of the customer's on-prem VPN device (customer gateway)."
   type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "vpn_mode" {
+  description = "none or customer_vpn"
+  type        = string
+  default     = "none"
+  validation {
+    condition     = contains(["none", "customer_vpn"], var.vpn_mode)
+    error_message = "vpn_mode must be none or customer_vpn."
+  }
 }
 
 variable "customer_bgp_asn" {
@@ -63,4 +75,27 @@ variable "shared_route_table_id" {
 variable "shared_vpc_cidr" {
   description = "CIDR block of the shared services VPC (for the VPN return route)."
   type        = string
+}
+
+variable "aws_region" {
+  description = "AWS region used for the S3 endpoint and KMS service condition."
+  type        = string
+}
+
+variable "runtime_principal_arn" {
+  description = "Only principal allowed to assume this tenant's storage role."
+  type        = string
+}
+
+variable "storage_bucket_name" {
+  description = "Optional globally unique bucket name; generated when null."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "storage_force_destroy" {
+  description = "Delete objects on destroy. Keep false in production for retention."
+  type        = bool
+  default     = false
 }
