@@ -167,7 +167,7 @@ confirm pass.
 | `ruff check` (all touched files) | clean |
 | `mypy` (all touched files) | clean |
 | KG-focused regression sweep (`pytest -k "knowledge_graph or kg" -q`, run before KG-17/18/16 landed) | 268 passed, 2 failed (pre-existing `test_business_insight_phase1.py` Redis-connection failures — this sandbox has no Redis running; unrelated to this phase) |
-| Full `pytest -q` (whole platform-api suite) | **FULL_SUITE_RESULT_PLACEHOLDER** |
+| Full `pytest -q` (whole platform-api suite) | **1805 passed, 4 skipped, 10 failed** — same 10 pre-existing/unrelated failures as every prior phase (dashboard visualization, percent-change summary statistics, business-insight snapshot staleness) — 0 new |
 
 ```bash
 cd platform-api
