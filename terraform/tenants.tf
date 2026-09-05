@@ -1,3 +1,5 @@
+data "aws_caller_identity" "current" {}
+
 # ---------------------------------------------------------------------------
 # Tenant data-plane wiring (Phase 1 of the Tenant VPN/Data-Plane plan).
 #
@@ -73,7 +75,7 @@ module "tenant" {
   shared_route_table_id = module.network_hub[0].shared_route_table_id
   shared_vpc_cidr       = data.aws_vpc.selected.cidr_block
   aws_region            = var.aws_region
-  runtime_principal_arn = aws_iam_role.tablescope_runtime.arn
+  runtime_principal_arn = var.runtime_principal_arn != "" ? var.runtime_principal_arn : data.aws_caller_identity.current.arn
   storage_bucket_name   = each.value.storage_bucket_name
   storage_force_destroy = each.value.storage_force_destroy
 }

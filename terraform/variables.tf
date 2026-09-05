@@ -69,3 +69,10 @@ variable "allowed_app_cidrs" {
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }
+
+variable "runtime_principal_arn" {
+  description = "ARN of the control-plane principal that may assume tenant storage roles. Defaults to the identity running Terraform."
+  type        = string
+  default     = ""
+}
+

@@ -108,6 +108,7 @@ resource "aws_kms_key" "storage" {
   description             = "Tablescope tenant ${var.tenant_id} storage key"
   enable_key_rotation     = true
   deletion_window_in_days = 30
+  depends_on = [aws_iam_role.storage]
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
