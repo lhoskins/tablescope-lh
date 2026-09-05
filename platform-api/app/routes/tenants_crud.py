@@ -127,12 +127,7 @@ async def create_tenant(
     CustomerFolderService().ensure_tenant_folders(tenant.slug)
 
     # Create shared VDB for the tenant, targeting the dedicated container if bound.
-    endpoint = await TenantTeiidResolver(session).resolve_for_org(tenant.id)
-    vdb_svc = VDBManagementService(
-        servlet_url=endpoint.servlet_url,
-        pg_host=endpoint.pg_host,
-        pg_port=endpoint.pg_port,
-    )
+    vdb_svc = await VDBManagementService.for_org(session, tenant.id)
     try:
         shared_result = await vdb_svc.create_shared_vdb(org_id=tenant.id)
         shared_vdb = SharedVDB(
@@ -169,11 +164,7 @@ async def create_tenant(
         )
 
         # Create and deploy user VDB for the root user in the tenant container.
-        vdb_svc = VDBManagementService(
-            servlet_url=endpoint.servlet_url,
-            pg_host=endpoint.pg_host,
-            pg_port=endpoint.pg_port,
-        )
+        vdb_svc = await VDBManagementService.for_org(session, tenant.id)
         try:
             user_result = await vdb_svc.create_user_vdb(
                 org_id=tenant.id, user_id=root_user.id,

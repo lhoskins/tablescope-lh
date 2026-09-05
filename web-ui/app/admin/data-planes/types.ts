@@ -16,6 +16,10 @@ export type DataPlane = {
   tenant_vpc_id: string | null;
   last_health_status: string | null;
   org_tenant_id: number | null;
+  storage_mode: string;
+  storage_status: string;
+  s3_bucket_name: string | null;
+  s3_region: string | null;
 };
 
 export type HealthReport = {
@@ -24,6 +28,7 @@ export type HealthReport = {
   teiid_status: string;
   firewall_status: string;
   vdb_path_status: string;
+  storage_status: string;
   messages?: Record<string, string>;
 };
 

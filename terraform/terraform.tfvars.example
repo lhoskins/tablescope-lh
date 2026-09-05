@@ -40,15 +40,19 @@ volume_size       = 30              # GB — root EBS volume
 #   acme = {
 #     tenant_vpc_cidr            = "10.100.0.0/16"
 #     tenant_private_subnet_cidr = "10.100.1.0/24"
+#     vpn_mode                   = "customer_vpn"
 #     customer_gateway_ip        = "203.0.113.10"   # customer on-prem VPN public IP
 #     customer_onprem_cidrs      = ["10.10.0.0/16"]
+#     storage_bucket_name        = "tablescope-customer-acme-data" # optional
+#     storage_force_destroy      = false
 #     # customer_bgp_asn         = 65000             # only for dynamic routing
 #     # vpn_routing_type         = "static"
 #   }
 #   globex = {
 #     tenant_vpc_cidr            = "10.101.0.0/16"
 #     tenant_private_subnet_cidr = "10.101.1.0/24"
-#     customer_gateway_ip        = "198.51.100.20"
-#     customer_onprem_cidrs      = ["10.20.0.0/16"]
+#     vpn_mode                   = "none"
+#     customer_onprem_cidrs      = []
+#     storage_force_destroy      = false
 #   }
 # }

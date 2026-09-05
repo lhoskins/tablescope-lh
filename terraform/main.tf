@@ -145,6 +145,39 @@ resource "aws_security_group" "tablescope" {
   }
 }
 
+# The shared host is a trusted control-plane runtime. It has no direct tenant
+# data permissions; it can only assume one tenant's narrowly scoped storage
+# role for the duration of a request.
+resource "aws_iam_role" "tablescope_runtime" {
+  name = "${var.instance_name}-runtime"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+      Action = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "tablescope_runtime" {
+  name = "assume-tenant-storage-roles"
+  role = aws_iam_role.tablescope_runtime.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "sts:AssumeRole"
+      Resource = "arn:aws:iam::*:role/tablescope-tenant-*-storage-*"
+    }]
+  })
+}
+
+resource "aws_iam_instance_profile" "tablescope_runtime" {
+  name = "${var.instance_name}-runtime"
+  role = aws_iam_role.tablescope_runtime.name
+}
+
 # ---------------------------------------------------------------------------
 # EC2 instance
 # ---------------------------------------------------------------------------
@@ -155,6 +188,7 @@ resource "aws_instance" "tablescope" {
   key_name               = local.key_name
   subnet_id              = local.subnet_id
   vpc_security_group_ids = [aws_security_group.tablescope.id]
+  iam_instance_profile   = aws_iam_instance_profile.tablescope_runtime.name
 
   availability_zone           = var.availability_zone
   associate_public_ip_address = true

@@ -95,7 +95,6 @@ def _extract_text_content(content: bytes, extension: str) -> dict[str, Any] | No
 class ChatAttachmentService:
     def __init__(self) -> None:
         self._settings = get_settings()
-        self._s3 = S3StorageService() if self._settings.s3_enabled else None
 
     async def upload(
         self,
@@ -112,6 +111,11 @@ class ChatAttachmentService:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Chat attachments are not enabled for this tenant.",
             )
+
+        from app.services.tenant_storage_resolver import TenantStorageResolver
+
+        binding = await TenantStorageResolver(session).resolve_for_org(tenant.id)
+        s3 = S3StorageService(binding) if settings.s3_enabled or binding.dedicated else None
 
         filename = file.filename or "attachment"
         safe_name = _safe_filename(filename)
@@ -181,13 +185,13 @@ class ChatAttachmentService:
         await session.flush()
 
         storage_key = f"customers/{tenant.id}/chat-attachments/{attachment.id}/{safe_name}"
-        local_path = Path(settings.customer_base_path) / storage_key
+        local_path = binding.local_base / storage_key
         local_path.parent.mkdir(parents=True, exist_ok=True)
         local_path.write_bytes(content)
 
-        if self._s3 is not None:
+        if s3 is not None:
             try:
-                self._s3.upload_file(str(local_path), storage_key)
+                s3.upload_file(str(local_path), storage_key)
             except Exception as exc:
                 logger.exception("S3 upload failed for chat attachment %s: %s", attachment.id, exc)
                 raise ChatAttachmentRejected("storage_failed", "Could not persist attachment to durable storage.") from exc
@@ -240,12 +244,18 @@ class ChatAttachmentService:
         attachment.deleted_at = datetime.now(UTC)
         attachment.status = "deleted"
         await session.flush()
-        if self._s3 is not None:
+        from app.services.tenant_storage_resolver import TenantStorageResolver
+
+        binding = await TenantStorageResolver(session).resolve_for_org(tenant_id)
+        s3 = S3StorageService(binding) if self._settings.s3_enabled or binding.dedicated else None
+        if s3 is not None:
             try:
-                self._s3.delete_file(attachment.storage_key)
+                s3.delete_file(attachment.storage_key)
             except Exception:
                 logger.exception("Failed to delete chat attachment %s from S3", attachment.id)
-        local_path = Path(self._settings.customer_base_path) / attachment.storage_key
+                if binding.dedicated:
+                    raise
+        local_path = binding.local_base / attachment.storage_key
         try:
             if local_path.exists():
                 local_path.unlink()

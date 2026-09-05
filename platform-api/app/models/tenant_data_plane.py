@@ -17,12 +17,17 @@ name or AWS Secrets Manager ARN) live in :class:`TenantSecretRef`.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import (
     JSON,
+    Boolean,
+    DateTime,
     ForeignKey,
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -39,12 +44,26 @@ VPN_MODE_CUSTOMER = "customer_vpn"
 VPN_MODES = (VPN_MODE_NONE, VPN_MODE_CUSTOMER)
 DEFAULT_VPN_MODE = VPN_MODE_NONE
 
+# Every registered data plane is an isolated storage boundary, even when it
+# does not have a customer VPN.  Shared storage remains available only to orgs
+# that have no TenantDataPlane record.
+STORAGE_MODE_ISOLATED = "isolated_s3"
+STORAGE_STATUS_UNCONFIGURED = "unconfigured"
+STORAGE_STATUS_READY = "ready"
+
 # JSONB on Postgres, plain JSON on other dialects (e.g. SQLite used in tests).
 _JSON = JSONB().with_variant(JSON(), "sqlite")
 
 
 class TenantDataPlane(TimestampMixin, Base):
     __tablename__ = "tenant_data_planes"
+    __table_args__ = (
+        UniqueConstraint("s3_bucket_name", name="uq_tenant_data_planes_s3_bucket_name"),
+        UniqueConstraint("s3_access_point_arn", name="uq_tenant_data_planes_s3_access_point_arn"),
+        UniqueConstraint("s3_vpc_endpoint_id", name="uq_tenant_data_planes_s3_vpc_endpoint_id"),
+        UniqueConstraint("s3_kms_key_arn", name="uq_tenant_data_planes_s3_kms_key_arn"),
+        UniqueConstraint("s3_role_arn", name="uq_tenant_data_planes_s3_role_arn"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
@@ -74,6 +93,22 @@ class TenantDataPlane(TimestampMixin, Base):
     vpn_tunnel2_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
     routing_type: Mapped[str] = mapped_column(String(20), nullable=False, default="static")
     vpn_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+    # Dedicated S3 boundary. The API uses the access point ARN as Bucket,
+    # assumes the tenant role and sends traffic to this VPC endpoint. These
+    # fields are metadata/references only; no AWS credentials are persisted.
+    storage_mode: Mapped[str] = mapped_column(String(30), nullable=False, default=STORAGE_MODE_ISOLATED)
+    s3_bucket_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    s3_region: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    s3_prefix: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    s3_access_point_arn: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    s3_vpc_endpoint_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    s3_endpoint_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    s3_kms_key_arn: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    s3_role_arn: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    s3_force_private: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    storage_status: Mapped[str] = mapped_column(String(50), nullable=False, default=STORAGE_STATUS_UNCONFIGURED)
+    storage_validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Docker / runtime metadata.
     docker_network_name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -127,6 +162,20 @@ class TenantDataPlane(TimestampMixin, Base):
             "status": self.status,
             "last_health_status": self.last_health_status,
             "last_health_message": self.last_health_message,
+            "storage_mode": self.storage_mode,
+            "s3_bucket_name": self.s3_bucket_name,
+            "s3_region": self.s3_region,
+            "s3_prefix": self.s3_prefix,
+            "s3_access_point_arn": self.s3_access_point_arn,
+            "s3_vpc_endpoint_id": self.s3_vpc_endpoint_id,
+            "s3_endpoint_url": self.s3_endpoint_url,
+            "s3_kms_key_arn": self.s3_kms_key_arn,
+            "s3_role_arn": self.s3_role_arn,
+            "s3_force_private": self.s3_force_private,
+            "storage_status": self.storage_status,
+            "storage_validated_at": (
+                self.storage_validated_at.isoformat() if self.storage_validated_at else None
+            ),
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

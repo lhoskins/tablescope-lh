@@ -10,19 +10,25 @@ All endpoints require super-admin.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
+from app.config import get_settings
 from app.database import get_db
-from app.routes.tenant_data_planes_crud import _read, _require_super_admin
+from app.models.shared_vdb import SharedVDB
+from app.routes.tenant_data_planes_crud import _provision_vdbs_for_tenant, _read, _require_super_admin
 from app.schemas.tenant_data_plane import (
     ComposePreview,
     FirewallScriptPreview,
     HealthCheckRequest,
     OnboardingPackage,
     ProvisionContainerResponse,
+    StorageMetadataIn,
     TenantDataPlaneRead,
     VpnMetadataIn,
 )
@@ -33,10 +39,13 @@ from app.services.tenant_firewall_service import (
 )
 from app.services.tenant_health_service import TenantHealthService
 from app.services.tenant_provisioning_service import (
+    StorageMetadata,
     TenantNotFound,
     TenantProvisioningService,
     VpnMetadata,
 )
+from app.services.tenant_storage_resolver import StorageIsolationError
+from app.services.vdb_management import VDBProvisioningError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tenant-data-planes", tags=["tenant-data-planes"])
@@ -69,6 +78,74 @@ async def attach_vpn_metadata(
         plane = await svc.attach_vpn_metadata(tenant_id, VpnMetadata(**payload.model_dump()))
     except TenantNotFound as exc:
         raise HTTPException(status_code=404, detail="Tenant data plane not found") from exc
+    await session.commit()
+    await session.refresh(plane)
+    return _read(plane)
+
+
+@router.post("/{tenant_id}/storage-metadata", response_model=TenantDataPlaneRead)
+async def attach_storage_metadata(
+    tenant_id: str,
+    payload: StorageMetadataIn,
+    session: AsyncSession = Depends(get_db),
+    _: RequestContext = Depends(_require_super_admin),
+) -> TenantDataPlaneRead:
+    """Import the non-secret private-S3 outputs created by Terraform."""
+    if payload.s3_bucket_name == get_settings().s3_bucket_name:
+        raise HTTPException(status_code=422, detail="An isolated data plane cannot use the shared S3 bucket")
+    svc = TenantProvisioningService(session)
+    try:
+        plane = await svc.attach_storage_metadata(
+            tenant_id, StorageMetadata(**payload.model_dump())
+        )
+        await session.commit()
+    except TenantNotFound as exc:
+        raise HTTPException(status_code=404, detail="Tenant data plane not found") from exc
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="The bucket, access point, endpoint, KMS key, or IAM role is already bound to another tenant.",
+        ) from exc
+    await session.refresh(plane)
+    return _read(plane)
+
+
+@router.post("/{tenant_id}/provision-vdbs", response_model=TenantDataPlaneRead)
+async def provision_vdbs(
+    tenant_id: str,
+    session: AsyncSession = Depends(get_db),
+    _: RequestContext = Depends(_require_super_admin),
+) -> TenantDataPlaneRead:
+    """Provision VDBs only after the private storage probe has passed."""
+    svc = TenantProvisioningService(session)
+    try:
+        plane = await svc.get(tenant_id)
+    except TenantNotFound as exc:
+        raise HTTPException(status_code=404, detail="Tenant data plane not found") from exc
+    if plane.org_tenant_id is None:
+        raise HTTPException(status_code=409, detail="Bind an application tenant first")
+    if plane.storage_status != "ready":
+        raise HTTPException(status_code=409, detail="Private storage must validate before VDB provisioning")
+    if plane.status not in ("infrastructure_ready", "active"):
+        raise HTTPException(
+            status_code=409,
+            detail="Container, firewall, VDB path, and private storage health must pass first",
+        )
+    existing = await session.scalar(
+        select(SharedVDB).where(SharedVDB.tenant_id == plane.org_tenant_id)
+    )
+    if existing is None:
+        try:
+            await _provision_vdbs_for_tenant(
+                session,
+                org_tenant_id=plane.org_tenant_id,
+                user_id=None,
+                strict=True,
+            )
+        except (StorageIsolationError, VDBProvisioningError) as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+    plane.status = "active"
     await session.commit()
     await session.refresh(plane)
     return _read(plane)
@@ -107,7 +184,7 @@ async def provision_container(
     layout = svc.layout_for(plane)
     from app.services.tenant_compose_service import TenantComposeService
 
-    generated = TenantComposeService().generate(layout, write=False)
+    generated = TenantComposeService().generate(layout, write=False, plane=plane)
     plane.status = "container_pending"
     await session.commit()
     return ProvisionContainerResponse(
@@ -144,16 +221,24 @@ async def health_check(
     report = await TenantHealthService().check(plane, connectivity_targets=targets)
     plane.last_health_status = report.teiid_status
     plane.vpn_status = report.vpn_status
-    # Promote a pending tenant to active once its data plane is verified healthy
-    # (container reachable, firewall applied, VDB dir present). VPN tunnels may
-    # legitimately be down until the customer peer is configured.
+    plane.storage_status = report.storage_status
+    if report.storage_status == "ready":
+        plane.storage_validated_at = datetime.now(UTC)
+    else:
+        plane.storage_validated_at = None
+        if plane.status in ("active", "infrastructure_ready"):
+            plane.status = "storage_failed"
+    plane.last_health_message = report.messages.get("storage")
+    # Infrastructure health alone is not enough to activate the tenant. VDB
+    # provisioning is a separate, explicit step after storage validation.
     if (
-        plane.status in ("provisioning", "container_pending")
+        plane.status in ("provisioning", "container_pending", "storage_failed")
         and report.teiid_status == "healthy"
         and report.firewall_status == "applied"
         and report.vdb_path_status == "ok"
+        and report.storage_status == "ready"
     ):
-        plane.status = "active"
+        plane.status = "infrastructure_ready"
     await session.commit()
     return report.to_dict()
 

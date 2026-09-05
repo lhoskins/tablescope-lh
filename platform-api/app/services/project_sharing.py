@@ -55,10 +55,11 @@ class ProjectSharingService:
     ) -> None:
         self._session = session
         self._folders = folder_service or CustomerFolderService()
-        self._vdb = vdb_service or VDBManagementService()
+        self._vdb = vdb_service
 
     async def aclose(self) -> None:
-        await self._vdb.aclose()
+        if self._vdb is not None:
+            await self._vdb.aclose()
 
     async def share_project(
         self,
@@ -83,6 +84,10 @@ class ProjectSharingService:
         if tenant is None:
             raise ProjectSharingError(f"Tenant {project.tenant_id} missing")
         tenant_slug = tenant.slug
+        if self._vdb is None:
+            self._vdb = await VDBManagementService.for_org(
+                self._session, project.tenant_id
+            )
 
         shared_vdb = await self._session.scalar(
             select(SharedVDB).where(SharedVDB.tenant_id == project.tenant_id)

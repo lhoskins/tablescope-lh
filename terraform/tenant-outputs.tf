@@ -15,6 +15,7 @@ output "tenant_data_planes" {
       vpn_tunnel1_address   = m.vpn_tunnel1_address
       vpn_tunnel2_address   = m.vpn_tunnel2_address
       tenant_onprem_cidrs   = m.tenant_onprem_cidrs
+      storage               = m.storage
     }
   }
 }

@@ -32,7 +32,7 @@ from app.services.supabase_auth_service import (
     SupabaseAuthService,
     SupabaseConfigError,
 )
-from app.services.tenant_teiid_resolver import TenantTeiidResolver
+from app.services.tenant_storage_resolver import StorageIsolationError
 from app.services.vdb_management import VDBManagementService, VDBProvisioningError
 
 logger = logging.getLogger(__name__)
@@ -133,12 +133,10 @@ async def create_user(
     )
 
     # Create and deploy user VDB — target the dedicated container if bound.
-    endpoint = await TenantTeiidResolver(session).resolve_for_org(tenant_id)
-    vdb_svc = VDBManagementService(
-        servlet_url=endpoint.servlet_url,
-        pg_host=endpoint.pg_host,
-        pg_port=endpoint.pg_port,
-    )
+    try:
+        vdb_svc = await VDBManagementService.for_org(session, tenant_id)
+    except StorageIsolationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     try:
         vdb_result = await vdb_svc.create_user_vdb(
             org_id=tenant_id, user_id=user.id,
@@ -157,6 +155,8 @@ async def create_user(
         session.add(user_vdb)
         logger.info("User VDB created for user %s: %s", user.email, vdb_result.vdb_id)
     except VDBProvisioningError as exc:
+        if vdb_svc.storage_required:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         logger.warning("Failed to create user VDB for user %s: %s", user.email, exc)
     finally:
         await vdb_svc.aclose()

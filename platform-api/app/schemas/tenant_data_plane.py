@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from urllib.parse import urlparse
+
+from pydantic import BaseModel, Field, model_validator
 
 
 class TenantDataPlaneCreate(BaseModel):
     tenant_id: str = Field(..., description="Stable lowercase slug, e.g. 'acme'.")
     tenant_name: str
+    s3_region: str = Field(
+        default="us-west-1",
+        pattern=r"^[a-z]{2}(?:-gov)?-[a-z]+-\d$",
+        description="AWS region for the tenant's dedicated S3 boundary.",
+    )
     vpn_mode: str = Field(
         default="none",
         description="'none' (container-only, no VPN) or 'customer_vpn' "
@@ -74,6 +81,48 @@ class VpnMetadataIn(BaseModel):
     routing_type: str | None = None
 
 
+class StorageMetadataIn(BaseModel):
+    """Non-secret Terraform outputs that bind a plane to private S3."""
+
+    s3_bucket_name: str = Field(pattern=r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
+    s3_region: str = Field(pattern=r"^[a-z]{2}(?:-gov)?-[a-z]+-\d$")
+    s3_prefix: str = Field(default="", max_length=500)
+    s3_access_point_arn: str
+    s3_vpc_endpoint_id: str
+    s3_endpoint_url: str
+    s3_kms_key_arn: str
+    s3_role_arn: str
+    s3_force_private: bool = True
+
+    @model_validator(mode="after")
+    def validate_private_boundary(self) -> StorageMetadataIn:
+        metadata_values = (
+            self.s3_prefix,
+            self.s3_access_point_arn,
+            self.s3_endpoint_url,
+            self.s3_kms_key_arn,
+            self.s3_role_arn,
+        )
+        if any(any(char in value for char in '\r\n\t"') for value in metadata_values):
+            raise ValueError("storage metadata contains unsafe control characters")
+        endpoint = urlparse(self.s3_endpoint_url)
+        hostname = endpoint.hostname or ""
+        if endpoint.scheme != "https" or not hostname.endswith(".amazonaws.com"):
+            raise ValueError("s3_endpoint_url must be an HTTPS AWS endpoint")
+        if self.s3_vpc_endpoint_id not in hostname:
+            raise ValueError("s3_endpoint_url must name s3_vpc_endpoint_id")
+        expected_ap_prefix = f"arn:aws:s3:{self.s3_region}:"
+        if not self.s3_access_point_arn.startswith(expected_ap_prefix) or ":accesspoint/" not in self.s3_access_point_arn:
+            raise ValueError("s3_access_point_arn must be an S3 access point ARN in s3_region")
+        if not self.s3_kms_key_arn.startswith(f"arn:aws:kms:{self.s3_region}:"):
+            raise ValueError("s3_kms_key_arn must be a KMS key ARN in s3_region")
+        if not self.s3_role_arn.startswith("arn:aws:iam::") or ":role/" not in self.s3_role_arn:
+            raise ValueError("s3_role_arn must be an IAM role ARN")
+        if not self.s3_force_private:
+            raise ValueError("s3_force_private must be true for an isolated data plane")
+        return self
+
+
 class TenantDataPlaneRead(BaseModel):
     id: int
     tenant_id: str
@@ -108,6 +157,18 @@ class TenantDataPlaneRead(BaseModel):
     vpn_tunnel2_address: str | None = None
     routing_type: str | None = None
     vpn_status: str | None = None
+    storage_mode: str
+    s3_bucket_name: str | None = None
+    s3_region: str | None = None
+    s3_prefix: str = ""
+    s3_access_point_arn: str | None = None
+    s3_vpc_endpoint_id: str | None = None
+    s3_endpoint_url: str | None = None
+    s3_kms_key_arn: str | None = None
+    s3_role_arn: str | None = None
+    s3_force_private: bool = True
+    storage_status: str
+    storage_validated_at: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
 

@@ -21,8 +21,10 @@ import httpx
 
 from app.config import get_settings
 from app.models.tenant_data_plane import TenantDataPlane
+from app.services.s3_storage import S3StorageService
 from app.services.tenant_firewall_service import FIREWALL_CONFIG_DIR
 from app.services.tenant_layout import TEIID_MGMT_CONTAINER_PORT, compute_layout
+from app.services.tenant_storage_resolver import StorageBinding
 
 
 @dataclass(slots=True)
@@ -39,6 +41,7 @@ class TenantHealthReport:
     teiid_status: str
     firewall_status: str
     vdb_path_status: str
+    storage_status: str
     connectivity_tests: list[ConnectivityTest] = field(default_factory=list)
     messages: dict[str, str] = field(default_factory=dict)
 
@@ -63,6 +66,7 @@ class TenantHealthService:
             teiid_status="unknown",
             firewall_status="unknown",
             vdb_path_status="unknown",
+            storage_status="unknown",
         )
 
         await asyncio.gather(
@@ -71,11 +75,49 @@ class TenantHealthService:
         )
         self._check_vdb_path(plane, report)
         self._check_firewall(plane, report)
+        await self._check_storage(plane, report)
 
         for target in connectivity_targets or []:
             report.connectivity_tests.append(await self._probe_tcp(target))
 
         return report
+
+    async def _check_storage(self, plane: TenantDataPlane, report: TenantHealthReport) -> None:
+        required = (
+            plane.s3_bucket_name,
+            plane.s3_region,
+            plane.s3_access_point_arn,
+            plane.s3_vpc_endpoint_id,
+            plane.s3_endpoint_url,
+            plane.s3_kms_key_arn,
+            plane.s3_role_arn,
+        )
+        if not all(required) or not plane.s3_force_private:
+            report.storage_status = "unconfigured"
+            report.messages["storage"] = "private S3 metadata is incomplete"
+            return
+        assert plane.s3_bucket_name and plane.s3_region
+        binding = StorageBinding(
+            bucket_name=plane.s3_bucket_name,
+            region=plane.s3_region,
+            prefix=plane.s3_prefix or "",
+            local_base=__import__("pathlib").Path(plane.vdb_host_path),
+            access_point_arn=plane.s3_access_point_arn,
+            vpc_endpoint_id=plane.s3_vpc_endpoint_id,
+            endpoint_url=plane.s3_endpoint_url,
+            kms_key_arn=plane.s3_kms_key_arn,
+            role_arn=plane.s3_role_arn,
+            force_private=True,
+            dedicated=True,
+        )
+        try:
+            await asyncio.to_thread(
+                lambda: S3StorageService(binding).validate_private_boundary()
+            )
+            report.storage_status = "ready"
+        except Exception as exc:
+            report.storage_status = "validation_failed"
+            report.messages["storage"] = str(exc)
 
     async def _check_vpn(self, plane: TenantDataPlane, report: TenantHealthReport) -> None:
         if plane.vpn_mode == "none":

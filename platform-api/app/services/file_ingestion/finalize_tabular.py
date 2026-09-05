@@ -79,11 +79,7 @@ async def _ensure_user_vdb(
     vdb_id = await asyncio.to_thread(_pick_vdb_id)
 
     if vdb_id is None:
-        vdb_svc = VDBManagementService(
-            servlet_url=getattr(endpoint, "servlet_url", None) or None,
-            pg_host=getattr(endpoint, "pg_host", None) or None,
-            pg_port=getattr(endpoint, "pg_port", None) or None,
-        )
+        vdb_svc = await VDBManagementService.for_org(session, tenant_id)
         try:
             result = await vdb_svc.create_user_vdb(
                 org_id=tenant_id, user_id=user_id
@@ -114,6 +110,7 @@ async def _ensure_user_vdb(
 
 
 async def _deploy_remote_view(
+    session: AsyncSession,
     endpoint: Any,
     user_vdb: Any,
     *,
@@ -166,11 +163,7 @@ async def _deploy_remote_view(
 
     await asyncio.to_thread(_edit_and_write)
 
-    vdb_svc = VDBManagementService(
-        servlet_url=getattr(endpoint, "servlet_url", None) or None,
-        pg_host=getattr(endpoint, "pg_host", None) or None,
-        pg_port=getattr(endpoint, "pg_port", None) or None,
-    )
+    vdb_svc = await VDBManagementService.for_org(session, tenant_id)
     try:
         # Pass the path as the Teiid servlet sees it. For dedicated tenant
         # containers the VDB volume is mounted at a different host path than
@@ -295,6 +288,7 @@ async def finalize_tabular_import(
 
     if job.live_source_params is not None:
         teiid_result = await _deploy_remote_view(
+            session,
             endpoint,
             user_vdb,
             data_source_id=meta.id,
@@ -336,6 +330,27 @@ async def finalize_tabular_import(
         )
         if "error" in teiid_result:
             raise FileImportError("TEIID_IMPORT_FAILED", str(teiid_result["error"]))
+
+        from app.services.s3_storage import S3StorageService
+        from app.services.tenant_storage_resolver import TenantStorageResolver
+
+        binding = await TenantStorageResolver(session).resolve_for_org(tenant_id)
+        if get_settings().s3_enabled or binding.dedicated:
+            storage = S3StorageService(binding)
+            local_upload = binding.local_base / str(tenant_id) / str(user.id) / "uploads" / final_filename
+            storage.upload_file(
+                str(local_upload),
+                storage.get_s3_key_for_upload(tenant_id, user.id, final_filename),
+            )
+            vdb_dir = binding.local_base / str(tenant_id) / str(user.id) / "vdb"
+            synced = storage.sync_local_to_s3(
+                str(vdb_dir), f"customers/{tenant_id}/{user.id}/vdb"
+            )
+            if binding.dedicated and synced == 0:
+                raise FileImportError(
+                    "PRIVATE_STORAGE_FAILED",
+                    "Teiid did not produce a VDB XML file for private storage.",
+                )
 
     apply_provenance(meta, job)
     await session.flush()
