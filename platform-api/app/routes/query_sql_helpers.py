@@ -32,6 +32,43 @@ from app.services.teiid_sql import (
 logger = logging.getLogger(__name__)
 
 
+class SourceReauthRequiredError(Exception):
+    """A live query failed because a Google Sheets source's stored OAuth
+    credential is no longer valid, per Teiid's own token-refresh attempt.
+
+    Distinct from every other Teiid failure this module maps to a bare 502:
+    the caller can resolve ``file_source_meta_id`` back to the owning
+    ``ConnectorCredential`` and prompt reconnection instead of dead-ending on
+    a raw engine error string (see ``query.py``'s ``query_datasource``).
+    """
+
+    def __init__(self, message: str, *, file_source_meta_id: int | None) -> None:
+        super().__init__(message)
+        self.file_source_meta_id = file_source_meta_id
+
+
+# Teiid names a Google Sheets datasource ``ds_<file_source_meta.id>_google-sheets``
+# (see ``teiid_registration_service.naming.generate_teiid_names``); the id is
+# ours by construction, so a failure Teiid reports against that source names
+# the exact FileSourceMeta row to resolve back to a credential. Restricted to
+# messages that also look auth-related (Teiid's own resource adapter refreshes
+# the token internally and surfaces the rejection inline, worded however that
+# adapter chooses to) so an unrelated failure against the same source -- a
+# network blip, a malformed query -- is never misreported as a reauth prompt.
+_GOOGLE_SHEETS_DS_RE = re.compile(r"\bds_(\d+)_google-sheets\b", re.IGNORECASE)
+_REAUTH_HINT_RE = re.compile(
+    r"token|refresh|invalid_grant|unauthoriz|credential", re.IGNORECASE
+)
+
+
+def _google_sheets_reauth_source_id(err: str) -> int | None:
+    """Return the ``FileSourceMeta.id`` a Google Sheets auth failure names, if any."""
+    if not _REAUTH_HINT_RE.search(err):
+        return None
+    match = _GOOGLE_SHEETS_DS_RE.search(err)
+    return int(match.group(1)) if match else None
+
+
 async def _resolve_vdb_database(
     *,
     session: AsyncSession,
@@ -179,8 +216,19 @@ async def _run_sql(
                     await asyncio.sleep(2)
                 continue
             logger.error("Query against database %s failed: %s", database, exc)
+            source_id = _google_sheets_reauth_source_id(err_msg)
+            if source_id is not None:
+                raise SourceReauthRequiredError(
+                    err_msg, file_source_meta_id=source_id
+                ) from exc
             raise HTTPException(status_code=502, detail=f"Query failed: {exc}") from exc
     else:
+        last_err_msg = str(last_exc)
+        source_id = _google_sheets_reauth_source_id(last_err_msg)
+        if source_id is not None:
+            raise SourceReauthRequiredError(
+                last_err_msg, file_source_meta_id=source_id
+            ) from last_exc
         raise HTTPException(status_code=502, detail=f"Query failed: {last_exc}") from last_exc
 
     if records:

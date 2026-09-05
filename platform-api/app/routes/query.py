@@ -18,9 +18,11 @@ from app.auth.context import RequestContext
 from app.auth.membership import require_membership
 from app.auth.rbac import Role, require_role
 from app.database import SessionLocal
+from app.models.file_source_meta import FileSourceMeta
 from app.routes.ai_proxy_shared import _authorize_project_access
 from app.routes.dashboards_widget_query import WidgetFilter, _build_where
 from app.routes.query_sql_helpers import (
+    SourceReauthRequiredError,
     _auto_cast_aggregates,
     _cast_timestampdiff,
     _execute_sql_with_repair,
@@ -88,6 +90,50 @@ def _replace_source_labels(sql: str, mapping: dict[str, str]) -> str:
         return f'"{escaped}"'
 
     return _SOURCE_LABEL_RE.sub(_repl, sql)
+
+
+#: Matches the frontend's existing ``payload.detail.code`` convention
+#: (``lib/api-client.ts``) and the same value used by the Google Drive/SaaS
+#: connector routes (``spreadsheet_connections.py``, ``saas_sources.py``) --
+#: kept as a separate constant here to avoid a cross-route import.
+CONNECTOR_REAUTH_REQUIRED = "CONNECTOR_REAUTH_REQUIRED"
+
+
+async def _reauth_required_error(exc: SourceReauthRequiredError) -> HTTPException:
+    """Convert a live Google Sheets auth failure into the same structured
+    reauth prompt the browse-time connector routes already return, so a
+    "click on a table" preview can trigger reconnection instead of
+    dead-ending on Teiid's raw error text.
+
+    Resolves the failing source back to its ``ConnectorCredential`` (stored
+    on the ``FileSourceMeta`` row at registration time) when possible, so the
+    frontend can scope the reauthorize flow to the right connection; falls
+    back to a reauth prompt with no credential id if that lookup fails for
+    any reason (a stale/deleted source row should never turn this back into
+    a dead-end 502).
+    """
+    credential_id: int | None = None
+    if exc.file_source_meta_id is not None:
+        try:
+            async with SessionLocal() as session:
+                source = await session.get(FileSourceMeta, exc.file_source_meta_id)
+                if source is not None:
+                    credential_id = (source.live_source_params or {}).get(
+                        "connector_credential_id"
+                    )
+        except Exception:  # pragma: no cover - best-effort lookup
+            logger.warning(
+                "Failed to resolve credential for reauth-required source %s",
+                exc.file_source_meta_id,
+                exc_info=True,
+            )
+    detail: dict[str, Any] = {
+        "code": CONNECTOR_REAUTH_REQUIRED,
+        "message": "Google Drive access has expired. Reconnect to continue.",
+    }
+    if credential_id is not None:
+        detail["credentialId"] = credential_id
+    return HTTPException(status_code=409, detail=detail)
 
 
 # Extract table/view names referenced in a SQL statement so we can sample only
@@ -287,20 +333,23 @@ async def query_datasource(
                 status_code=400, detail="project_id is required when executing SQL"
             )
         rewritten_sql = _replace_source_labels(payload.sql, source_label_map)
-        result, final_sql, _ = await _execute_sql_with_repair(
-            raw_sql=_apply_global_filters(rewritten_sql, payload.global_filters),
-            tenant_id=context.tenant_id,
-            user_id=context.user_id,
-            project_id=project_id,
-            database=database,
-            endpoint=endpoint,
-            table_schema=table_schema,
-            allowed_tables=allowed_tables,
-            column_types=column_types,
-            column_samples=column_samples,
-            limit=payload.limit,
-            offset=payload.offset,
-        )
+        try:
+            result, final_sql, _ = await _execute_sql_with_repair(
+                raw_sql=_apply_global_filters(rewritten_sql, payload.global_filters),
+                tenant_id=context.tenant_id,
+                user_id=context.user_id,
+                project_id=project_id,
+                database=database,
+                endpoint=endpoint,
+                table_schema=table_schema,
+                allowed_tables=allowed_tables,
+                column_types=column_types,
+                column_samples=column_samples,
+                limit=payload.limit,
+                offset=payload.offset,
+            )
+        except SourceReauthRequiredError as exc:
+            raise await _reauth_required_error(exc) from exc
     else:
         if project_id is not None and allowed_tables and payload.tableName not in allowed_tables:
             raise HTTPException(
@@ -308,12 +357,15 @@ async def query_datasource(
                 detail=f"Unauthorized table reference: {payload.tableName}",
             )
         final_sql = f'SELECT * FROM "{payload.tableName}" LIMIT {payload.limit} OFFSET {payload.offset}'
-        result = await _run_sql(
-            database=database,
-            sql=final_sql,
-            teiid_host=endpoint.pg_host,
-            teiid_port=endpoint.pg_port,
-        )
+        try:
+            result = await _run_sql(
+                database=database,
+                sql=final_sql,
+                teiid_host=endpoint.pg_host,
+                teiid_port=endpoint.pg_port,
+            )
+        except SourceReauthRequiredError as exc:
+            raise await _reauth_required_error(exc) from exc
 
     if result is None:
         raise HTTPException(status_code=502, detail=f"Query failed: {final_sql}")

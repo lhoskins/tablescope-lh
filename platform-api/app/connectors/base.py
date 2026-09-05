@@ -23,7 +23,18 @@ RAW_JSON_KEY = "raw_json"
 
 
 class SaasConnectorError(Exception):
-    """User-facing connector failure (safe message, never leaks secrets)."""
+    """User-facing connector failure (safe message, never leaks secrets).
+
+    ``requires_reauth`` marks a connection failure that the stored
+    credential itself cannot recover from -- an expired/revoked OAuth token
+    or rejected username/password -- as opposed to a transient/network
+    error. A caller uses this to prompt the user to reconnect the
+    connector instead of surfacing a dead-end error.
+    """
+
+    def __init__(self, message: str, *, requires_reauth: bool = False) -> None:
+        super().__init__(message)
+        self.requires_reauth = requires_reauth
 
 
 @dataclass(frozen=True)

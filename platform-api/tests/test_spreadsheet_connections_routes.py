@@ -361,3 +361,228 @@ async def test_detect_tables_finds_multiple_tables(client, service_headers, monk
     list_body = r.json()
     assert len(list_body["files"]) == 1
     assert len(list_body["files"][0]["tables"]) == 2
+
+
+async def test_list_files_reports_reauth_required_when_refresh_is_rejected(
+    client, service_headers, monkeypatch
+):
+    """Live finding: a revoked/expired refresh token surfaced as a generic
+    502 with no way for the frontend to distinguish it from any other
+    transient failure. It must come back as a structured, detectable error
+    instead."""
+    import app.routes.spreadsheet_connections as sc
+    import app.services.google_drive.oauth as gd_oauth
+
+    tenant, user, headers = await _setup(client, service_headers, "gd-reauth-refresh")
+    monkeypatch.setattr(sc, "_require_feature_enabled", lambda: None)
+
+    state = gd_oauth.create_state_token(tenant_id=tenant["id"], user_id=user["id"])
+
+    async def fake_exchange(*, code):
+        # Already expired, so the next call must refresh.
+        return {"access_token": "stale-at", "refresh_token": "rt", "expires_at": 1.0}
+
+    monkeypatch.setattr(sc.gd, "exchange_code_for_tokens", fake_exchange)
+    r = await client.post(
+        "/api/spreadsheet-connections/callback",
+        json={"code": "c", "state": state},
+        headers=headers,
+    )
+    connection_id = r.json()["id"]
+
+    async def fake_refresh(*, refresh_token):
+        raise sc.gd.GoogleOAuthError(
+            "Google rejected the refresh token.", requires_reauth=True
+        )
+
+    monkeypatch.setattr(sc.gd, "refresh_access_token", fake_refresh)
+
+    r = await client.get(
+        f"/api/spreadsheet-connections/{connection_id}/files", headers=headers
+    )
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["code"] == "CONNECTOR_REAUTH_REQUIRED"
+
+
+async def test_list_files_reports_reauth_required_on_a_401_after_refresh(
+    client, service_headers, monkeypatch
+):
+    """Even after a *successful* token refresh, Drive itself can still
+    reject the access token with a 401 (e.g. the user revoked Tablescope's
+    access in their Google Account) -- this must also be detectable, not a
+    generic 502."""
+    import app.routes.spreadsheet_connections as sc
+    import app.services.google_drive.oauth as gd_oauth
+
+    tenant, user, headers = await _setup(client, service_headers, "gd-reauth-401")
+    monkeypatch.setattr(sc, "_require_feature_enabled", lambda: None)
+
+    state = gd_oauth.create_state_token(tenant_id=tenant["id"], user_id=user["id"])
+
+    async def fake_exchange(*, code):
+        return {"access_token": "at", "refresh_token": "rt", "expires_at": 9e15}
+
+    monkeypatch.setattr(sc.gd, "exchange_code_for_tokens", fake_exchange)
+    r = await client.post(
+        "/api/spreadsheet-connections/callback",
+        json={"code": "c", "state": state},
+        headers=headers,
+    )
+    connection_id = r.json()["id"]
+
+    class _FakeClient:
+        def __init__(self, access_token):
+            pass
+
+        async def list_supported_files(self, page_token=None):
+            raise sc.gd.GoogleDriveError(
+                "Google access token is expired or invalid.", requires_reauth=True
+            )
+
+    monkeypatch.setattr(sc.gd, "GoogleDriveClient", _FakeClient)
+
+    r = await client.get(
+        f"/api/spreadsheet-connections/{connection_id}/files", headers=headers
+    )
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["code"] == "CONNECTOR_REAUTH_REQUIRED"
+
+
+async def test_no_refresh_token_reports_reauth_required(client, service_headers, monkeypatch):
+    import app.routes.spreadsheet_connections as sc
+    import app.services.google_drive.oauth as gd_oauth
+
+    tenant, user, headers = await _setup(client, service_headers, "gd-no-refresh")
+    monkeypatch.setattr(sc, "_require_feature_enabled", lambda: None)
+
+    state = gd_oauth.create_state_token(tenant_id=tenant["id"], user_id=user["id"])
+
+    async def fake_exchange(*, code):
+        # No refresh_token at all (can happen if Google didn't grant one).
+        return {"access_token": "stale-at", "expires_at": 1.0}
+
+    monkeypatch.setattr(sc.gd, "exchange_code_for_tokens", fake_exchange)
+    r = await client.post(
+        "/api/spreadsheet-connections/callback",
+        json={"code": "c", "state": state},
+        headers=headers,
+    )
+    connection_id = r.json()["id"]
+
+    r = await client.get(
+        f"/api/spreadsheet-connections/{connection_id}/files", headers=headers
+    )
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["code"] == "CONNECTOR_REAUTH_REQUIRED"
+
+
+async def test_reauthorize_with_credential_id_updates_the_existing_connection(
+    client, service_headers, monkeypatch
+):
+    """Reconnecting a broken connection (Create Data Source -> reauthorize)
+    must update the SAME ConnectorCredential row in place, not create a
+    second, duplicate connection -- every already-created data source still
+    points at the same connection id afterwards."""
+    import app.routes.spreadsheet_connections as sc
+    import app.services.google_drive.oauth as gd_oauth
+
+    tenant, user, headers = await _setup(client, service_headers, "gd-reconnect")
+    monkeypatch.setattr(sc, "_require_feature_enabled", lambda: None)
+    monkeypatch.setattr(sc.gd, "is_configured", lambda: True)
+    monkeypatch.setattr(
+        sc.gd, "build_authorization_url", lambda *, state: f"https://accounts.google.com/auth?state={state}"
+    )
+
+    # Original (now-broken) connection.
+    state = gd_oauth.create_state_token(tenant_id=tenant["id"], user_id=user["id"])
+
+    async def fake_exchange_1(*, code):
+        return {"access_token": "old-at", "refresh_token": "old-rt", "expires_at": 9e15}
+
+    monkeypatch.setattr(sc.gd, "exchange_code_for_tokens", fake_exchange_1)
+    r = await client.post(
+        "/api/spreadsheet-connections/callback",
+        json={"code": "c1", "state": state},
+        headers=headers,
+    )
+    connection_id = r.json()["id"]
+
+    # Reauthorize that SAME connection.
+    r = await client.post(
+        "/api/spreadsheet-connections/authorize",
+        json={"credential_id": connection_id},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    reauth_state = r.json()["state"]
+
+    async def fake_exchange_2(*, code):
+        assert code == "c2"
+        return {"access_token": "new-at", "refresh_token": "new-rt", "expires_at": 9e15}
+
+    monkeypatch.setattr(sc.gd, "exchange_code_for_tokens", fake_exchange_2)
+    r = await client.post(
+        "/api/spreadsheet-connections/callback",
+        json={"code": "c2", "state": reauth_state},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["id"] == connection_id
+
+    # Still exactly one connection -- no duplicate created.
+    r = await client.get("/api/spreadsheet-connections", headers=headers)
+    assert r.status_code == 200
+    assert len(r.json()) == 1
+
+    # And the new token is what's actually used now.
+    captured: dict = {}
+
+    class _FakeClient:
+        def __init__(self, access_token):
+            captured["access_token"] = access_token
+
+        async def list_supported_files(self, page_token=None):
+            return {"files": []}
+
+    monkeypatch.setattr(sc.gd, "GoogleDriveClient", _FakeClient)
+
+    r = await client.get(
+        f"/api/spreadsheet-connections/{connection_id}/files", headers=headers
+    )
+    assert r.status_code == 200, r.text
+    assert captured["access_token"] == "new-at"
+
+
+async def test_reauthorize_with_credential_id_for_another_tenant_is_rejected(
+    client, service_headers, monkeypatch
+):
+    import app.routes.spreadsheet_connections as sc
+    import app.services.google_drive.oauth as gd_oauth
+
+    tenant_a, user_a, headers_a = await _setup(client, service_headers, "gd-reconnect-tenant-a")
+    _tenant_b, _user_b, headers_b = await _setup(client, service_headers, "gd-reconnect-tenant-b")
+    monkeypatch.setattr(sc, "_require_feature_enabled", lambda: None)
+    monkeypatch.setattr(sc.gd, "is_configured", lambda: True)
+    monkeypatch.setattr(
+        sc.gd, "build_authorization_url", lambda *, state: f"https://accounts.google.com/auth?state={state}"
+    )
+
+    state = gd_oauth.create_state_token(tenant_id=tenant_a["id"], user_id=user_a["id"])
+
+    async def fake_exchange(*, code):
+        return {"access_token": "at", "refresh_token": "rt", "expires_at": 9e15}
+
+    monkeypatch.setattr(sc.gd, "exchange_code_for_tokens", fake_exchange)
+    r = await client.post(
+        "/api/spreadsheet-connections/callback",
+        json={"code": "c", "state": state},
+        headers=headers_a,
+    )
+    connection_id = r.json()["id"]
+
+    r = await client.post(
+        "/api/spreadsheet-connections/authorize",
+        json={"credential_id": connection_id},
+        headers=headers_b,
+    )
+    assert r.status_code == 404

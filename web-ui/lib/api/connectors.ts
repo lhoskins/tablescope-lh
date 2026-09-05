@@ -178,10 +178,12 @@ export interface AuthorizeSpreadsheetResponse {
   state: string;
 }
 
-export function authorizeGoogleSheets(): Promise<AuthorizeSpreadsheetResponse> {
+export function authorizeGoogleSheets(
+  credentialId?: number,
+): Promise<AuthorizeSpreadsheetResponse> {
   return apiClient.post<AuthorizeSpreadsheetResponse>(
     "/api/spreadsheet-connections/authorize",
-    {},
+    credentialId != null ? { credential_id: credentialId } : {},
   );
 }
 

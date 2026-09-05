@@ -27,13 +27,31 @@ function getApiUrl(): string {
   return getApiBaseUrl();
 }
 
-/** Error carrying the HTTP status so callers can branch on 403/404/etc. */
+/** Error carrying the HTTP status so callers can branch on 403/404/etc.
+ *
+ * `code` is the structured `detail.code` a backend error can carry (e.g.
+ * `"CONNECTOR_REAUTH_REQUIRED"`) so a caller can branch reliably instead of
+ * parsing English error text. `null` when the backend didn't send one.
+ *
+ * `credentialId` is the connector credential a `CONNECTOR_REAUTH_REQUIRED`
+ * error names (e.g. from a live Google Sheets query failing through Teiid),
+ * so a caller can scope a reconnect flow to the right connection without a
+ * second lookup. `null` when the backend didn't send one. */
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  code: string | null;
+  credentialId: number | null;
+  constructor(
+    message: string,
+    status: number,
+    code: string | null = null,
+    credentialId: number | null = null,
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.code = code;
+    this.credentialId = credentialId;
   }
 }
 
@@ -200,6 +218,7 @@ async function request<T>(
   if (!response.ok) {
     let detail = `Request failed: ${response.status}`;
     let code: string | null = null;
+    let credentialId: number | null = null;
     try {
       const payload = await response.json();
       code = payload?.code ?? payload?.error ?? null;
@@ -210,8 +229,15 @@ async function request<T>(
           // Pydantic 422 returns [{loc, msg, ...}, ...]
           detail = payload.detail.map((e: { msg?: string }) => e.msg ?? JSON.stringify(e)).join("; ");
         } else {
-          detail = JSON.stringify(payload.detail);
-          code = code ?? (payload.detail as { code?: string })?.code ?? null;
+          const detailObj = payload.detail as {
+            code?: string;
+            message?: string;
+            credentialId?: number;
+          };
+          code = code ?? detailObj?.code ?? null;
+          credentialId = detailObj?.credentialId ?? null;
+          detail =
+            typeof detailObj?.message === "string" ? detailObj.message : JSON.stringify(payload.detail);
         }
       }
     } catch {
@@ -223,7 +249,7 @@ async function request<T>(
     if (isAuthExpiry(response.status, code)) {
       redirectToLogin();
     }
-    throw new ApiError(detail, response.status);
+    throw new ApiError(detail, response.status, code, credentialId);
   }
 
   if (response.status === 204) {

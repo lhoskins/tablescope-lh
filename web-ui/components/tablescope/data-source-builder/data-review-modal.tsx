@@ -1,13 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { IconLoader2, IconX } from "@tabler/icons-react";
+import { Button } from "@/components/ui/button";
+import { ApiError } from "@/lib/api-client";
 import {
   previewCreatedSource,
   previewDbTable,
   type TablePreviewResult,
 } from "@/lib/api/data-source-builder";
 import { useBuilderStore } from "@/lib/stores/data-source-builder-store";
+import { GoogleSheetsConnectionModal } from "@/components/tablescope/database-connectors/google-sheets-connection-modal";
 import type { FlatItem } from "./flatten";
 
 function cell(value: unknown): string {
@@ -44,24 +47,34 @@ export function DataReviewModal({
   const [data, setData] = useState<TablePreviewResult | null>(null);
   const [loading, setLoading] = useState(!(item.isFile && !isExisting));
   const [error, setError] = useState<string | null>(null);
+  const [needsReauth, setNeedsReauth] = useState(false);
+  const [reauthId, setReauthId] = useState<number | null>(null);
+  const [reauthorizing, setReauthorizing] = useState(false);
 
-  useEffect(() => {
+  const loadPreview = useCallback(() => {
     let cancelled = false;
 
     // New file upload in this session: use the locally detected fields.
     if (item.isFile && !source?.existing) {
       setData(filePreview(source?.previewFields ?? []));
       setLoading(false);
-      return;
+      return () => {};
     }
-    if (!source) return;
+    if (!source) return () => {};
 
     setLoading(true);
     setError(null);
+    setNeedsReauth(false);
+    setReauthId(null);
 
     const onError = (err: unknown) => {
-      if (!cancelled)
-        setError(err instanceof Error ? err.message : "Could not load data");
+      if (cancelled) return;
+      if (err instanceof ApiError && err.code === "CONNECTOR_REAUTH_REQUIRED") {
+        setNeedsReauth(true);
+        setReauthId(err.credentialId);
+        return;
+      }
+      setError(err instanceof Error ? err.message : "Could not load data");
     };
     const onDone = () => {
       if (!cancelled) setLoading(false);
@@ -109,6 +122,8 @@ export function DataReviewModal({
     };
   }, [item, source]);
 
+  useEffect(() => loadPreview(), [loadPreview]);
+
   const hasRows = (data?.rows.length ?? 0) > 0;
 
   return (
@@ -141,6 +156,16 @@ export function DataReviewModal({
           {loading ? (
             <div className="flex items-center gap-2 py-10 text-small text-ink-tertiary">
               <IconLoader2 size={16} className="animate-spin" /> Loading data…
+            </div>
+          ) : needsReauth ? (
+            <div className="flex flex-col items-center gap-3 py-10 text-center">
+              <p className="max-w-sm text-small text-ink-secondary">
+                Google Drive access has expired for this data source. Reauthorize to
+                load a preview.
+              </p>
+              <Button variant="primary" onClick={() => setReauthorizing(true)}>
+                Reauthorize Google Drive
+              </Button>
             </div>
           ) : error ? (
             <div className="rounded-md border border-danger/40 bg-danger-bg/40 px-3 py-2 text-[12px] text-danger">
@@ -205,6 +230,17 @@ export function DataReviewModal({
             : "Preview"}
         </div>
       </div>
+
+      {reauthorizing && (
+        <GoogleSheetsConnectionModal
+          credentialId={reauthId ?? undefined}
+          onClose={() => setReauthorizing(false)}
+          onSaved={() => {
+            setReauthorizing(false);
+            loadPreview();
+          }}
+        />
+      )}
     </div>
   );
 }

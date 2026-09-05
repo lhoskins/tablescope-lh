@@ -101,6 +101,13 @@ def _safe_error(exc: Exception) -> str:
     return "QuickBooks request failed."
 
 
+def _connector_error(exc: Exception) -> SaasConnectorError:
+    requires_reauth = (
+        isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (401, 403)
+    )
+    return SaasConnectorError(_safe_error(exc), requires_reauth=requires_reauth)
+
+
 class QuickBooksConnector(SaasConnector):
     connector_type = "quickbooks"
 
@@ -148,7 +155,7 @@ class QuickBooksConnector(SaasConnector):
             raise
         except Exception as exc:
             logger.warning("QuickBooks query failed: %s", exc)
-            raise SaasConnectorError(_safe_error(exc)) from exc
+            raise _connector_error(exc) from exc
 
     async def test_connection(self, config: dict) -> dict:
         base = self._base_url(config)
@@ -166,7 +173,7 @@ class QuickBooksConnector(SaasConnector):
             raise
         except Exception as exc:
             logger.warning("QuickBooks test_connection failed: %s", exc)
-            raise SaasConnectorError(_safe_error(exc)) from exc
+            raise _connector_error(exc) from exc
         info = data.get("CompanyInfo", {}) or {}
         return {
             "company_name": info.get("CompanyName"),

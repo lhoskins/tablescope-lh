@@ -53,6 +53,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/saas-sources", tags=["saas-sources"])
 
 
+#: Matches the frontend's existing ``payload.detail.code`` convention
+#: (``lib/api-client.ts``), so a caller can reliably branch on this without
+#: parsing English error text. Shared with the Google Drive connector
+#: (``spreadsheet_connections.CONNECTOR_REAUTH_REQUIRED``) -- same value,
+#: kept as a separate constant here to avoid a cross-route import.
+CONNECTOR_REAUTH_REQUIRED = "CONNECTOR_REAUTH_REQUIRED"
+
+
+def _saas_http_error(exc: SaasConnectorError) -> HTTPException:
+    """Structured error the frontend can reliably detect to prompt
+    reconnecting/re-entering credentials for this connector from the same
+    place the user hit the failure, instead of a dead-end error message."""
+    if exc.requires_reauth:
+        return HTTPException(
+            status_code=409,
+            detail={"code": CONNECTOR_REAUTH_REQUIRED, "message": str(exc)},
+        )
+    return HTTPException(status_code=400, detail=str(exc))
+
+
 @router.get("/connectors")
 async def list_connectors(
     context: RequestContext = Depends(require_role(Role.VIEWER)),
@@ -200,7 +220,7 @@ async def list_objects(
     try:
         objects = await connector.list_objects(decrypt_config(cred))
     except SaasConnectorError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise _saas_http_error(exc) from exc
     return {"objects": [{"name": o.name, "label": o.label} for o in objects]}
 
 
@@ -217,7 +237,7 @@ async def list_fields(
     try:
         fields = await connector.list_fields(decrypt_config(cred), body.object_type)
     except SaasConnectorError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise _saas_http_error(exc) from exc
     return {
         "fields": [
             {
@@ -249,7 +269,7 @@ async def preview(
             limit=body.limit,
         )
     except SaasConnectorError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise _saas_http_error(exc) from exc
     return {"columns": result.columns, "rows": result.rows}
 
 
@@ -281,7 +301,7 @@ async def create_source(
     except SaasSourceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except SaasConnectorError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise _saas_http_error(exc) from exc
 
     # Kick off the initial sync in the background (best-effort enqueue).
     enqueued = False
@@ -347,7 +367,7 @@ async def sync_source(
         except SaasSourceError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except SaasConnectorError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise _saas_http_error(exc) from exc
 
     enqueued = False
     try:

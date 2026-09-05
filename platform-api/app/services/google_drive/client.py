@@ -38,7 +38,18 @@ _FILE_FIELDS = "id,name,mimeType,owners,modifiedTime,shared,driveId"
 
 
 class GoogleDriveError(Exception):
-    """Raised when the Drive/Sheets API rejects or fails a request."""
+    """Raised when the Drive/Sheets API rejects or fails a request.
+
+    ``requires_reauth`` marks a 401 -- the access token is expired/invalid
+    even though it was refreshed moments ago, meaning the underlying grant
+    itself is no longer valid (e.g. the user revoked Tablescope's access in
+    their Google Account) -- so a caller can prompt reconnection instead of
+    surfacing a dead-end error.
+    """
+
+    def __init__(self, message: str, *, requires_reauth: bool = False) -> None:
+        super().__init__(message)
+        self.requires_reauth = requires_reauth
 
 
 class GoogleDriveClient:
@@ -62,7 +73,9 @@ class GoogleDriveClient:
             except httpx.RequestError as exc:
                 raise GoogleDriveError(f"Failed to contact Google API: {exc}") from exc
         if resp.status_code == 401:
-            raise GoogleDriveError("Google access token is expired or invalid.")
+            raise GoogleDriveError(
+                "Google access token is expired or invalid.", requires_reauth=True
+            )
         if resp.status_code == 403:
             raise GoogleDriveError("Access to this Google file was denied.")
         if resp.status_code == 404:

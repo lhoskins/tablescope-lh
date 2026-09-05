@@ -66,6 +66,13 @@ def _safe_error(exc: Exception) -> str:
     return "HubSpot request failed."
 
 
+def _connector_error(exc: Exception) -> SaasConnectorError:
+    requires_reauth = (
+        isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (401, 403)
+    )
+    return SaasConnectorError(_safe_error(exc), requires_reauth=requires_reauth)
+
+
 class HubSpotConnector(SaasConnector):
     connector_type = "hubspot"
 
@@ -93,7 +100,7 @@ class HubSpotConnector(SaasConnector):
                 data = resp.json()
         except Exception as exc:
             logger.warning("HubSpot test_connection failed: %s", exc)
-            raise SaasConnectorError(_safe_error(exc)) from exc
+            raise _connector_error(exc) from exc
         return {
             "portal_id": data.get("portalId"),
             "time_zone": data.get("timeZone"),
@@ -117,7 +124,7 @@ class HubSpotConnector(SaasConnector):
                 data = resp.json()
         except Exception as exc:
             logger.warning("HubSpot list_fields failed: %s", exc)
-            raise SaasConnectorError(_safe_error(exc)) from exc
+            raise _connector_error(exc) from exc
 
         fields: list[FieldInfo] = []
         for prop in data.get("results", []):
@@ -207,7 +214,7 @@ class HubSpotConnector(SaasConnector):
             raise
         except Exception as exc:
             logger.warning("HubSpot fetch_records failed: %s", exc)
-            raise SaasConnectorError(_safe_error(exc)) from exc
+            raise _connector_error(exc) from exc
         return records
 
     def _normalize(
