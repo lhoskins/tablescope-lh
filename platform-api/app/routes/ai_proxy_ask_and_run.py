@@ -462,7 +462,9 @@ async def _generate_sql_for_question(
     # collapsing both into the same generic failure is what let an AI-server
     # outage silently resolve to a matched Insight Card instead of a clear
     # error, with no way for the caller to know that's what happened.
-    kg_context = await _kg_context(session, context, project_id, surface="query_generation")
+    kg_context = await _kg_context(
+        session, context, project_id, surface="query_generation", question=question,
+    )
     ai_result = await ai.generate_sql(
         tenant_id=context.tenant_id,
         user_id=context.user_id,
@@ -880,7 +882,9 @@ async def _forward_prose_answer(
     fall further back from, but "we could not even ask" must surface as a
     hard error instead of silently degrading to whatever fallback runs next.
     """
-    kg_context = await _kg_context(session, context, project_id, surface="query_generation")
+    kg_context = await _kg_context(
+        session, context, project_id, surface="query_generation", question=question,
+    )
     try:
         result = await ai.ask(
             tenant_id=context.tenant_id,

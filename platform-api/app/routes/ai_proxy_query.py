@@ -60,6 +60,7 @@ async def generate_sql(
 
     kg_context = await _kg_context(
         session, context, req.project_id, surface="query_generation",
+        question=req.prompt,
     )
     payload = {
         "tenant_id": context.tenant_id,

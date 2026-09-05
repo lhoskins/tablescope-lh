@@ -92,6 +92,7 @@ async def ai_suggest_dashboards(
 
     kg_context = await _kg_context(
         session, context, req.project_id, surface="dashboard_generation",
+        question=req.prompt,
     )
 
     desired = max(3, int(req.desired_count or 3))

@@ -191,6 +191,53 @@ def _neighborhood(
 
 # ── Insight cards / gaps / recommendations ───────────────────────────
 
+# KG-35: property keys excluded from contradiction comparison because they
+# are expected to differ incidentally rather than assert a fact -- free text,
+# derived/bookkeeping fields, or the key that produced the collision itself.
+_CONFLICT_IGNORED_PROPERTY_KEYS = frozenset({"graph_key", "confidence", "summary", "description"})
+
+
+def _property_conflicts(
+    kept_props: dict[str, Any],
+    dropped_props: dict[str, Any],
+    *,
+    dropped_source_type: Any,
+    dropped_source_id: Any,
+) -> list[dict[str, Any]]:
+    """KG-35: two colliding nodes proven to come from different sources may
+    still just be a provenance mismatch (KG-26 already logs that) -- but when
+    they also disagree on a shared scalar property, that's contradictory
+    evidence about the same real-world entity, not just noise.
+
+    Deliberately conservative: only shared scalar (non-list/dict, non-null)
+    property keys are compared, and free-text/bookkeeping keys that are
+    expected to differ incidentally are excluded (see
+    ``_CONFLICT_IGNORED_PROPERTY_KEYS``). This only flags disagreement; it
+    does not attempt to decide which source is correct.
+    """
+    conflicts: list[dict[str, Any]] = []
+    for key, kept_value in kept_props.items():
+        if key in _CONFLICT_IGNORED_PROPERTY_KEYS:
+            continue
+        if isinstance(kept_value, (list, dict)) or kept_value is None:
+            continue
+        if key not in dropped_props:
+            continue
+        dropped_value = dropped_props[key]
+        if isinstance(dropped_value, (list, dict)) or dropped_value is None:
+            continue
+        if kept_value == dropped_value:
+            continue
+        conflicts.append({
+            "key": key,
+            "keptValue": kept_value,
+            "conflictingValue": dropped_value,
+            "conflictingSourceType": dropped_source_type,
+            "conflictingSourceId": dropped_source_id,
+        })
+    return conflicts
+
+
 def merge_graph_sources(
     stored_nodes: list[dict[str, Any]],
     stored_edges: list[dict[str, Any]],
@@ -234,6 +281,23 @@ def merge_graph_sources(
                     existing.get("id"), existing.get("source_type"), existing.get("source_id"),
                     n.get("id"), n.get("source_type"), n.get("source_id"),
                 )
+                # KG-35: a provenance mismatch alone isn't proof the two
+                # sources disagree -- but when their shared properties also
+                # differ, surface that as a visible conflict on the
+                # surviving node instead of only a log line.
+                conflicts = _property_conflicts(
+                    _as_dict(existing.get("properties")),
+                    _as_dict(n.get("properties")),
+                    dropped_source_type=n.get("source_type"),
+                    dropped_source_id=n.get("source_id"),
+                )
+                if conflicts:
+                    existing_props = _as_dict(existing.get("properties"))
+                    prior = existing_props.get("evidence_conflicts") or []
+                    existing["properties"] = {
+                        **existing_props,
+                        "evidence_conflicts": [*prior, *conflicts],
+                    }
             id_remap[n["id"]] = existing["id"]
 
     valid_ids = {n["id"] for n in merged_nodes}

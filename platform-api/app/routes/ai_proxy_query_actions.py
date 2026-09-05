@@ -371,6 +371,7 @@ async def ai_generate_and_save_query(
             )
             kg_context = await _kg_context(
                 session, context, req.project_id, surface="query_generation",
+                question=req.prompt,
             )
             payload = {
                 "tenant_id": context.tenant_id,

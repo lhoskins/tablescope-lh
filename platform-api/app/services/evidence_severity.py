@@ -23,13 +23,35 @@ GUIDANCE_SEVERITY = "watch"
 REFERENCE_NODE_TYPES = frozenset({"reference_document"})
 
 
-def gate_severity(severity: str, *, has_project_evidence: bool) -> str:
-    """Cap a risk-grade severity to ``watch`` when there is no project evidence.
+def gate_severity(
+    severity: str,
+    *,
+    has_project_evidence: bool,
+    has_authoritative_non_industry_evidence: bool = False,
+) -> str:
+    """Cap a risk-grade severity to ``watch`` when there is no project
+    evidence and no authoritative company/project-tier guidance backing it.
 
-    Returns ``severity`` unchanged when there is project-specific evidence or the
-    severity is already informational/opportunity-grade.
+    KG-36: the review's own stated source-authority order ranks "approved
+    company policy" and "project documentation" above generic "industry
+    references" -- a finding resting only on a company-approved reference
+    document (or a project-tier one) is not the same as one resting only
+    on a generic industry standard, and must not be capped the same way.
+    ``has_authoritative_non_industry_evidence`` lets a caller distinguish
+    the two without this module needing to know about reference-document
+    tiers itself; callers that can't make that distinction simply omit it
+    (defaulting to the original, industry-and-company-both-capped
+    behavior).
+
+    Returns ``severity`` unchanged when there is project-specific evidence,
+    authoritative non-industry guidance, or the severity is already
+    informational/opportunity-grade.
     """
     sev = (severity or "").lower()
-    if not has_project_evidence and sev in RISK_SEVERITIES:
+    if (
+        not has_project_evidence
+        and not has_authoritative_non_industry_evidence
+        and sev in RISK_SEVERITIES
+    ):
         return GUIDANCE_SEVERITY
     return severity

@@ -75,6 +75,7 @@ async def ai_generate_and_save_dashboard(
     # Step 1 — Plan: ask the AI server for an insight-first dashboard plan.
     kg_context = await _kg_context(
         session, context, req.project_id, surface="dashboard_generation",
+        question=req.prompt,
     )
     payload = {
         "tenant_id": context.tenant_id,

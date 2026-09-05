@@ -69,6 +69,26 @@ def _dedupe(items: list[str]) -> list[str]:
     return result
 
 
+def _hops(
+    neighbors: list[tuple[dict[str, Any], dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """KG-34: an ordered, direction-aware hop per evidence edge, so a trace
+    path is a real walk (edge direction + relationship meaning per hop),
+    not only a flat list of evidence node ids. Built directly from the
+    real edges gathered for this card -- never invented -- in the same
+    order the evidence itself was gathered, so a UI can render/verify
+    each hop from the finding to its source.
+    """
+    return [
+        {
+            "fromNodeId": e["from_node_id"],
+            "toNodeId": e["to_node_id"],
+            "relationshipType": e.get("relationship_type") or "",
+        }
+        for _other, e in neighbors
+    ]
+
+
 def _evidence_has_expired_reference(
     evidence_neighbors: list[tuple[dict[str, Any], dict[str, Any]]],
 ) -> bool:
@@ -152,6 +172,7 @@ def _build_card_for_node(
             "nodeIds": evidence_node_ids,
             "edgeIds": evidence_edge_ids,
             "nodeKeys": evidence_path,
+            "hops": _hops(evidence_neighbors),
         },
     }
 
@@ -270,6 +291,7 @@ def _center_overview_card(
             "nodeIds": [center["id"], *[o["id"] for o, _e in neighbors]],
             "edgeIds": [e["id"] for _o, e in neighbors],
             "nodeKeys": [],
+            "hops": _hops(neighbors),
         },
     }
 
@@ -314,6 +336,7 @@ def _kpi_measurement_gap_card(
             "nodeIds": [center["id"], *[o["id"] for o, _e in neighbors]],
             "edgeIds": [e["id"] for _o, e in neighbors],
             "nodeKeys": [],
+            "hops": _hops(neighbors),
         },
     }
 
@@ -326,14 +349,22 @@ def _card_bundle(payload: dict[str, Any]) -> dict[str, Any]:
         "recommendedActions": payload.get("recommendedActions", []),
         "tracePaths": payload.get("tracePaths", []),
         "aiGenerated": payload.get("aiGenerated", False),
+        # KG-40: "ok" when AI enrichment produced the cards above, or
+        # "unavailable" when they're the deterministic structural fallback
+        # (see knowledge_graph_ai._clear_cards) -- persisted alongside the
+        # cards themselves so a later cache read can still tell them apart.
+        "aiEnrichmentStatus": payload.get("aiEnrichmentStatus", "ok"),
     }
 
 
 def _overlay_card_bundle(payload: dict[str, Any], bundle: dict[str, Any]) -> None:
-    """Overlay a cached AI insight-card bundle onto a freshly-built payload.
+    """Overlay a cached insight-card bundle onto a freshly-built payload.
 
-    Insight cards come solely from the cached bundle (AI-only — no deterministic
-    fallback), so a centre without grounded AI cards shows none.
+    KG-40: the bundle's own cards may themselves be a structural fallback
+    (``aiEnrichmentStatus == "unavailable"``, see ``_clear_cards``), not
+    only AI-enriched cards -- either way, whatever the bundle holds is
+    what a centre shows, since it's already the best available (grounded)
+    content for that centre.
     """
     payload["insightCards"] = bundle.get("insightCards") or []
     payload["gaps"] = bundle.get("gaps", payload["gaps"])
@@ -342,5 +373,6 @@ def _overlay_card_bundle(payload: dict[str, Any], bundle: dict[str, Any]) -> Non
     )
     payload["tracePaths"] = bundle.get("tracePaths") or []
     payload["aiGenerated"] = bool(bundle.get("aiGenerated"))
+    payload["aiEnrichmentStatus"] = bundle.get("aiEnrichmentStatus", "ok")
 
 
