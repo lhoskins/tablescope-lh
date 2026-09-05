@@ -5,7 +5,7 @@ import json
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, select
 
 from app.models import (
     Dashboard,
@@ -23,15 +23,11 @@ from app.models import (
     RepositoryScan,
     SavedQuery,
 )
-from app.models.reference_library import (
-    TIER_COMPANY,
-    TIER_INDUSTRY,
-    TIER_PROJECT,
-    ReferenceDocument,
-)
+from app.models.reference_library import ReferenceDocument
 from app.services.knowledge_graph_builder import (
     SNAPSHOT_PIPELINE_VERSION,
 )
+from app.services.knowledge_graph_context import active_reference_document_conditions
 
 from .base import LifecycleBase
 
@@ -39,16 +35,35 @@ from .base import LifecycleBase
 # ``compute_source_fingerprint`` (staleness hashing) and
 # ``current_source_watermark`` (checkpoint verification) iterate this same
 # list, so the two can no longer silently diverge on which sources count.
-_FINGERPRINT_MODELS: list[tuple[Any, str, str, str]] = [
-    (ProjectGoal, "goals", "id", "updated_at"),
-    (ProjectMetric, "metrics", "id", "updated_at"),
-    (ProjectRisk, "risks", "id", "updated_at"),
-    (DatabaseDataSource, "data_sources", "id", "updated_at"),
-    (FileSourceMeta, "file_sources", "id", "updated_at"),
-    (SavedQuery, "saved_queries", "id", "updated_at"),
-    (Dashboard, "dashboards", "id", "updated_at"),
-    (ProjectAsset, "assets", "id", "updated_at"),
+#
+# KG-14: the 5th element names the field(s) whose *content* -- not just id
+# and updated_at -- must be folded into the fingerprint. IDs and timestamps
+# alone miss a content edit that doesn't bump updated_at (a bad clock, an
+# import that preserves timestamps, direct SQL). FileSourceMeta/ProjectAsset
+# already store their own content hash (content_sha256/file_hash) computed
+# from the actual file bytes -- reused verbatim rather than re-derived.
+_FINGERPRINT_MODELS: list[tuple[Any, str, str, str, tuple[str, ...]]] = [
+    (ProjectGoal, "goals", "id", "updated_at", ("title", "description", "category", "priority", "status")),
+    (ProjectMetric, "metrics", "id", "updated_at", ("name", "description", "business_definition", "aggregation", "expression", "source_mapping")),
+    (ProjectRisk, "risks", "id", "updated_at", ("title", "description", "mitigation", "contingency", "severity")),
+    (DatabaseDataSource, "data_sources", "id", "updated_at", ("table_name", "schema_name")),
+    (FileSourceMeta, "file_sources", "id", "updated_at", ("content_sha256",)),
+    (SavedQuery, "saved_queries", "id", "updated_at", ("sql_text",)),
+    (Dashboard, "dashboards", "id", "updated_at", ("config",)),
+    (ProjectAsset, "assets", "id", "updated_at", ("file_hash",)),
 ]
+
+
+def _content_hash(row: Any, fields: tuple[str, ...]) -> str:
+    """Stable hash of the named fields' current values (KG-14)."""
+    parts: list[str] = []
+    for field in fields:
+        value = getattr(row, field, None)
+        if isinstance(value, dict | list):
+            value = json.dumps(value, sort_keys=True, default=str)
+        parts.append(str(value) if value is not None else "")
+    combined = "\x1f".join(parts)
+    return hashlib.sha256(combined.encode("utf-8")).hexdigest()
 
 
 class BootstrapMixin(LifecycleBase):
@@ -127,17 +142,19 @@ class BootstrapMixin(LifecycleBase):
         if settings:
             parts["project_version"] = settings.version
 
-        for model, key, id_attr, ts_attr in _FINGERPRINT_MODELS:
-            id_col = getattr(model, id_attr)
-            ts_col = getattr(model, ts_attr)
-            stmt = select(id_col, ts_col).where(model.project_id == project_id)
+        for model, key, id_attr, ts_attr, content_fields in _FINGERPRINT_MODELS:
+            stmt = select(model).where(model.project_id == project_id)
             if hasattr(model, "tenant_id"):
                 stmt = stmt.where(model.tenant_id == tenant_id)
-            rows = (await self.session.execute(stmt)).all()
+            rows = (await self.session.scalars(stmt)).all()
             parts[key] = sorted(
                 [
-                    (r[0], r[1].isoformat() if r[1] else None)
-                    for r in rows
+                    (
+                        getattr(row, id_attr),
+                        (getattr(row, ts_attr).isoformat() if getattr(row, ts_attr) else None),
+                        _content_hash(row, content_fields),
+                    )
+                    for row in rows
                 ],
                 key=lambda x: x[0],
             )
@@ -150,18 +167,7 @@ class BootstrapMixin(LifecycleBase):
         ref_rows = (
             await self.session.execute(
                 select(ReferenceDocument.id, ReferenceDocument.updated_at).where(
-                    ReferenceDocument.status == "active",
-                    or_(
-                        ReferenceDocument.tier == TIER_INDUSTRY,
-                        and_(
-                            ReferenceDocument.tier == TIER_COMPANY,
-                            ReferenceDocument.tenant_id == tenant_id,
-                        ),
-                        and_(
-                            ReferenceDocument.tier == TIER_PROJECT,
-                            ReferenceDocument.project_id == project_id,
-                        ),
-                    ),
+                    *active_reference_document_conditions(tenant_id, project_id),
                 )
             )
         ).all()
@@ -210,7 +216,7 @@ class BootstrapMixin(LifecycleBase):
         """
         watermarks: list[datetime] = []
 
-        for model, _key, _id_attr, ts_attr in _FINGERPRINT_MODELS:
+        for model, _key, _id_attr, ts_attr, _content_fields in _FINGERPRINT_MODELS:
             ts_col = getattr(model, ts_attr)
             stmt = select(func.max(ts_col)).where(model.project_id == project_id)
             if hasattr(model, "tenant_id"):
@@ -221,18 +227,7 @@ class BootstrapMixin(LifecycleBase):
 
         ref_ts = await self.session.scalar(
             select(func.max(ReferenceDocument.updated_at)).where(
-                ReferenceDocument.status == "active",
-                or_(
-                    ReferenceDocument.tier == TIER_INDUSTRY,
-                    and_(
-                        ReferenceDocument.tier == TIER_COMPANY,
-                        ReferenceDocument.tenant_id == tenant_id,
-                    ),
-                    and_(
-                        ReferenceDocument.tier == TIER_PROJECT,
-                        ReferenceDocument.project_id == project_id,
-                    ),
-                ),
+                *active_reference_document_conditions(tenant_id, project_id),
             )
         )
         if ref_ts is not None:
