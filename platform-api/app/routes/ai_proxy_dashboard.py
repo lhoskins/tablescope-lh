@@ -41,6 +41,9 @@ async def suggest_dashboard(
     ds_result = await session.execute(ds_stmt)
     allowed_tables = [ds.view_name for ds in ds_result.scalars()]
 
+    kg_context = await _kg_context(
+        session, context, req.project_id, surface="dashboard_generation",
+    )
     payload = {
         "tenant_id": context.tenant_id,
         "user_id": context.user_id,
@@ -49,8 +52,10 @@ async def suggest_dashboard(
         "allowed_tables": allowed_tables,
         # Knowledge Graph context steers suggestions toward validated
         # risks/gaps/measured KPIs and governing documents.
-        "knowledge_graph_context": await _kg_context(
-            session, context, req.project_id, surface="dashboard_generation",
-        ),
+        "knowledge_graph_context": kg_context,
     }
-    return await _forward_to_ai("/ai/dashboard/suggest", payload)
+    result = await _forward_to_ai("/ai/dashboard/suggest", payload)
+    # KG-50: the active KG version + evidence ids that grounded this
+    # suggestion, so a client can verify which evidence actually informed it.
+    result["kgGrounding"] = kg_context.get("kg_grounding")
+    return result

@@ -314,6 +314,7 @@ async def build_project_insight(
         surface="project_insights",
     )
     kg_grounding_degraded = kg_context.get("grounding_status") == "unavailable"
+    kg_grounding = kg_context.get("kg_grounding")
     if kg_grounding_degraded:
         # KG-39: fail-open by design (the report still generates), but this
         # must be visible rather than indistinguishable from a healthy,
@@ -386,6 +387,7 @@ async def build_project_insight(
             graphBlockingReasons=graph_blocking_reasons,
             graphDisclosure=graph_disclosure,
             kgGroundingDegraded=kg_grounding_degraded,
+            kgGrounding=kg_grounding,
         )
 
     es = ai_result.get("executiveSummary") or {}
@@ -455,6 +457,7 @@ async def build_project_insight(
         graphBlockingReasons=graph_blocking_reasons,
         graphDisclosure=graph_disclosure,
         kgGroundingDegraded=kg_grounding_degraded,
+        kgGrounding=kg_grounding,
     )
 
 

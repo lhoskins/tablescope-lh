@@ -199,6 +199,9 @@ async def ai_suggest_dashboards(
         "suggestions": suggestions,
         "previewNote": preview_note,
         "model_used": ai_result.get("model_used", ""),
+        # KG-50: the active KG version + evidence ids that grounded these
+        # suggestions.
+        "kgGrounding": kg_context.get("kg_grounding"),
     }
 
 

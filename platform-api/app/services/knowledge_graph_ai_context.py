@@ -99,6 +99,12 @@ async def collect_knowledge_graph_ai_context(
     reconstruct exactly what evidence informed that feature's answer for
     this tenant/project/user.
 
+    KG-50: the same record is also returned inline as ``kg_grounding``
+    (``{"kgVersionId", "nodeIds", "documentIds", "queryIds"}``, or ``None``
+    when there's nothing to ground on) so the caller can attach it to its
+    own response envelope directly -- proving which KG version and evidence
+    grounded *this* answer doesn't require a separate audit-table query.
+
     KG-39: the returned block always carries ``grounding_status`` --
     ``"ok"`` for both a real result and a project that legitimately has no
     Knowledge Graph content yet, ``"unavailable"`` only when loading the
@@ -117,6 +123,10 @@ async def collect_knowledge_graph_ai_context(
         "query_lineage": [], "dashboard_lineage": [],
         "datasource_relationships": [],
         "grounding_status": "ok",
+        # KG-50: the active KG version + evidence ids that grounded this
+        # context, so a caller can attach them to its own response envelope.
+        # None when there is no graph content to ground on.
+        "kg_grounding": None,
     }
 
     try:
@@ -320,7 +330,7 @@ async def collect_knowledge_graph_ai_context(
             used_node_ids.update(item["_ids"])
     used_nodes = [by_id[nid] for nid in used_node_ids if nid in by_id]
     audit_node_ids, document_ids, query_ids = evidence_ids_from_nodes(used_nodes)
-    await record_kg_evidence_access(
+    recorded = await record_kg_evidence_access(
         session,
         tenant_id=tenant_id,
         project_id=project_id,
@@ -330,6 +340,16 @@ async def collect_knowledge_graph_ai_context(
         document_ids=document_ids,
         query_ids=query_ids,
     )
+    kg_grounding = (
+        {
+            "kgVersionId": recorded["kg_version_id"],
+            "nodeIds": recorded["node_ids"],
+            "documentIds": recorded["document_ids"],
+            "queryIds": recorded["query_ids"],
+        }
+        if recorded is not None
+        else None
+    )
 
     for items in bucketed.values():
         for item in items:
@@ -338,4 +358,4 @@ async def collect_knowledge_graph_ai_context(
         for item in items:
             item.pop("_ids", None)
 
-    return {**bucketed, **lineage, "grounding_status": "ok"}
+    return {**bucketed, **lineage, "grounding_status": "ok", "kg_grounding": kg_grounding}

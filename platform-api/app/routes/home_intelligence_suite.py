@@ -168,6 +168,7 @@ async def _run_for_project(
     granularity: int = 3,
     plan_semaphore: asyncio.Semaphore | None = None,
     raise_on_error: bool = False,
+    grounding_sink: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     started = datetime.now(UTC)
     ctx = await hi.gather_project_context(session, project)
@@ -188,6 +189,7 @@ async def _run_for_project(
             user_id=context.user_id,
             granularity=granularity,
             plan_semaphore=plan_semaphore,
+            grounding_sink=grounding_sink,
         )
     except AIUnavailableError:
         raise
@@ -286,14 +288,20 @@ async def run_intelligence_suite(
         return {"projectId": str(req.project_id), "insights": [], "error": "no_access"}
 
     prompts = req.prompt_types or hi.ALL_PROMPT_TYPES
+    # KG-50: the active KG version + evidence ids that grounded this run's
+    # plan, so a client can verify (or an evaluation prove) which evidence
+    # actually influenced these insights.
+    grounding_sink: dict[str, Any] = {}
     cards = await _run_for_project(
-        session, context, project, prompts, granularity=req.granularity
+        session, context, project, prompts, granularity=req.granularity,
+        grounding_sink=grounding_sink,
     )
     return {
         "projectId": str(project.id),
         "projectName": project.name,
         "projectColor": hi.project_color(project.id),
         "insights": cards,
+        "kgGrounding": grounding_sink.get("kg_grounding"),
     }
 
 

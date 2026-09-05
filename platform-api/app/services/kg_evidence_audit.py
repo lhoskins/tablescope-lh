@@ -73,10 +73,17 @@ async def record_kg_evidence_access(
     node_ids: list,
     document_ids: list,
     query_ids: list,
-) -> None:
-    """Persist one audit row. Best-effort: never raises into the caller."""
+) -> dict[str, Any] | None:
+    """Persist one audit row and return what was recorded.
+
+    KG-50: the caller (``collect_knowledge_graph_ai_context``) attaches this
+    same grounding record to the response it hands back, so a client can see
+    which KG version and evidence ids grounded *this* answer without a
+    separate query against the audit table. Best-effort: never raises into
+    the caller, and returns ``None`` when there's nothing to record.
+    """
     if not node_ids and not document_ids and not query_ids:
-        return
+        return None
     try:
         kg_version_id = await _active_kg_version_id(
             session, tenant_id=tenant_id, project_id=project_id,
@@ -94,8 +101,15 @@ async def record_kg_evidence_access(
             )
         )
         await session.flush()
+        return {
+            "kg_version_id": kg_version_id,
+            "node_ids": node_ids,
+            "document_ids": document_ids,
+            "query_ids": query_ids,
+        }
     except Exception:
         logger.exception(
             "Failed to record KG evidence-access audit row (tenant=%s project=%s surface=%s)",
             tenant_id, project_id, surface,
         )
+        return None
