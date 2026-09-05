@@ -62,7 +62,7 @@ All 4 new tests were proven fail-before/pass-after via `git stash` — the route
 | `pytest -q -k "query or sql_authorization or database_source or saas or project_table_schema or ask_and_run or home_intelligence"` | 207 passed, 0 regressions |
 | `ruff check app/services/teiid_sql/string_filters.py tests/test_project_table_schema.py tests/test_query_datasource_authorization.py` | clean |
 | `mypy app/services/teiid_sql/string_filters.py` | clean |
-| Full `pytest -q` (whole platform-api suite) | FULL_SUITE_RESULT_PLACEHOLDER |
+| Full `pytest -q` (whole platform-api suite) | 1874 passed, 12 failed, 4 skipped in 891s. All 12 failures confirmed pre-existing on `UX-design-03` tip *without* this branch's change (reran the identical two commands against `origin/UX-design-03` directly and got the same 12): 10 are the long-standing, unrelated failures seen in every recent phase (Redis-dependent snapshot-staleness tests, percent-change-summary, visualization-engine, dashboard/ask-pipeline chart-presentation tests). The other 2 (`test_billing.py::test_provision_isolated_data_plane`, `test_provision_isolated_vpn_awaits_details`) are new since the tenant-private-S3 data-plane feature merged into `UX-design-03` — its fail-closed storage resolver now correctly blocks VDB provisioning until S3 metadata is actually set, and these two pre-existing tests still assert the old "provisioned" expectation. Confirmed unrelated to this fix by reproducing all 12 on `origin/UX-design-03` with none of this branch's changes applied. |
 
 ```bash
 cd platform-api
