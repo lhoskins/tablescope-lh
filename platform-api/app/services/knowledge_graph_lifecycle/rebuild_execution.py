@@ -553,6 +553,35 @@ class RebuildExecutionMixin(LifecycleBase):
         return result
 
 
+    def _finalize_stage_duration(self, build: KnowledgeGraphBuild, now: datetime) -> dict[str, Any]:
+        """KG-48: close out the time spent in ``build.stage`` and return the
+        (mutable, not-yet-assigned) metrics dict for the caller to update
+        further and assign back to ``build.stage_metrics``.
+
+        The very first call for a build has no prior marker to measure from,
+        so it falls back to ``queued_at`` -- meaning the first stage closed
+        out (typically "queued", the stage set at build creation) captures
+        queue delay for free.
+        """
+        metrics = dict(build.stage_metrics or {})
+        durations = dict(metrics.get("durations_ms") or {})
+        last_ts_raw = metrics.get("_last_stage_at") or (
+            build.queued_at.isoformat() if build.queued_at else None
+        )
+        if last_ts_raw:
+            try:
+                start = datetime.fromisoformat(str(last_ts_raw))
+                if start.tzinfo is None:
+                    start = start.replace(tzinfo=UTC)
+                elapsed_ms = round((now - start).total_seconds() * 1000, 1)
+                durations[build.stage] = durations.get(build.stage, 0) + elapsed_ms
+            except (TypeError, ValueError):
+                pass
+        metrics["durations_ms"] = durations
+        metrics["_last_stage_at"] = now.isoformat()
+        return metrics
+
+
     async def _transition_build(
         self,
         build: KnowledgeGraphBuild,
@@ -561,17 +590,27 @@ class RebuildExecutionMixin(LifecycleBase):
         stage: str | None = None,
         progress: int | None = None,
     ) -> None:
+        now = datetime.now(UTC)
+        became_terminal = status in ("succeeded", "failed", "cancelled")
+        stage_changed = stage is not None and stage != build.stage
+        if stage_changed or became_terminal:
+            metrics = self._finalize_stage_duration(build, now)
+            if became_terminal:
+                metrics["retry_attempt"] = build.retry_attempt
+                metrics["failure_category"] = build.error_code
+            build.stage_metrics = metrics
+
         if status:
             build.status = status
-            if status in ("succeeded", "failed", "cancelled"):
-                build.completed_at = datetime.now(UTC)
+            if became_terminal:
+                build.completed_at = now
             if status == "building" and build.started_at is None:
-                build.started_at = datetime.now(UTC)
+                build.started_at = now
         if stage:
             build.stage = stage
         if progress is not None:
             build.progress = max(0, min(100, progress))
-        build.heartbeat_at = datetime.now(UTC)
+        build.heartbeat_at = now
         await self.session.flush()
 
 
@@ -582,6 +621,15 @@ class RebuildExecutionMixin(LifecycleBase):
         error_code: str,
         message: str,
     ) -> None:
+        # KG-48: close out the in-flight stage's duration and record the
+        # failure category even on this path, which bypasses
+        # _transition_build entirely (validation failures call this
+        # directly).
+        now = datetime.now(UTC)
+        metrics = self._finalize_stage_duration(build, now)
+        metrics["retry_attempt"] = build.retry_attempt
+        metrics["failure_category"] = error_code
+        build.stage_metrics = metrics
         build.status = "failed"
         build.error_code = error_code
         build.safe_error_message = message

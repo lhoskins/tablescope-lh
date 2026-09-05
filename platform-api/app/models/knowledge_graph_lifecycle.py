@@ -185,6 +185,13 @@ class KnowledgeGraphBuild(Base, TimestampMixin):
     )
     source_checkpoint: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
     affected_entity_summary: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    # KG-48: per-stage duration breakdown (ms) plus source counts, keyed by
+    # stage name -- e.g. {"durations_ms": {"queued": 40, "fingerprinting":
+    # 210, "loading_sources": 1500, "ai_enrichment": 8200, "validating": 90,
+    # "activating": 15}, "source_counts": {...}} -- so an operator can see
+    # which stage was slow or where a build failed for any build_id without
+    # reading raw logs.
+    stage_metrics: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
     progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     stage: Mapped[str] = mapped_column(
         String(100), nullable=False, default="initializing"
