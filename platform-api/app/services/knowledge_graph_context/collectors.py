@@ -255,8 +255,14 @@ async def collect_structural_graph(
     # because collect_structural_graph already verified the project itself
     # belongs to tenant_id above, and project ids are never reused across
     # tenants.
+    # KG-09: an archived query is a soft-delete (DELETE requires archiving
+    # first, per app/routes/projects_queries.py) -- it must stop appearing
+    # in the graph the same way archived FileSourceMeta/DatabaseDataSource
+    # rows already do below, not linger until the row is hard-deleted.
     queries = await _fetch_all_in_batches(
-        session, SavedQuery, SavedQuery.project_id == project_id,
+        session, SavedQuery,
+        SavedQuery.project_id == project_id,
+        SavedQuery.is_archived.is_(False),
     )
     # (node_id, display name, normalized searchable text) per query/dashboard,
     # used to detect which KPIs a query/dashboard actually measures.
@@ -432,6 +438,12 @@ async def collect_structural_graph(
                     properties={
                         "chunk_index": chunk.chunk_index,
                         "summary": (chunk.chunk_text or "")[:300],
+                        # KG-08: a passage is exactly its parent document's
+                        # evidence, so visibility filtering needs a way back
+                        # to the ProjectAsset id without a second query --
+                        # it can never be visible to someone the parent
+                        # document itself is hidden from.
+                        "asset_id": a.id,
                     },
                 )
             )

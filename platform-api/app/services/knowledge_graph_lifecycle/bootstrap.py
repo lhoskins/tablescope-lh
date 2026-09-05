@@ -17,6 +17,7 @@ from app.models import (
     ProjectAsset,
     ProjectBusinessContext,
     ProjectGoal,
+    ProjectMember,
     ProjectMetric,
     ProjectRisk,
     RepositoryConnection,
@@ -130,6 +131,7 @@ class BootstrapMixin(LifecycleBase):
             "assets": [],
             "reference_documents": [],
             "repository_scans": [],
+            "project_members": [],
             "pipeline_version": SNAPSHOT_PIPELINE_VERSION,
         }
 
@@ -174,6 +176,24 @@ class BootstrapMixin(LifecycleBase):
         parts["reference_documents"] = sorted(
             [(r[0], r[1].isoformat() if r[1] else None) for r in ref_rows],
             key=lambda x: x[0],
+        )
+
+        # KG-09: membership grants/revocations previously never marked the
+        # graph stale at all -- ProjectMember has no single-column id or
+        # updated_at (composite (project_id, user_id) key, no timestamp), so
+        # it can't join _FINGERPRINT_MODELS's shape; it's hashed here
+        # directly instead. This only feeds the fingerprint (polled every
+        # 15 minutes by evaluate_stale_graphs), not current_source_watermark,
+        # which has no timestamp column to read for this source.
+        member_rows = (
+            await self.session.execute(
+                select(ProjectMember.user_id, ProjectMember.role, ProjectMember.is_active).where(
+                    ProjectMember.project_id == project_id
+                )
+            )
+        ).all()
+        parts["project_members"] = sorted(
+            [(r[0], r[1], r[2]) for r in member_rows], key=lambda x: x[0]
         )
 
         conn_ids = (
