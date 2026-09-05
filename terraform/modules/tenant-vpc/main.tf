@@ -175,6 +175,19 @@ resource "aws_s3_access_point" "tenant" {
   vpc_configuration { vpc_id = aws_vpc.tenant.id }
 }
 
+resource "aws_s3control_access_point_policy" "tenant" {
+  access_point_arn = aws_s3_access_point.tenant.arn
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { AWS = aws_iam_role.storage.arn }
+      Action    = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"]
+      Resource  = [aws_s3_access_point.tenant.arn, "${aws_s3_access_point.tenant.arn}/object/*"]
+    }]
+  })
+}
+
 resource "aws_iam_role" "storage" {
   name = local.storage_role_name
   assume_role_policy = jsonencode({
@@ -210,20 +223,6 @@ resource "aws_iam_role_policy" "storage" {
         Resource = aws_kms_key.storage.arn
       }
     ]
-  })
-}
-
-resource "aws_s3_access_point_policy" "tenant" {
-  access_point_arn = aws_s3_access_point.tenant.arn
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { AWS = aws_iam_role.storage.arn }
-      Action    = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"]
-      Resource  = [aws_s3_access_point.tenant.arn, "${aws_s3_access_point.tenant.arn}/object/*"]
-      Condition = { StringEquals = { "aws:SourceVpce" = aws_vpc_endpoint.s3.id } }
-    }]
   })
 }
 
