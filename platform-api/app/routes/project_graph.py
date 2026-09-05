@@ -78,8 +78,13 @@ async def _require_project_access(
 
 
 FAMILY_NODE_TYPES = {"document_family"}
+# KG-24: kept in sync with the write-side allow-list
+# (``app.services.project_graph_service.graph_primitives.FAMILY_RELATIONSHIP_TYPES``)
+# -- "responds_to" was previously listed here but is absent from that
+# allow-list, so it could never actually be produced; removed rather than
+# added to the write side, since nothing currently emits it.
 FAMILY_EDGE_TYPES = {
-    "belongs_to_family", "governs", "responds_to", "supersedes", "superseded_by",
+    "belongs_to_family", "governs", "supersedes", "superseded_by",
     "depends_on", "implements", "references", "exception_to", "procedure_for",
     "policy_for", "evidence_for", "supports", "contradicts", "updates",
     "appendix_to", "template_for", "meeting_notes_for", "postmortem_for",

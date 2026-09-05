@@ -215,6 +215,25 @@ def merge_graph_sources(
             merged_nodes.append(n)
             id_remap[n["id"]] = n["id"]
         else:
+            # KG-26: two different sources normalizing to the same
+            # graph_key (e.g. a file source and a database table both
+            # named "orders") is not proof they're the same real-world
+            # thing -- log it so the collision is at least visible, even
+            # though which node wins the merge is unchanged here. A
+            # same-source "collision" (identical source_type/source_id)
+            # is the expected, silent case: the AI-enriched and structural
+            # rows for the same underlying record are meant to fold into
+            # one node.
+            if (existing.get("source_type"), existing.get("source_id")) != (
+                n.get("source_type"), n.get("source_id"),
+            ):
+                logger.warning(
+                    "knowledge_graph.graph_key_collision key=%s "
+                    "kept=%s(%s:%s) dropped=%s(%s:%s)",
+                    key,
+                    existing.get("id"), existing.get("source_type"), existing.get("source_id"),
+                    n.get("id"), n.get("source_type"), n.get("source_id"),
+                )
             id_remap[n["id"]] = existing["id"]
 
     valid_ids = {n["id"] for n in merged_nodes}
