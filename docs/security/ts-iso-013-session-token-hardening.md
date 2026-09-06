@@ -377,3 +377,17 @@ Monitor active sessions, refresh success/failure, reuse detections, revocation p
 - [ ] Key rotation, revocation propagation, compromise response, and dependency-failure runbooks are exercised.
 
 TS-ISO-013 must remain open until repeated-refresh, MFA-expiry, refresh-reuse, immediate-revocation, multi-tab, and two-tenant production-like tests pass and the legacy stateless renewal paths have been removed.
+
+## 13. Validation addendum
+
+All nine current-state findings in Section 2 (JWT claim shape, `renew_access_token()`, `/api/auth/refresh`, `/api/mfa/phone/verify`, login/exchange claim issuance, `MfaPhoneFactor.verified_until`, stateless tokens with no revocation, `localStorage`/`X-Session-Token` handling, and the absence of a rotating refresh-token family) were independently re-verified line-by-line against `platform-api/app/auth/jwt.py`, `app/routes/auth.py`, `app/routes/mfa.py`, `app/services/mfa_phone_service.py`, `web-ui/lib/api-client.ts`, and confirmed **accurate** in every case. Two clarifications worth noting for implementers:
+
+- `create_access_token`'s module docstring (`jwt.py:1-12`) does not mention the `aal`/`ses` claims it actually supports — worth a doc-comment fix alongside this work, not a blocker.
+- `MfaPhoneFactor.verified_until`-derived `aal` (via `mfa_aal_for_user`) is wired into `/auth/login` and `/auth/exchange` only. It is not consulted by `/auth/refresh` or `renew_access_token`, which is the exact mechanism by which stale `aal2` survives renewal (Section 2's "MFA assurance" row) — `app/services/mfa_phone_service.py` (already in Section 7's file table) is the load-bearing file for closing that gap and should be called out explicitly in Section 5.6's task list, not just implied by "recompute/downgrade MFA on refresh."
+
+Two files touch first-party token issuance/handling and are missing from Section 7's file table; add them:
+
+- **`web-ui/lib/api/voice.ts`** — duplicates its own `TOKEN_KEY = "tablescope.token"` constant and reads the bearer token directly via raw `fetch()`, bypassing `api-client.ts`'s `request()`/`streamRequest()` helpers entirely. A renewed token returned via `X-Session-Token` on a `/api/ai/speech/transcribe` call is silently dropped, so a long voice-transcription session never slides its renewal window the way every other API call does. Any migration to memory-only token storage or cookie-based refresh (Section 5.8) must also update this file or it will keep reading a token that no longer exists in `localStorage`.
+- **`platform-api/app/main.py`** — registers `SESSION_TOKEN_HEADER` ("X-Session-Token") in `CORSMiddleware(expose_headers=[...])`. Any change to the renewal-delivery mechanism (e.g. moving to a cookie per Section 5.8) requires updating this wiring too; it is the one place outside `middleware.py` that the current header-based renewal contract touches.
+
+No claim in Section 2 was found to be inaccurate or overstated.
