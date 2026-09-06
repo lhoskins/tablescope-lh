@@ -16,6 +16,7 @@ from app.schemas.enterprise_auth import (
     SsoStartResponse,
     TenantAuthPolicyResponse,
 )
+from app.security.rls import set_rls_session_context
 from app.services.enterprise_auth import decrypt_sso_provider_id, get_enterprise_auth_settings
 from app.services.sso_provider_service import SsoProviderService
 
@@ -31,6 +32,7 @@ async def get_tenant_auth_policy(
     tenant = await session.scalar(select(Tenant).where(Tenant.slug == slug))
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant not found")
+    await set_rls_session_context(session, tenant_id=tenant.id)
     settings = await get_enterprise_auth_settings(session, tenant.id)
     return TenantAuthPolicyResponse(
         tenant_slug=tenant.slug,
@@ -51,6 +53,7 @@ async def start_sso(
     tenant = await session.scalar(select(Tenant).where(Tenant.slug == payload.tenant_slug))
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant not found")
+    await set_rls_session_context(session, tenant_id=tenant.id)
     settings = await get_enterprise_auth_settings(session, tenant.id)
     if not settings.sso_enabled:
         raise HTTPException(status_code=403, detail="SSO is not enabled for this tenant")

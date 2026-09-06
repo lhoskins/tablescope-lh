@@ -34,6 +34,7 @@ from app.schemas.auth import (
     ForgotPasswordRequest,
     ForgotPasswordResponse,
 )
+from app.security.rls import set_rls_session_context
 from app.services.allowed_domains import enforce_allowed_domain
 from app.services.email import send_transactional_email
 from app.services.enterprise_auth import (
@@ -147,6 +148,7 @@ async def exchange_token(
                 detail=f"Tenant {payload.tenant_slug!r} not found",
             )
         tenant_id = tenant.id
+        await set_rls_session_context(session, tenant_id=tenant_id)
 
     if tenant_id is None:
         raise HTTPException(
@@ -175,6 +177,10 @@ async def exchange_token(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User does not belong to requested tenant",
         )
+
+    await set_rls_session_context(
+        session, tenant_id=user.tenant_id, user_id=user.id
+    )
 
     # Backfill a legacy identity record when the user was resolved by external_id
     # but no UserAuthIdentity row exists yet.
@@ -243,11 +249,21 @@ async def direct_login(
     """Authenticate with email and password (no external provider required)."""
     settings = get_settings()
 
+    if settings.postgres_rls_context_enabled and not payload.tenant_slug:
+        # RLS cannot safely enumerate users across tenants before identity is
+        # established.  Requiring the organization also eliminates the
+        # duplicate-email ambiguity documented by TS-ISO-015.
+        raise HTTPException(
+            status_code=400,
+            detail="Organization is required when database tenant isolation is enabled.",
+        )
+
     query = select(User).where(User.email == payload.email, User.is_active.is_(True))
     if payload.tenant_slug:
         tenant = await session.scalar(select(Tenant).where(Tenant.slug == payload.tenant_slug))
         if tenant is None:
             raise HTTPException(status_code=401, detail="Invalid email or password")
+        await set_rls_session_context(session, tenant_id=tenant.id)
         query = query.where(User.tenant_id == tenant.id)
         user = await session.scalar(query)
     else:
@@ -267,6 +283,10 @@ async def direct_login(
 
     if user is None or not user.verify_password(payload.password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    await set_rls_session_context(
+        session, tenant_id=user.tenant_id, user_id=user.id
+    )
 
     await enforce_allowed_domain(
         session,

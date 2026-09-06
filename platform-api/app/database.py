@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import asynccontextmanager
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import get_settings
+
+# Import registers the SQLAlchemy transaction-begin hook.  Keep this import in
+# the database bootstrap so requests, workers, and scripts share one behavior.
+from app.security import rls as _rls  # noqa: F401
+from app.security.rls import rls_scope
 
 _settings = get_settings()
 
@@ -48,3 +54,33 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
         else:
             await session.commit()
+
+
+@asynccontextmanager
+async def tenant_session(
+    *,
+    tenant_id: int,
+    user_id: int,
+    project_id: int | None = None,
+    source: str = "worker",
+) -> AsyncIterator[AsyncSession]:
+    """Open a tenant-bound session for workers, scripts, and scheduled tasks.
+
+    New background code must prefer this helper over a bare ``SessionLocal``.
+    Existing jobs remain an explicit rollout blocker until migrated and tested.
+    """
+
+    with rls_scope(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        project_id=project_id,
+        source=source,
+    ):
+        async with SessionLocal() as session:
+            try:
+                yield session
+            except Exception:
+                await session.rollback()
+                raise
+            else:
+                await session.commit()

@@ -29,6 +29,7 @@ from app.auth.jwt import (
     renew_access_token,
 )
 from app.config import get_settings
+from app.security.rls import rls_scope
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 claims=_synthesize_service_claims(api_key),
                 is_service=True,
             )
+            # A service key is not a global database principal.  Service routes
+            # must bind a concrete tenant before accessing tenant data; tenant
+            # zero deliberately receives no RLS scope.
             return await call_next(request)
 
         authorization = request.headers.get("authorization")
@@ -128,7 +132,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
             # Sliding session: an active user should never be logged out
             # mid-task just because the clock ran out. Handed back on the
             # response so no extra round trip is needed; the client swaps it in.
-            response = await call_next(request)
+            with rls_scope(
+                tenant_id=claims.tenant_id,
+                user_id=claims.user_id,
+                source="jwt",
+            ):
+                response = await call_next(request)
             try:
                 renewed = renew_access_token(token)
             except Exception:  # never let renewal break a good response

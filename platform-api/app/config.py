@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     database_pool_min_size: int = 5
     database_pool_max_size: int = 20
 
+    # PostgreSQL RLS rollout is intentionally two-stage.  Alembic installs the
+    # tenant policies without enabling them; operators first deploy this context
+    # propagation, validate workers/auth flows, and then enable selected tables.
+    # Keep false until the runtime DB role is non-owner/non-BYPASSRLS and the
+    # TS-ISO-004 preflight passes.
+    postgres_rls_context_enabled: bool = False
+
     redis_url: str = "redis://redis:6379/0"
 
     jwt_secret_key: str = "change-me-please"
