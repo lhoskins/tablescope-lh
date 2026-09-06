@@ -126,7 +126,7 @@ Existing users: `email_verified` defaults to `false` for everyone, including use
 | `platform-api` `pytest tests/test_project_insight_rebuild.py` | 11 passed (7 pre-existing + 4 new) |
 | `platform-api` `pytest tests/test_home_intelligence_insights_cache.py` | 4 passed |
 | `platform-api` `pytest tests/test_ai_dashboard_designer.py` | 35 passed |
-| `platform-api` `pytest -q` (full suite) | _fill in from the full run — see below_ |
+| `platform-api` `pytest -q` (full suite) | **1908 passed, 12 failed, 4 skipped** (18m1s) — the 12 failures are pre-existing and unrelated: 2 are the `test_provision_isolated_*` S3-config failures above; 3 are `test_business_insight_phase1.py` (`redis.exceptions.ConnectionError` — no Redis reachable in this sandbox, and Business Insight was not touched by this branch); 2 are `test_ai_dashboard_pipeline.py`/`test_ask_pipeline.py` visualization-engine tests unrelated to any of the 4 items; 4 are `test_percent_change_summary.py` (date-window arithmetic against `_monthly_series()`, unrelated to insight-card persistence); 1 is `test_visualization_engine.py::test_many_categories_is_horizontal_bar`. The 4 skips are the VPN/SMB E2E tests (no live endpoint configured). None touch any file this branch changed. |
 | `web-ui` `tsc --noEmit` | clean |
 | `web-ui` `next lint` | clean (same pre-existing `max-lines`/`exhaustive-deps` warnings as `origin/UX-design-03`, no new ones) |
 | `web-ui` `vitest run` | 598 / 608 passed, 1 file / 10 tests failed — **pre-existing, unrelated** (`components/tablescope/home/intelligence-card.test.tsx`: `ChartSuggestionDialog` renders without a `QueryClientProvider` wrapper in that test file; confirmed identical failure on `origin/UX-design-03` before this branch's changes via `git stash`) |
