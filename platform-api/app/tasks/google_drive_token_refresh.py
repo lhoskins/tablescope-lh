@@ -2,11 +2,10 @@
 
 Mirrors ``app/tasks/quickbooks_token_refresh.py``: runs as an arq cron job,
 refreshes access tokens for connector credentials that have a refresh token,
-and persists the rotated tokens. Unlike the QuickBooks task, this does not
-yet re-register any live Teiid source -- Workstream E (Teiid range-aware
-execution) has not landed, so there is nothing live to re-register against
-token rotation yet. Add that step here once it does, following the same
-pattern as ``_reregister_live_quickbooks_sources``.
+persists the rotated tokens, and re-registers every live Teiid source backed
+by that credential (``reregister_live_sources_for_credential``) so an
+already-registered source picks up the new token instead of continuing to
+run on the one it was confirmed with.
 """
 
 from __future__ import annotations
@@ -18,14 +17,9 @@ from sqlalchemy import select
 
 from app.database import SessionLocal
 from app.models.connector_credential import ConnectorCredential
-from app.models.file_source_meta import FileSourceMeta
-from app.models.spreadsheet_table_mapping import SpreadsheetTableMapping
 from app.services import google_drive as gd
 from app.services.crypto import encrypt_secret
-from app.services.google_drive.registration import (
-    GoogleSheetsRegistrationError,
-    reregister_google_sheet,
-)
+from app.services.google_drive.registration import reregister_live_sources_for_credential
 from app.services.saas_source_service import decrypt_config
 
 logger = logging.getLogger(__name__)
@@ -66,33 +60,8 @@ async def _reregister_live_google_drive_sources(
     credential: ConnectorCredential,
 ) -> int:
     """Re-register every confirmed Google Drive mapping backed by this credential."""
-    re_registered = 0
     async with SessionLocal() as session:
-        stmt = select(SpreadsheetTableMapping).where(
-            SpreadsheetTableMapping.tenant_id == credential.tenant_id,
-            SpreadsheetTableMapping.status == "confirmed",
-            SpreadsheetTableMapping.datasource_id.is_not(None),
-        )
-        mappings = list((await session.scalars(stmt)).all())
-        for mapping in mappings:
-            child = await session.get(FileSourceMeta, mapping.datasource_id)
-            if child is None:
-                continue
-            live_params = child.live_source_params or {}
-            if live_params.get("connector_credential_id") != credential.id:
-                continue
-            try:
-                await reregister_google_sheet(
-                    session, credential=credential, mapping=mapping
-                )
-                re_registered += 1
-            except GoogleSheetsRegistrationError as exc:
-                logger.warning(
-                    "Failed to re-register Google Drive mapping %s after token refresh: %s",
-                    mapping.id,
-                    exc,
-                )
-    return re_registered
+        return await reregister_live_sources_for_credential(session, credential)
 
 
 async def refresh_google_drive_tokens(ctx: dict[str, object]) -> dict[str, int]:

@@ -40,6 +40,7 @@ from app.services.google_drive.detection import detect_google_sheet_tables
 from app.services.google_drive.registration import (
     GoogleSheetsRegistrationError,
     confirm_and_register_google_sheet,
+    reregister_live_sources_for_credential,
 )
 from app.services.saas_source_service import decrypt_config
 from app.services.teiid_registration_service.naming import sanitize_identifier
@@ -194,7 +195,13 @@ async def complete_authorization(
     of an existing, broken connection), the fresh tokens replace that
     credential's secret in place -- every ``SessionSource``/``FileSourceMeta``
     already pointing at it keeps working under the same id, instead of a new,
-    duplicate connection appearing.
+    duplicate connection appearing. Every already-confirmed Google Sheets
+    source backed by that credential is also re-registered against Teiid
+    immediately (``reregister_live_sources_for_credential``): Teiid's own
+    resource adapter holds a *copy* of the refresh token from when it was
+    confirmed and does not pick up a rotated/reconnected credential on its
+    own, so skipping this would leave an already-created source failing at
+    query time with the same "reauthorize" prompt the user just resolved.
     """
     _require_feature_enabled()
     try:
@@ -214,6 +221,7 @@ async def complete_authorization(
         credential.secret_encrypted = encrypt_secret(json.dumps(tokens))
         await session.commit()
         await session.refresh(credential)
+        await reregister_live_sources_for_credential(session, credential)
     else:
         credential = ConnectorCredential(
             tenant_id=context.tenant_id,

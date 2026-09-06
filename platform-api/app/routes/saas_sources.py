@@ -45,6 +45,7 @@ from app.services.saas_source_service import (
     SaasSourceError,
     create_saas_source,
     decrypt_config,
+    reregister_live_saas_sources_for_credential,
     run_sync,
 )
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
@@ -114,16 +115,29 @@ async def update_credential(
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> dict:
+    """Update a credential's display name and/or secret config.
+
+    A config update (a reconnect after an expired/rejected credential, or a
+    rotated password) also re-registers every already-created "live"
+    ServiceNow/Salesforce/HubSpot/QuickBooks source backed by this
+    credential against Teiid -- those sources hold their own baked-in copy
+    of the credential from when they were created, so without this an
+    already-created table would keep failing on the old value even though
+    the credential itself was just successfully reconnected.
+    """
     cred = await session.get(ConnectorCredential, credential_id)
     if cred is None or cred.tenant_id != context.tenant_id:
         raise HTTPException(status_code=404, detail="Credential not found")
     if body.display_name:
         cred.display_name = body.display_name
-    if body.config is not None:
+    config_updated = body.config is not None
+    if config_updated:
         cred.secret_encrypted = encrypt_secret(json.dumps(body.config))
         cred.last_tested_at = datetime.now(UTC)
     await session.commit()
     await session.refresh(cred)
+    if config_updated:
+        await reregister_live_saas_sources_for_credential(session, cred)
     return cred.to_dict()
 
 

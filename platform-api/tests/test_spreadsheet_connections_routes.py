@@ -586,3 +586,151 @@ async def test_reauthorize_with_credential_id_for_another_tenant_is_rejected(
         headers=headers_b,
     )
     assert r.status_code == 404
+
+
+async def test_reauthorizing_reregisters_an_already_confirmed_google_sheet(
+    client, db_session, service_headers, monkeypatch
+):
+    """The reported bug: reauthorizing a broken Google Drive connection
+    updates the stored credential, but an already-created ("SAPPHIRE Leads")
+    Google Sheets table must also be re-registered against Teiid with the new
+    refresh token -- Teiid's own resource adapter holds its own copy from
+    confirm time and keeps failing on the stale one otherwise, so "click on a
+    table" for that source would still show a reauthorize prompt even though
+    the connection was just successfully reconnected."""
+    from types import SimpleNamespace
+
+    import app.routes.spreadsheet_connections as sc
+    import app.services.google_drive.oauth as gd_oauth
+    import app.services.google_drive.registration as gd_registration
+
+    tenant, user, headers = await _setup(client, service_headers, "gd-reregister")
+    monkeypatch.setattr(sc, "_require_feature_enabled", lambda: None)
+    monkeypatch.setattr(sc.gd, "is_configured", lambda: True)
+    monkeypatch.setattr(
+        sc.gd, "build_authorization_url", lambda *, state: f"https://accounts.google.com/auth?state={state}"
+    )
+    monkeypatch.setattr(
+        gd_registration,
+        "get_settings",
+        lambda: SimpleNamespace(
+            google_drive_client_id="client-123",
+            google_drive_client_secret="secret-456",
+            teiid_pg_host="teiid",
+            teiid_pg_port=35432,
+        ),
+    )
+
+    async def fake_warm_vdb(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(gd_registration, "warm_vdb", fake_warm_vdb)
+
+    # Original (now-broken) connection.
+    state = gd_oauth.create_state_token(tenant_id=tenant["id"], user_id=user["id"])
+
+    async def fake_exchange_1(*, code):
+        return {"access_token": "old-at", "refresh_token": "old-rt", "expires_at": 9e15}
+
+    monkeypatch.setattr(sc.gd, "exchange_code_for_tokens", fake_exchange_1)
+    r = await client.post(
+        "/api/spreadsheet-connections/callback",
+        json={"code": "c1", "state": state},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    connection_id = r.json()["id"]
+
+    # An already-confirmed table backed by this connection.
+    from app.models.file_source_meta import FileSourceMeta
+    from app.models.spreadsheet_table_mapping import (
+        SpreadsheetColumnMapping,
+        SpreadsheetTableMapping,
+    )
+    from app.models.user_vdb import UserVDB
+
+    db_session.add(
+        UserVDB(
+            tenant_id=tenant["id"], user_id=user["id"], vdb_id="user-vdb",
+            vdb_username="u", encrypted_password="p", is_active=True,
+        )
+    )
+    parent = FileSourceMeta(
+        tenant_id=tenant["id"], owner_id=user["id"], view_name="gdrive_abc_Sheet1",
+        file_name="Sheet1", column_types=[],
+        live_source_params={"spreadsheet_id": "sheet-1", "sheet_name": "Sheet1"},
+    )
+    db_session.add(parent)
+    await db_session.commit()
+    await db_session.refresh(parent)
+
+    child = FileSourceMeta(
+        tenant_id=tenant["id"], owner_id=user["id"], view_name="SAPPHIRE_Leads_GOOGLE",
+        file_name="SAPPHIRE Leads", column_types=[],
+        source_format="google_sheet", acquisition_method="google_drive",
+        live_source_params={
+            "spreadsheet_id": "sheet-1", "range_a1": "Sheet1!A1:C10",
+            "connector_credential_id": connection_id,
+        },
+    )
+    db_session.add(child)
+    await db_session.commit()
+    await db_session.refresh(child)
+
+    mapping = SpreadsheetTableMapping(
+        tenant_id=tenant["id"], file_source_meta_id=parent.id, datasource_id=child.id,
+        sheet_name_at_creation="Sheet1", table_name="SAPPHIRE Leads",
+        range_a1="Sheet1!A1:C10", header_row_index=0, data_start_row_index=1,
+        detection_method="header_scan", detection_confidence=1.0,
+        user_confirmed=True, status="confirmed",
+    )
+    db_session.add(mapping)
+    await db_session.commit()
+    await db_session.refresh(mapping)
+    db_session.add(
+        SpreadsheetColumnMapping(
+            table_mapping_id=mapping.id, ordinal=1, source_label="Name",
+            physical_column_ref="A", relational_name="name", teiid_type="string",
+        )
+    )
+    await db_session.commit()
+
+    # Reauthorize the connection with a new refresh token.
+    r = await client.post(
+        "/api/spreadsheet-connections/authorize",
+        json={"credential_id": connection_id},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    reauth_state = r.json()["state"]
+
+    async def fake_exchange_2(*, code):
+        return {"access_token": "new-at", "refresh_token": "new-rt", "expires_at": 9e15}
+
+    monkeypatch.setattr(sc.gd, "exchange_code_for_tokens", fake_exchange_2)
+
+    captured: dict = {}
+
+    class _FakeReg:
+        def __init__(self):
+            pass
+
+        async def register_google_sheets_source(self, **kwargs):
+            captured.update(kwargs)
+            return {"view_name": child.view_name}
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(gd_registration, "TeiidRegistrationService", _FakeReg)
+
+    r = await client.post(
+        "/api/spreadsheet-connections/callback",
+        json={"code": "c2", "state": reauth_state},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+
+    assert captured["refresh_token"] == "new-rt"
+    assert captured["spreadsheet_id"] == "sheet-1"
+    assert captured["sheet_name"] == "Sheet1!A1:C10"

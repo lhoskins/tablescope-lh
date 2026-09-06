@@ -265,3 +265,49 @@ async def reregister_google_sheet(
         tenant_id=child.tenant_id,
         user_id=child.owner_id,
     )
+
+
+async def reregister_live_sources_for_credential(
+    session: AsyncSession, credential: ConnectorCredential
+) -> int:
+    """Re-register every confirmed Google Sheets mapping backed by
+    ``credential`` against Teiid.
+
+    Teiid's own resource adapter is registered with a *copy* of the refresh
+    token at confirm/re-register time -- it does not read back from
+    ``ConnectorCredential`` on every query. Updating ``credential.secret_encrypted``
+    alone (a token rotation or a user manually reauthorizing a broken
+    connection) leaves any already-registered live source on its stale token
+    until this runs, so callers that change a credential's secret in place
+    must call this immediately after, not rely solely on the periodic
+    ``google_drive_token_refresh`` cron job.
+
+    Best-effort per mapping: a registration failure for one mapping is logged
+    and does not stop the others or raise to the caller, matching how the
+    cron job already treats this.
+    """
+    re_registered = 0
+    stmt = select(SpreadsheetTableMapping).where(
+        SpreadsheetTableMapping.tenant_id == credential.tenant_id,
+        SpreadsheetTableMapping.status == "confirmed",
+        SpreadsheetTableMapping.datasource_id.is_not(None),
+    )
+    mappings = list((await session.scalars(stmt)).all())
+    for mapping in mappings:
+        child = await session.get(FileSourceMeta, mapping.datasource_id)
+        if child is None:
+            continue
+        live_params = child.live_source_params or {}
+        if live_params.get("connector_credential_id") != credential.id:
+            continue
+        try:
+            await reregister_google_sheet(session, credential=credential, mapping=mapping)
+            re_registered += 1
+        except GoogleSheetsRegistrationError as exc:
+            logger.warning(
+                "Failed to re-register Google Drive mapping %s for credential %s: %s",
+                mapping.id,
+                credential.id,
+                exc,
+            )
+    return re_registered
