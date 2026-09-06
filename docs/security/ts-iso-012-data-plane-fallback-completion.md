@@ -333,3 +333,18 @@ Repeat after Docker daemon restart, host reboot, firewall reload, gateway replac
 - [ ] Deployment and rollback procedures preserve isolation and have been exercised.
 
 TS-ISO-012 must remain open until every isolated production mode—including container-only and VPN—uses the fail-closed binding/gateway path, the shared control plane has no tenant-network interfaces, and packet-level evidence proves there is no lateral tenant route.
+
+## 13. Validation addendum
+
+All ten current-state findings in Section 2 (S3 resolution, Teiid resolution, binding uniqueness, resolver readiness checks, control-plane networking, VPN file work, service identity, PG identity, helper defaults, host firewall) were independently re-verified line-by-line against `platform-api` and `deploy` on `UX-design-03` and confirmed **accurate**, with one finding understated:
+
+- **`teiid_api_key` is not "commonly" bypassed — it is never used.** `TenantEndpoint.api_key_secret_ref` (`tenant_teiid_resolver.py`) has zero downstream readers anywhere in `app/`. Every Teiid client (`vdb_management.py`, `teiid_registration_service`, `scope_proxy.py`) authenticates with `settings.teiid_servlet_api_key` unconditionally. Phase B's "replace common Teiid servlet credentials" work item has no existing partial implementation for the servlet key to build on.
+
+The following call sites were confirmed during validation and are missing from Section 7's file table; add them:
+
+- **`platform-api/app/services/google_drive/registration.py`** — Google Sheets registration calls `TeiidRegistrationService()` with no arguments and never imports `TenantTeiidResolver` at all. This is not a fallback default (Section 2 wording implies an overridable parameter); there is no tenant-scoping parameter threaded through this path at all.
+- **`platform-api/app/services/saas_source_service.py`** — both SaaS-connector registration call sites (`TeiidRegistrationService()`, two locations) are likewise fully unscoped; the file has no `TenantTeiidResolver`/`resolve_for_org` reference.
+- **`platform-api/app/services/teiid_registration_service/reconcile.py`** (`reconcile_database_sources`) — the highest-blast-radius call site found: it queries `DatabaseDataSource` across **all tenants** in one pass (no tenant filter unless `only_id` is given) and reuses a single global `TeiidRegistrationService()` instance for the entire batch. Not named in Section 6's phase list or Section 7's file table.
+- **`platform-api/app/routes/health.py`** — `VDBManagementService()` instantiated with no tenant/endpoint argument for health checks. Reasonable for a global probe today, but if reused for a future per-tenant health check it would silently probe the global Teiid instead; Section 6E's "health, reconciliation, and deletion orchestration" phase should explicitly account for this call site so it isn't repurposed without a tenant argument later.
+
+These four call sites should be added to the Phase D (call-site completion) inventory and to Section 7's "Serving paths" / "Teiid clients" rows before implementation begins, since they represent unscoped Teiid access the plan's own Section 5.6 inventory (query, dashboard, VDB, upload, SaaS/Google Sheets, repository/background jobs) intends to cover but does not yet name at the function level.
