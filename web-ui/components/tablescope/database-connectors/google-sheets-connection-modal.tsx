@@ -21,6 +21,10 @@ export function GoogleSheetsConnectionModal({
   const [authUrl, setAuthUrl] = useState<string | null>(null);
   const popupRef = useRef<Window | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Only close on a genuine click on the backdrop -- a drag/selection that
+  // starts inside the modal and releases over the backdrop must not
+  // dismiss it.
+  const backdropMouseDown = useRef(false);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -79,10 +83,15 @@ export function GoogleSheetsConnectionModal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
+      onMouseDown={(e) => {
+        backdropMouseDown.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && backdropMouseDown.current) onClose();
+      }}
     >
       <div
-        className="w-full max-w-md rounded-xl bg-bg-primary p-5 shadow-xl"
+        className="max-h-[85vh] w-[80vw] max-w-[1400px] overflow-y-auto rounded-xl bg-bg-primary p-5 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-start justify-between">

@@ -89,12 +89,12 @@ class TenantOnboardingService:
 
         try:
             tenant = await self._ensure_tenant(req)
-            invite_link, root_user = await self._ensure_root_admin(req, tenant)
+            root_user = await self._ensure_root_admin(req, tenant)
             await self._link_billing(req, tenant)
             await self._run_tier_automation(req, tenant)
             await self._ensure_vdbs(req, tenant, root_user)
             await self._ensure_default_project(req, tenant, root_user)
-            await self._send_lifecycle_emails(req, invite_link)
+            await self._send_lifecycle_emails(req, tenant, root_user)
 
             req.status = "provisioned"
             req.tenant_status = "active"
@@ -138,42 +138,36 @@ class TenantOnboardingService:
 
     async def _ensure_root_admin(
         self, req: TenantProvisioningRequest, tenant: Tenant
-    ) -> tuple[str | None, User]:
-        from app.config import get_settings
+    ) -> User:
+        """Create (or find) the local root-admin user, unverified.
 
-        # The invite link must land on the set-password page so the new root
-        # admin is prompted to choose a password (not the bare sign-in page).
-        setup_url = f"{get_settings().app_base_url}/{tenant.slug}/set-password"
-        supa = await self._supabase.create_or_invite_user(
-            req.tenant_admin_email,
-            first_name=req.tenant_admin_first_name,
-            last_name=req.tenant_admin_last_name,
-            redirect_to=setup_url,
-        )
-        if supa.created:
-            req.root_admin_status = "supabase_user_created"
-            audit.audit(
-                audit.SUPABASE_USER_CREATED,
-                provisioning_request_id=req.id,
-                supabase_user_id=supa.id,
+        Supabase account creation and the credential/set-password email are
+        deferred until the admin proves they own this inbox -- see
+        ``complete_root_admin_verification``, invoked once
+        ``POST /api/auth/verify-email`` consumes their confirmation link.
+        Local provisioning (membership, VDBs, default project) does not
+        depend on Supabase and proceeds immediately.
+        """
+        user = await self._session.scalar(
+            select(User).where(
+                User.tenant_id == tenant.id, User.email == req.tenant_admin_email
             )
-        else:
-            req.root_admin_status = "existing_supabase_user_linked"
-            audit.audit(
-                audit.SUPABASE_EXISTING_USER_LINKED,
-                provisioning_request_id=req.id,
-                supabase_user_id=supa.id,
-            )
-
-        user = await self._supabase.link_local_user(
-            self._session,
-            supabase_user_id=supa.id,
-            email=req.tenant_admin_email,
-            tenant_id=tenant.id,
-            role="tenant_admin",
-            first_name=req.tenant_admin_first_name,
-            last_name=req.tenant_admin_last_name,
         )
+        if user is None:
+            user = User(
+                tenant_id=tenant.id,
+                email=req.tenant_admin_email,
+                role="tenant_admin",
+                first_name=req.tenant_admin_first_name,
+                last_name=req.tenant_admin_last_name,
+                display_name=_display_name(
+                    req.tenant_admin_first_name, req.tenant_admin_last_name
+                )
+                or req.tenant_admin_email,
+            )
+            self._session.add(user)
+            await self._session.flush()
+        req.root_admin_status = "local_user_created"
 
         membership = await self._session.scalar(
             select(TenantMembership).where(
@@ -196,7 +190,85 @@ class TenantOnboardingService:
         elif membership.role != "tenant_admin":
             membership.role = "tenant_admin"
         req.root_admin_status = "membership_created"
-        return supa.action_link, user
+        return user
+
+    async def complete_root_admin_verification(
+        self, user: User, tenant: Tenant
+    ) -> None:
+        """Step 2: create/link the Supabase identity and send the real
+        credential email, now that the admin has verified their email.
+
+        Called by ``POST /api/auth/verify-email`` once the confirmation link
+        is consumed. Idempotent in effect: ``create_or_invite_user`` finds an
+        existing Supabase identity rather than duplicating it on a retry.
+        """
+        from app.config import get_settings
+
+        settings = get_settings()
+        setup_url = f"{settings.app_base_url}/{tenant.slug}/set-password"
+        supa = await self._supabase.create_or_invite_user(
+            user.email,
+            first_name=user.first_name,
+            last_name=user.last_name,
+            redirect_to=setup_url,
+        )
+        audit.audit(
+            audit.SUPABASE_USER_CREATED
+            if supa.created
+            else audit.SUPABASE_EXISTING_USER_LINKED,
+            tenant_id=tenant.id,
+            supabase_user_id=supa.id,
+        )
+        await self._supabase.link_local_user(
+            self._session,
+            supabase_user_id=supa.id,
+            email=user.email,
+            tenant_id=tenant.id,
+            role="tenant_admin",
+            first_name=user.first_name,
+            last_name=user.last_name,
+        )
+
+        workspace_url = f"{settings.app_base_url}/{tenant.slug}"
+        company_name = tenant.name
+        if supa.action_link:
+            sent = await self._email.send_transactional_email(
+                to=user.email,
+                template="workspace_ready_with_password_setup",
+                variables={
+                    "first_name": user.first_name or "",
+                    "workspace_name": f"{company_name} Workspace",
+                    "tenant_name": company_name,
+                    "admin_email": user.email,
+                    "workspace_url": workspace_url,
+                    "password_setup_link": supa.action_link,
+                    "expiration_time": "24 hours",
+                },
+            )
+        else:
+            sent = await self._email.send_transactional_email(
+                to=user.email,
+                template="workspace_ready",
+                variables={
+                    "first_name": user.first_name or "",
+                    "workspace_name": f"{company_name} Workspace",
+                    "tenant_name": company_name,
+                    "workspace_url": workspace_url,
+                },
+            )
+        if sent:
+            audit.audit(
+                audit.ROOT_ADMIN_INVITE_SENT, tenant_id=tenant.id, recipient=user.email
+            )
+
+        req = await self._session.scalar(
+            select(TenantProvisioningRequest)
+            .where(TenantProvisioningRequest.tenant_id == tenant.id)
+            .order_by(TenantProvisioningRequest.id.desc())
+        )
+        if req is not None and req.root_admin_email_sent_at is None:
+            req.root_admin_status = "invite_sent"
+            req.root_admin_email_sent_at = datetime.now(UTC)
 
     async def _link_billing(
         self, req: TenantProvisioningRequest, tenant: Tenant
@@ -389,59 +461,24 @@ class TenantOnboardingService:
             await self._session.flush()
 
     async def _send_lifecycle_emails(
-        self, req: TenantProvisioningRequest, invite_link: str | None
+        self, req: TenantProvisioningRequest, tenant: Tenant, root_user: User
     ) -> None:
         from app.config import get_settings
 
         settings = get_settings()
-        workspace_url = f"{settings.app_base_url}/{req.tenant_slug}"
         company_name = req.company_name or req.tenant_slug
 
-        # Idempotency: the single root-admin onboarding email is sent exactly
+        # Idempotency: the single root-admin credential email is sent exactly
         # once. A replayed webhook or a retry after a mid-provisioning failure
         # must never send a duplicate.
-        if req.root_admin_email_sent_at is not None:
-            return
-
-        # Single combined onboarding email for the initial tenant admin: the
-        # "workspace ready" message whose primary CTA is "Create your password"
-        # (the set-password link), so the admin never lands on a login page
-        # before having credentials. No separate password-setup email is sent.
-        if invite_link:
-            sent = await self._email.send_transactional_email(
-                to=req.tenant_admin_email,
-                template="workspace_ready_with_password_setup",
-                variables={
-                    "first_name": req.tenant_admin_first_name or "",
-                    "workspace_name": f"{company_name} Workspace",
-                    "tenant_name": company_name,
-                    "admin_email": req.tenant_admin_email,
-                    "workspace_url": workspace_url,
-                    "password_setup_link": invite_link,
-                    "expiration_time": "24 hours",
-                },
-            )
-        else:
-            # Existing Supabase user already has a password — point them to the
-            # workspace instead of a password-setup link.
-            sent = await self._email.send_transactional_email(
-                to=req.tenant_admin_email,
-                template="workspace_ready",
-                variables={
-                    "first_name": req.tenant_admin_first_name or "",
-                    "workspace_name": f"{company_name} Workspace",
-                    "tenant_name": company_name,
-                    "workspace_url": workspace_url,
-                },
-            )
-        if sent:
-            req.root_admin_status = "invite_sent"
-            req.root_admin_email_sent_at = datetime.now(UTC)
-            audit.audit(
-                audit.ROOT_ADMIN_INVITE_SENT,
-                provisioning_request_id=req.id,
-                recipient=req.tenant_admin_email,
-            )
+        if req.root_admin_email_sent_at is None:
+            if root_user.email_verified:
+                # The admin already verified (e.g. a provisioning retry after
+                # verification succeeded but a later step failed) -- proceed
+                # straight to creating the Supabase identity + credentials.
+                await self.complete_root_admin_verification(root_user, tenant)
+            else:
+                await self._send_root_admin_verification_email(req, root_user)
 
         # Only isolated tiers that still need network details get a second,
         # action-required email.
@@ -457,3 +494,59 @@ class TenantOnboardingService:
                     "support_contact_email": settings.support_email,
                 },
             )
+
+    async def _send_root_admin_verification_email(
+        self, req: TenantProvisioningRequest, root_user: User
+    ) -> None:
+        """Step 1: ask the admin to confirm they own this inbox.
+
+        Idempotent: skips resending once a verification token already exists
+        for this user (a replayed webhook must not spam the confirmation
+        email while the admin still has not clicked it).
+        """
+        from app.config import get_settings
+        from app.models.email_verification_token import EmailVerificationToken
+        from app.services.email_verification_service import (
+            TENANT_ADMIN_INVITE,
+            create_verification_token,
+        )
+
+        already_sent = await self._session.scalar(
+            select(EmailVerificationToken.id).where(
+                EmailVerificationToken.tenant_id == root_user.tenant_id,
+                EmailVerificationToken.user_id == root_user.id,
+                EmailVerificationToken.purpose == TENANT_ADMIN_INVITE,
+            )
+        )
+        if already_sent is not None:
+            return
+
+        settings = get_settings()
+        raw_token = await create_verification_token(
+            self._session,
+            tenant_id=root_user.tenant_id,
+            user_id=root_user.id,
+            purpose=TENANT_ADMIN_INVITE,
+        )
+        confirmation_link = f"{settings.app_base_url}/verify-email?token={raw_token}"
+        sent = await self._email.send_transactional_email(
+            to=root_user.email,
+            template="account_confirmation",
+            variables={
+                "first_name": root_user.first_name or "",
+                "confirmation_link": confirmation_link,
+                "expiration_time": "24 hours",
+            },
+        )
+        if sent:
+            req.root_admin_status = "pending_email_verification"
+            audit.audit(
+                audit.ROOT_ADMIN_VERIFICATION_EMAIL_SENT,
+                provisioning_request_id=req.id,
+                recipient=root_user.email,
+            )
+
+
+def _display_name(first: str | None, last: str | None) -> str | None:
+    parts = [p for p in (first, last) if p]
+    return " ".join(parts) if parts else None

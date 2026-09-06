@@ -565,7 +565,9 @@ async def test_chart_candidates_requires_project_access(
     assert r.status_code in (403, 404)
 
 
-def test_operational_sections_match_the_itsm_story_and_bottom_right_layout() -> None:
+def test_operational_sections_match_the_itsm_story() -> None:
+    """The "Best Improvement Opportunities" panel was removed -- this must
+    return only the Operational Brief widget, not a second narrative."""
     widgets = _operational_widgets(
         "Show sales health",
         {
@@ -577,20 +579,14 @@ def test_operational_sections_match_the_itsm_story_and_bottom_right_layout() -> 
             "widgets": [{"businessQuestion": "Which region drives the backlog?"}],
         },
     )
-    brief, improvements = widgets
+    assert len(widgets) == 1
+    brief = widgets[0]
+    assert brief["type"] == "operational_brief"
     assert [item["label"] for item in brief["items"]] == [
         "Backing risk",
         "Primary driver",
         "Recommended action",
     ]
-    assert improvements["layout"] == {
-        "position": 1,
-        "width": "standard",
-        "gridX": 9,
-        "gridY": 5,
-        "gridW": 3,
-        "gridH": 3,
-    }
 
 
 def test_ai_layout_caps_horizontal_rankings_at_half_width() -> None:

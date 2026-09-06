@@ -155,6 +155,22 @@ export async function requestPasswordReset(
   });
 }
 
+export type VerifyEmailResponse = {
+  email: string;
+  tenant_slug: string;
+  already_verified: boolean;
+};
+
+/**
+ * Consume an account_confirmation link's token (step 1 of the two-step
+ * onboarding flow). Only once this succeeds does the backend create the
+ * Supabase identity and send the real "set your password" credential email
+ * -- so a typo'd or unowned address never receives login information.
+ */
+export async function verifyEmail(token: string): Promise<VerifyEmailResponse> {
+  return apiClient.post<VerifyEmailResponse>("/api/auth/verify-email", { token });
+}
+
 /**
  * Verify a recovery token_hash (from a Tablescope-branded reset email) and
  * establish a Supabase session, so the user can then set a new password.

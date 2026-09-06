@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { IconCheck, IconLoader2, IconX } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -49,6 +49,10 @@ export function ConnectionModal({
   const [tested, setTested] = useState(isEdit); // editing allows save without retest
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
+  // Only close on a genuine click on the backdrop -- a text selection or
+  // drag (e.g. pasting a credential from another window) that starts inside
+  // the modal and releases over the backdrop must not dismiss it.
+  const backdropMouseDown = useRef(false);
 
   useEffect(() => {
     setTested(isEdit);
@@ -147,10 +151,15 @@ export function ConnectionModal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
+      onMouseDown={(e) => {
+        backdropMouseDown.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && backdropMouseDown.current) onClose();
+      }}
     >
       <div
-        className="max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-xl bg-bg-primary p-5 shadow-xl"
+        className="max-h-[85vh] w-[80vw] max-w-[1400px] overflow-y-auto rounded-xl bg-bg-primary p-5 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-start justify-between">

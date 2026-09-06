@@ -445,6 +445,13 @@ async def _make_request(db_session, **overrides) -> TenantProvisioningRequest:
     return req
 
 
+def _confirmation_token(email: FakeEmail) -> str:
+    """Extract the raw verification token from a sent account_confirmation email."""
+    call = next(c for c in email.calls if c["template"] == "account_confirmation")
+    link = call["variables"]["confirmation_link"]
+    return link.split("token=", 1)[1]
+
+
 @pytest.mark.asyncio
 async def test_provision_basic_cloud(db_session):
     req = await _make_request(db_session)
@@ -453,7 +460,14 @@ async def test_provision_basic_cloud(db_session):
     assert out.status == "provisioned"
     assert out.data_plane_status == "shared_cloud_bound"
     assert out.vpn_status == "not_required"
-    assert out.root_admin_status == "invite_sent"
+    # Two-step invite: only the email-ownership confirmation is sent -- no
+    # Supabase identity or credential email exists yet.
+    assert out.root_admin_status == "pending_email_verification"
+    assert ("root@acme.com", "account_confirmation") in email.sent
+    assert not any(
+        t in ("workspace_ready_with_password_setup", "workspace_ready")
+        for _, t in email.sent
+    )
     # tenant + membership created
     tenant = await db_session.scalar(select(Tenant).where(Tenant.slug == "acme"))
     assert tenant is not None
@@ -461,20 +475,7 @@ async def test_provision_basic_cloud(db_session):
         select(TenantMembership).where(TenantMembership.tenant_id == tenant.id)
     )
     assert membership.role == "tenant_admin"
-    binding = await db_session.scalar(select(TenantAuthBinding))
-    assert binding.supabase_user_id == "supa-root@acme.com"
-    assert (
-        "root@acme.com",
-        "workspace_ready_with_password_setup",
-    ) in email.sent
-    # Exactly one onboarding email (no separate workspace-ready + password email).
-    onboarding = [
-        t
-        for _, t in email.sent
-        if t
-        in ("workspace_ready_with_password_setup", "workspace_ready")
-    ]
-    assert len(onboarding) == 1
+    assert await db_session.scalar(select(TenantAuthBinding)) is None
     # Issue 5: no default workspace project is auto-created by default.
     from app.models.project import Project
 
@@ -484,6 +485,36 @@ async def test_provision_basic_cloud(db_session):
         )
     ).all()
     assert projects == []
+
+    # Step 2: the admin follows the confirmation link -- only now is the
+    # Supabase identity created and the real credential email sent.
+    from app.services.email_verification_service import consume_verification_token
+
+    raw_token = _confirmation_token(email)
+    result = await consume_verification_token(db_session, raw_token)
+    await db_session.commit()
+    assert result.already_verified is False
+    root_user = await db_session.get(User, result.user.id)
+    assert root_user.email_verified is True
+
+    svc = _onboarding(db_session, email=email)
+    await svc.complete_root_admin_verification(root_user, tenant)
+    await db_session.commit()
+
+    binding = await db_session.scalar(select(TenantAuthBinding))
+    assert binding.supabase_user_id == "supa-root@acme.com"
+    assert (
+        "root@acme.com",
+        "workspace_ready_with_password_setup",
+    ) in email.sent
+    onboarding = [
+        t
+        for _, t in email.sent
+        if t in ("workspace_ready_with_password_setup", "workspace_ready")
+    ]
+    assert len(onboarding) == 1
+    await db_session.refresh(req)
+    assert req.root_admin_status == "invite_sent"
 
 
 @pytest.mark.asyncio
@@ -563,10 +594,25 @@ async def test_provision_is_idempotent(db_session):
 @pytest.mark.asyncio
 async def test_provision_links_existing_supabase_user(db_session):
     req = await _make_request(db_session)
+    email = FakeEmail()
     out = await _onboarding(
-        db_session, supabase=FakeSupabase(existing=True)
+        db_session, supabase=FakeSupabase(existing=True), email=email
     ).provision_from_stripe_activation(req.id)
-    assert out.root_admin_status == "invite_sent"
+    # Supabase is not contacted until the admin verifies their email.
+    assert out.root_admin_status == "pending_email_verification"
+
+    from app.services.email_verification_service import consume_verification_token
+
+    tenant = await db_session.scalar(select(Tenant).where(Tenant.slug == "acme"))
+    raw_token = _confirmation_token(email)
+    result = await consume_verification_token(db_session, raw_token)
+    await db_session.commit()
+
+    svc = _onboarding(db_session, supabase=FakeSupabase(existing=True), email=email)
+    await svc.complete_root_admin_verification(result.user, tenant)
+    await db_session.commit()
+    await db_session.refresh(req)
+    assert req.root_admin_status == "invite_sent"
 
 
 # --------------------------------------------------------------------------- #

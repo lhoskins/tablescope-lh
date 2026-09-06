@@ -88,7 +88,10 @@ async def test_create_tenant_and_user(
     assert len(response.json()) == 1
 
     assert (customer_dir / "acme").exists()
-    assert (customer_dir / "acme" / "users" / "supa-alice@example.com").exists()
+    # Two-step invite: the user's folder is provisioned immediately (keyed by
+    # the local numeric id), before any Supabase identity exists -- Supabase
+    # creation is deferred until the invitee verifies their email.
+    assert (customer_dir / "acme" / "users" / str(user["id"])).exists()
 
 
 async def test_anonymous_cannot_create_tenant(client) -> None:

@@ -27,6 +27,10 @@ from app.services.allowed_domains import enforce_allowed_domain
 from app.services.crypto import encrypt_secret
 from app.services.customer_folders import CustomerFolderService
 from app.services.email_service import EmailService
+from app.services.email_verification_service import (
+    USER_INVITE,
+    create_verification_token,
+)
 from app.services.supabase_auth_service import (
     SupabaseAdminError,
     SupabaseAuthService,
@@ -76,46 +80,19 @@ async def create_user(
         session, tenant_id=tenant_id, email=payload.email, purpose="invite"
     )
 
-    # Supabase is the primary authenticator: create/link a Supabase identity and
-    # send a "set your password" invite that lands on the set-password page. No
-    # local password is ever stored. If Supabase is unavailable, the user is NOT
-    # created (no local fallback).
-    settings = get_settings()
-    setup_url = f"{settings.app_base_url}/{tenant.slug}/set-password"
-    supa = SupabaseAuthService()
-    try:
-        supa_user = await supa.create_or_invite_user(
-            payload.email,
-            first_name=payload.display_name,
-            redirect_to=setup_url,
-        )
-    except (SupabaseConfigError, SupabaseAdminError) as exc:
-        logger.warning("Supabase user creation failed for %s: %s", payload.email, exc)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication provider unavailable; user was not created",
-        ) from exc
-
-    user = await supa.link_local_user(
-        session,
-        supabase_user_id=supa_user.id,
-        email=payload.email,
+    # Two-step invite: create the local user unverified first. Supabase
+    # identity creation and the "set your password" credential email are
+    # deferred until the invitee proves they own this inbox (see
+    # complete_user_invitation, run by POST /api/auth/verify-email) -- no
+    # local password is ever stored, and no login information is sent to an
+    # unverified address.
+    user = User(
         tenant_id=tenant_id,
+        email=payload.email,
         role=payload.role,
-        first_name=payload.display_name,
+        display_name=payload.display_name or payload.email,
     )
-    user.role = payload.role
-    if payload.display_name:
-        user.display_name = payload.display_name
-    invite_link = supa_user.action_link
-    if invite_link is None:
-        try:
-            invite_link = await supa.generate_magic_link(
-                payload.email, redirect_to=setup_url
-            )
-        except SupabaseAdminError as exc:
-            logger.warning("Could not generate set-password link for %s: %s", payload.email, exc)
-
+    session.add(user)
     try:
         await session.flush()
     except IntegrityError as exc:
@@ -164,26 +141,98 @@ async def create_user(
     await session.commit()
     await session.refresh(user)
 
-    # Send the branded magic-link invite (best-effort; never fails user creation).
+    # Step 1 of the two-step invite: ask the invitee to confirm they own this
+    # inbox before any Supabase identity or login credential is generated
+    # (best-effort; never fails user creation).
+    try:
+        settings = get_settings()
+        raw_token = await create_verification_token(
+            session, tenant_id=tenant_id, user_id=user.id, purpose=USER_INVITE
+        )
+        confirmation_link = f"{settings.app_base_url}/verify-email?token={raw_token}"
+        await EmailService().send_transactional_email(
+            to=payload.email,
+            template="account_confirmation",
+            variables={
+                "first_name": payload.display_name or "",
+                "confirmation_link": confirmation_link,
+                "expiration_time": "24 hours",
+            },
+            tenant_id=tenant_id,
+        )
+    except Exception as exc:  # delivery is best-effort
+        logger.warning(
+            "Failed to send verification email to %s: %s", payload.email, exc
+        )
+
+    return _user_read_tenant(user)
+
+
+async def complete_user_invitation(
+    session: AsyncSession, user: User, tenant: Tenant
+) -> None:
+    """Step 2 of the two-step invite: create/link the Supabase identity and
+    send the real "set your password" credential email, now that the
+    invitee has verified their email address.
+
+    Called by ``POST /api/auth/verify-email`` once the confirmation link is
+    consumed. Best-effort: Supabase or email delivery failures are logged,
+    not raised, since the user record already exists.
+    """
+    settings = get_settings()
+    setup_url = f"{settings.app_base_url}/{tenant.slug}/set-password"
+    supa = SupabaseAuthService()
+    try:
+        supa_user = await supa.create_or_invite_user(
+            user.email,
+            first_name=user.display_name,
+            redirect_to=setup_url,
+        )
+    except (SupabaseConfigError, SupabaseAdminError) as exc:
+        logger.warning(
+            "Supabase user creation failed for %s: %s", user.email, exc
+        )
+        return
+
+    await supa.link_local_user(
+        session,
+        supabase_user_id=supa_user.id,
+        email=user.email,
+        tenant_id=tenant.id,
+        role=user.role,
+        first_name=user.display_name,
+    )
+
+    invite_link = supa_user.action_link
+    if invite_link is None:
+        try:
+            invite_link = await supa.generate_magic_link(
+                user.email, redirect_to=setup_url
+            )
+        except SupabaseAdminError as exc:
+            logger.warning(
+                "Could not generate set-password link for %s: %s", user.email, exc
+            )
+
+    await session.commit()
+
     if invite_link is not None:
         try:
             await EmailService().send_transactional_email(
-                to=payload.email,
+                to=user.email,
                 template="user_invitation",
                 variables={
-                    "first_name": payload.display_name or "",
+                    "first_name": user.display_name or "",
                     "inviter_name": "A Tablescope administrator",
                     "workspace_name": tenant.name,
-                    "role_name": payload.role.replace("_", " ").title(),
+                    "role_name": user.role.replace("_", " ").title(),
                     "invitation_link": invite_link,
                     "expiration_date": "in 24 hours",
                 },
-                tenant_id=tenant_id,
+                tenant_id=tenant.id,
             )
         except Exception as exc:  # delivery is best-effort
-            logger.warning("Failed to send invite email to %s: %s", payload.email, exc)
-
-    return _user_read_tenant(user)
+            logger.warning("Failed to send invite email to %s: %s", user.email, exc)
 
 
 @router.get("/{tenant_id}/users", response_model=list[UserRead])

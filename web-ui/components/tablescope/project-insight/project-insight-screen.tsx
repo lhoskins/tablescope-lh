@@ -14,7 +14,7 @@ import { IntelligenceWorkspace } from "@/components/tablescope/insights/intellig
 import { SaveInsightToDashboardModal } from "@/components/tablescope/home/save-insight-to-dashboard-modal";
 import { useInsightFeedback } from "@/lib/hooks/use-insight-feedback";
 import { createHomePin, getHomePins } from "@/lib/api/home-pins";
-import { suggestInsights, type InsightCard } from "@/lib/api/home-intelligence";
+import { suggestInsights, type InsightCard, type ProjectResult } from "@/lib/api/home-intelligence";
 
 import { projectInsightApi, type ProjectInsight } from "@/lib/api/project-insight";
 import {
@@ -133,6 +133,18 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     queryFn: () => suggestInsights(granularity, projectIdNum),
     staleTime: 5 * 60_000,
     enabled: !Number.isNaN(projectIdNum),
+    // The backing "insights" suite run is a background job that keeps going
+    // even if the user navigates away (see home_intelligence_suggestions.py).
+    // Polling while the snapshot reports `stale` is what lets a caller who
+    // left and came back (or just reloaded) see the in-progress indicator
+    // for a still-running Analyze/Refresh instead of silent stale data.
+    refetchInterval: (query) => {
+      const latest = query.state.data as { projects?: ProjectResult[] } | undefined;
+      const stillRunning = latest?.projects?.some(
+        (p) => Number(p.projectId) === projectIdNum && p.stale,
+      );
+      return stillRunning ? 5_000 : false;
+    },
   });
 
   // suggestInsights (GET-or-generate) returns the cached ProjectIntelligenceSnapshot
@@ -254,11 +266,24 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     [respondToReview],
   );
 
+  // `analyzeInsights.isPending`/`insightsQuery.isFetching` only reflect this
+  // component instance's own in-flight request -- they reset to false on
+  // navigation away and remount, even though the backend job keeps running.
+  // The snapshot's own `stale` flag is what actually survives that: it is
+  // still true on a fresh mount if a previously-started run has not
+  // completed yet, so a user who navigates away and comes back still sees
+  // the in-progress indicator instead of stale data with no explanation.
+  const insightsStillRunning =
+    insightsQuery.data?.projects?.some(
+      (p) => Number(p.projectId) === projectIdNum && p.stale,
+    ) ?? false;
+
   const running =
     refresh.isPending ||
     isFetching ||
     insightsQuery.isFetching ||
-    analyzeInsights.isPending;
+    analyzeInsights.isPending ||
+    insightsStillRunning;
 
   const lastUpdated = useMemo(
     () => (insight.lastUpdatedAt ? new Date(insight.lastUpdatedAt) : null),

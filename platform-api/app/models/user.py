@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from passlib.context import CryptContext
-from sqlalchemy import JSON, Boolean, ForeignKey, String, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -41,6 +43,11 @@ class User(TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_super_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Set once the owner has proven they control this inbox (the
+    # account_confirmation email link). Credentials/login info (the Supabase
+    # invite / set-password link) are not generated or sent until this is True.
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Profile avatar: a safe served URL (never a filesystem path) plus the
     # stored object key/filename used to locate the image on disk / in S3.
     avatar_url: Mapped[str | None] = mapped_column(String(512), nullable=True)

@@ -66,6 +66,7 @@ from app.models.database_data_source_assignment import (
 from app.models.directory_derived_grant import DirectoryDerivedGrant
 from app.models.directory_group_role_mapping import DirectoryGroupRoleMapping
 from app.models.directory_sync_run import DirectorySyncRun
+from app.models.email_verification_token import EmailVerificationToken
 from app.models.file_import_job import FileImportJob
 from app.models.file_source_meta import FileSourceMeta
 from app.models.file_source_version import FileSourceVersion
@@ -197,6 +198,7 @@ __all__ = [
     "DirectoryDerivedGrant",
     "DirectoryGroupRoleMapping",
     "DirectorySyncRun",
+    "EmailVerificationToken",
     "FileImportJob",
     "FileSourceMeta",
     "FileSourceVersion",
