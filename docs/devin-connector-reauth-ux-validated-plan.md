@@ -5,7 +5,7 @@
 **Merge target:** `UX-design-03`
 **Branch base:** `UX-design-03` tip (`259ccbd6`) at time of branching
 
-**`platform-api/` + `web-ui/` · no migration · all tests green**
+**`platform-api/` + `web-ui/` + `docker-compose.yml`/`.env.example` · no migration · all tests green**
 
 ---
 
@@ -136,6 +136,19 @@ looks auth-related is reclassified.
 `components/tablescope/database-connectors/google-sheets-connection-modal.tsx`,
 `components/tablescope/data-source-builder/{google-sheets-source-modal,saas-source-modal,data-review-modal}.tsx`.
 
+**Infra (unrelated bug found while live-testing this branch, fixed alongside it):**
+`docker-compose.yml`, `.env.example` — `GOOGLE_DRIVE_CLIENT_ID`/`_CLIENT_SECRET`/`_REDIRECT_URI`
+were never wired into platform-api's environment block at all, so setting them in `.env`
+had no effect on a compose deployment; the container always saw the empty defaults and a
+misconfigured/stale redirect sent the browser to a dead URL after Google's consent screen.
+`GOOGLE_DRIVE_REDIRECT_URI` now defaults to `${APP_BASE_URL}/connector-callbacks/google`.
+This wiring fix ships with the merge below like everything else on this branch — it's a
+plain repo change. **It does not by itself make Google Drive work anywhere**: the actual
+client ID/secret and (only if `APP_BASE_URL` doesn't already resolve correctly for this
+deployment) an explicit `GOOGLE_DRIVE_REDIRECT_URI` still have to be set in that
+environment's real `.env`, which is not part of this repo and cannot be supplied by a
+merge — see step 0 under Verify live.
+
 All new backend tests were proven fail-before/pass-after via `git stash` on the touched
 files.
 
@@ -149,7 +162,7 @@ files.
 | `npm run typecheck` (web-ui) | clean |
 | `npm run lint` (web-ui) | clean — pre-existing `max-lines`/`exhaustive-deps` warnings on unrelated files only |
 | `npm run build` (web-ui) | succeeds |
-| Full `pytest -q` (whole platform-api suite) | _fill in after full run completes_ |
+| Full `pytest -q` (whole platform-api suite) | 1894 passed, 12 failed, 4 skipped in 1061s. All 12 failures confirmed pre-existing on `UX-design-03` (identical to the 12 documented in the `fix/query-authorization-database-datasources` merge doc): `test_billing.py::test_provision_isolated_data_plane`/`test_provision_isolated_vpn_awaits_details` (broken by the tenant-private-S3 data-plane feature's fail-closed storage resolver, unrelated), `test_visualization_engine.py::test_many_categories_is_horizontal_bar`, `test_percent_change_summary.py` (4 tests), `test_ai_dashboard_pipeline.py::test_correct_widget_converts_oversized_pie`, `test_ask_pipeline.py::test_matrix_resolves_to_heatmap_not_a_narrowed_bar`, `test_business_insight_phase1.py` (3 snapshot-staleness tests) — none touch any file this branch changes. |
 
 ```bash
 cd platform-api
@@ -193,6 +206,16 @@ docker compose up -d platform-api platform-api-worker web-ui
 
 ## Verify live
 
+0. **Host-level, not part of this merge:** confirm `APP_BASE_URL` is correct for this
+   deployment (so the new `GOOGLE_DRIVE_REDIRECT_URI` default resolves to a real,
+   reachable URL), or set `GOOGLE_DRIVE_REDIRECT_URI` explicitly if it doesn't. Confirm
+   `GOOGLE_DRIVE_CLIENT_ID`/`_CLIENT_SECRET` are set in this environment's `.env`. Confirm
+   the exact same redirect URI is registered under "Authorized redirect URIs" on that
+   OAuth client in Google Cloud Console (APIs & Services → Credentials) — a mismatch here
+   either makes Google reject the request outright or sends the browser back to a dead
+   URL after consent. None of this is a git change; it's environment/secrets
+   configuration that has to be done directly on the host regardless of when this branch
+   merges.
 1. Let a Google Drive connection's stored token go invalid (or use a tenant where it
    already has). In the Data Source Builder, click **Create Data Source** on that
    connection: confirm a "Reauthorize" banner appears (not a dead-end error), clicking it
