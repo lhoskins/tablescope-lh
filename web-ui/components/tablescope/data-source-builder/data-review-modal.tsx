@@ -5,13 +5,23 @@ import { IconLoader2, IconX } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api-client";
 import {
+  connectorDisplayName,
+  listSaasCredentials,
+  saasCredentialAsCreatedConnection,
+  type SaasCredential,
+} from "@/lib/api/connectors";
+import {
   previewCreatedSource,
   previewDbTable,
   type TablePreviewResult,
 } from "@/lib/api/data-source-builder";
 import { useBuilderStore } from "@/lib/stores/data-source-builder-store";
 import { GoogleSheetsConnectionModal } from "@/components/tablescope/database-connectors/google-sheets-connection-modal";
+import { ConnectionModal } from "@/components/tablescope/database-connectors/connection-modal";
+import { connectorSpec } from "@/components/tablescope/database-connectors/connector-fields";
 import type { FlatItem } from "./flatten";
+
+const GOOGLE_DRIVE_CONNECTOR_TYPE = "google_drive";
 
 function cell(value: unknown): string {
   if (value === null || value === undefined) return "—";
@@ -49,7 +59,9 @@ export function DataReviewModal({
   const [error, setError] = useState<string | null>(null);
   const [needsReauth, setNeedsReauth] = useState(false);
   const [reauthId, setReauthId] = useState<number | null>(null);
+  const [reauthConnectorType, setReauthConnectorType] = useState<string | null>(null);
   const [reauthorizing, setReauthorizing] = useState(false);
+  const [reauthCredential, setReauthCredential] = useState<SaasCredential | null>(null);
 
   const loadPreview = useCallback(() => {
     let cancelled = false;
@@ -66,12 +78,30 @@ export function DataReviewModal({
     setError(null);
     setNeedsReauth(false);
     setReauthId(null);
+    setReauthConnectorType(null);
+    setReauthCredential(null);
 
     const onError = (err: unknown) => {
       if (cancelled) return;
       if (err instanceof ApiError && err.code === "CONNECTOR_REAUTH_REQUIRED") {
         setNeedsReauth(true);
         setReauthId(err.credentialId);
+        setReauthConnectorType(err.connectorType);
+        if (
+          err.connectorType &&
+          err.connectorType !== GOOGLE_DRIVE_CONNECTOR_TYPE &&
+          err.credentialId != null
+        ) {
+          const credentialId = err.credentialId;
+          listSaasCredentials()
+            .then((creds) => {
+              if (cancelled) return;
+              setReauthCredential(creds.find((c) => c.id === credentialId) ?? null);
+            })
+            .catch(() => {
+              /* Reconnect still works with a minimal editTarget if this fails. */
+            });
+        }
         return;
       }
       setError(err instanceof Error ? err.message : "Could not load data");
@@ -160,11 +190,17 @@ export function DataReviewModal({
           ) : needsReauth ? (
             <div className="flex flex-col items-center gap-3 py-10 text-center">
               <p className="max-w-sm text-small text-ink-secondary">
-                Google Drive access has expired for this data source. Reauthorize to
-                load a preview.
+                {connectorDisplayName(reauthConnectorType ?? GOOGLE_DRIVE_CONNECTOR_TYPE)}{" "}
+                access has expired for this data source.{" "}
+                {reauthConnectorType === GOOGLE_DRIVE_CONNECTOR_TYPE
+                  ? "Reauthorize"
+                  : "Reconnect"}{" "}
+                to load a preview.
               </p>
               <Button variant="primary" onClick={() => setReauthorizing(true)}>
-                Reauthorize Google Drive
+                {reauthConnectorType === GOOGLE_DRIVE_CONNECTOR_TYPE
+                  ? "Reauthorize Google Drive"
+                  : `Reconnect ${connectorDisplayName(reauthConnectorType ?? "")}`}
               </Button>
             </div>
           ) : error ? (
@@ -231,7 +267,7 @@ export function DataReviewModal({
         </div>
       </div>
 
-      {reauthorizing && (
+      {reauthorizing && reauthConnectorType === GOOGLE_DRIVE_CONNECTOR_TYPE && (
         <GoogleSheetsConnectionModal
           credentialId={reauthId ?? undefined}
           onClose={() => setReauthorizing(false)}
@@ -241,6 +277,36 @@ export function DataReviewModal({
           }}
         />
       )}
+
+      {reauthorizing &&
+        reauthConnectorType &&
+        reauthConnectorType !== GOOGLE_DRIVE_CONNECTOR_TYPE &&
+        (() => {
+          const spec = connectorSpec(reauthConnectorType);
+          if (!spec) return null;
+          const editTarget = reauthCredential
+            ? saasCredentialAsCreatedConnection(reauthCredential)
+            : {
+                kind: "saas" as const,
+                id: reauthId ?? 0,
+                friendlyName: connectorDisplayName(reauthConnectorType),
+                connectorKey: reauthConnectorType,
+                connectorName: connectorDisplayName(reauthConnectorType),
+                hostOrAccount: connectorDisplayName(reauthConnectorType),
+                lastTested: null,
+              };
+          return (
+            <ConnectionModal
+              spec={spec}
+              editTarget={editTarget}
+              onClose={() => setReauthorizing(false)}
+              onSaved={() => {
+                setReauthorizing(false);
+                loadPreview();
+              }}
+            />
+          );
+        })()}
     </div>
   );
 }

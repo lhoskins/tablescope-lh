@@ -11,8 +11,7 @@ import {
   type SaasObject,
 } from "@/lib/api/data-source-builder";
 import {
-  connectorDisplayName,
-  type CreatedConnection,
+  saasCredentialAsCreatedConnection,
   type SaasCredential,
 } from "@/lib/api/connectors";
 import {
@@ -26,18 +25,6 @@ import { ConnectionModal } from "../database-connectors/connection-modal";
 
 function isReauthRequired(err: unknown): boolean {
   return err instanceof ApiError && err.code === "CONNECTOR_REAUTH_REQUIRED";
-}
-
-function asCreatedConnection(credential: SaasCredential): CreatedConnection {
-  return {
-    kind: "saas",
-    id: credential.id,
-    friendlyName: credential.display_name,
-    connectorKey: credential.connector_type,
-    connectorName: connectorDisplayName(credential.connector_type),
-    hostOrAccount: connectorDisplayName(credential.connector_type),
-    lastTested: credential.last_tested_at ?? credential.created_at,
-  };
 }
 
 export function SaaSSourceModal({
@@ -342,7 +329,7 @@ export function SaaSSourceModal({
           return (
             <ConnectionModal
               spec={spec}
-              editTarget={asCreatedConnection(credential)}
+              editTarget={saasCredentialAsCreatedConnection(credential)}
               onClose={() => setReauthorizing(false)}
               onSaved={() => {
                 setReauthorizing(false);

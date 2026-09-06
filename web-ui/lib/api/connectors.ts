@@ -171,6 +171,23 @@ export function connectorDisplayName(key: string): string {
   return CONNECTOR_NAMES[key] ?? key.charAt(0).toUpperCase() + key.slice(1);
 }
 
+/** Build the `CreatedConnection` shape `ConnectionModal`'s `editTarget` expects
+ * from a raw `SaasCredential`, for reconnect flows that only have the
+ * credential (not the full `listCreatedConnections()` row) in hand. */
+export function saasCredentialAsCreatedConnection(
+  credential: SaasCredential,
+): CreatedConnection {
+  return {
+    kind: "saas",
+    id: credential.id,
+    friendlyName: credential.display_name,
+    connectorKey: credential.connector_type,
+    connectorName: connectorDisplayName(credential.connector_type),
+    hostOrAccount: connectorDisplayName(credential.connector_type),
+    lastTested: credential.last_tested_at ?? credential.created_at,
+  };
+}
+
 // ── Google Drive / Sheets connector OAuth flow ───────────────────────
 
 export interface AuthorizeSpreadsheetResponse {

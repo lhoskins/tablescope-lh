@@ -13,12 +13,14 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from app.auth.context import RequestContext
 from app.auth.membership import require_membership
 from app.auth.rbac import Role, require_role
 from app.database import SessionLocal
 from app.models.file_source_meta import FileSourceMeta
+from app.models.saas_object_data_source import SaasObjectDataSource
 from app.routes.ai_proxy_shared import _authorize_project_access
 from app.routes.dashboards_widget_query import WidgetFilter, _build_where
 from app.routes.query_sql_helpers import (
@@ -99,37 +101,65 @@ def _replace_source_labels(sql: str, mapping: dict[str, str]) -> str:
 CONNECTOR_REAUTH_REQUIRED = "CONNECTOR_REAUTH_REQUIRED"
 
 
-async def _reauth_required_error(exc: SourceReauthRequiredError) -> HTTPException:
-    """Convert a live Google Sheets auth failure into the same structured
-    reauth prompt the browse-time connector routes already return, so a
-    "click on a table" preview can trigger reconnection instead of
-    dead-ending on Teiid's raw error text.
+#: Teiid's ``db_type`` for a live Google Sheets translator source
+#: (``generate_teiid_names(..., db_type="google-sheets", ...)``) versus the
+#: frontend/``ConnectorCredential`` convention of ``"google_drive"`` used
+#: everywhere else (``SourceType``, ``connectorDisplayName``) -- translated
+#: here so the frontend never has to know about the Teiid-internal spelling.
+_CONNECTOR_TYPE_DISPLAY = {
+    "google-sheets": ("google_drive", "Google Drive"),
+    "servicenow": ("servicenow", "ServiceNow"),
+    "salesforce": ("salesforce", "Salesforce"),
+    "hubspot": ("hubspot", "HubSpot"),
+    "quickbooks": ("quickbooks", "QuickBooks"),
+}
 
-    Resolves the failing source back to its ``ConnectorCredential`` (stored
-    on the ``FileSourceMeta`` row at registration time) when possible, so the
-    frontend can scope the reauthorize flow to the right connection; falls
-    back to a reauth prompt with no credential id if that lookup fails for
-    any reason (a stale/deleted source row should never turn this back into
-    a dead-end 502).
+
+async def _reauth_required_error(exc: SourceReauthRequiredError) -> HTTPException:
+    """Convert a live query auth failure into the same structured reauth
+    prompt the browse-time connector routes already return, so a "click on a
+    table" preview can trigger reconnection instead of dead-ending on
+    Teiid's raw error text.
+
+    Resolves the failing source back to its credential -- via
+    ``FileSourceMeta.live_source_params`` for a Google Sheets source, or via
+    ``SaasObjectDataSource`` for a ServiceNow/Salesforce/HubSpot/QuickBooks
+    one -- when possible, so the frontend can scope the reauthorize flow to
+    the right connection; falls back to a reauth prompt with no credential id
+    if that lookup fails for any reason (a stale/deleted source row should
+    never turn this back into a dead-end 502).
     """
+    connector_type, connector_name = _CONNECTOR_TYPE_DISPLAY.get(
+        exc.connector_type, (exc.connector_type, exc.connector_type)
+    )
     credential_id: int | None = None
-    if exc.file_source_meta_id is not None:
-        try:
-            async with SessionLocal() as session:
-                source = await session.get(FileSourceMeta, exc.file_source_meta_id)
+    try:
+        async with SessionLocal() as session:
+            if exc.connector_type == "google-sheets":
+                source = await session.get(FileSourceMeta, exc.data_source_id)
                 if source is not None:
                     credential_id = (source.live_source_params or {}).get(
                         "connector_credential_id"
                     )
-        except Exception:  # pragma: no cover - best-effort lookup
-            logger.warning(
-                "Failed to resolve credential for reauth-required source %s",
-                exc.file_source_meta_id,
-                exc_info=True,
-            )
+            else:
+                saas = await session.scalar(
+                    select(SaasObjectDataSource).where(
+                        SaasObjectDataSource.database_data_source_id == exc.data_source_id
+                    )
+                )
+                if saas is not None:
+                    credential_id = saas.credential_id
+    except Exception:  # pragma: no cover - best-effort lookup
+        logger.warning(
+            "Failed to resolve credential for reauth-required source %s (%s)",
+            exc.data_source_id,
+            exc.connector_type,
+            exc_info=True,
+        )
     detail: dict[str, Any] = {
         "code": CONNECTOR_REAUTH_REQUIRED,
-        "message": "Google Drive access has expired. Reconnect to continue.",
+        "message": f"{connector_name} access has expired. Reconnect to continue.",
+        "connectorType": connector_type,
     }
     if credential_id is not None:
         detail["credentialId"] = credential_id

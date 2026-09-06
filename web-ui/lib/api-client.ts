@@ -34,24 +34,30 @@ function getApiUrl(): string {
  * parsing English error text. `null` when the backend didn't send one.
  *
  * `credentialId` is the connector credential a `CONNECTOR_REAUTH_REQUIRED`
- * error names (e.g. from a live Google Sheets query failing through Teiid),
- * so a caller can scope a reconnect flow to the right connection without a
- * second lookup. `null` when the backend didn't send one. */
+ * error names (e.g. from a live query failing through Teiid), so a caller
+ * can scope a reconnect flow to the right connection without a second
+ * lookup. `connectorType` names which connector needs reconnecting
+ * (`"google_drive"`, `"servicenow"`, `"salesforce"`, `"hubspot"`, or
+ * `"quickbooks"`) so a caller can pick the right reconnect UI. Both `null`
+ * when the backend didn't send them. */
 export class ApiError extends Error {
   status: number;
   code: string | null;
   credentialId: number | null;
+  connectorType: string | null;
   constructor(
     message: string,
     status: number,
     code: string | null = null,
     credentialId: number | null = null,
+    connectorType: string | null = null,
   ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
     this.credentialId = credentialId;
+    this.connectorType = connectorType;
   }
 }
 
@@ -219,6 +225,7 @@ async function request<T>(
     let detail = `Request failed: ${response.status}`;
     let code: string | null = null;
     let credentialId: number | null = null;
+    let connectorType: string | null = null;
     try {
       const payload = await response.json();
       code = payload?.code ?? payload?.error ?? null;
@@ -233,9 +240,11 @@ async function request<T>(
             code?: string;
             message?: string;
             credentialId?: number;
+            connectorType?: string;
           };
           code = code ?? detailObj?.code ?? null;
           credentialId = detailObj?.credentialId ?? null;
+          connectorType = detailObj?.connectorType ?? null;
           detail =
             typeof detailObj?.message === "string" ? detailObj.message : JSON.stringify(payload.detail);
         }
@@ -249,7 +258,7 @@ async function request<T>(
     if (isAuthExpiry(response.status, code)) {
       redirectToLogin();
     }
-    throw new ApiError(detail, response.status, code, credentialId);
+    throw new ApiError(detail, response.status, code, credentialId, connectorType);
   }
 
   if (response.status === 204) {

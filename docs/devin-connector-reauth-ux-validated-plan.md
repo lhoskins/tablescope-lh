@@ -165,6 +165,40 @@ job, never from a manual reconnect.
 - `quickbooks_token_refresh.py`: its private duplicate of this logic replaced with a call
   to the shared function (no behavior change to the cron job itself, just deduplicated).
 
+### 6. A third bug found live-testing #5's fix: the query-time reauth detection was
+   Google-Sheets-only
+
+After #5 shipped, live-testing surfaced a third, narrower bug in the *query.py* reauth
+detection built earlier in this branch (item 3 above): it correctly recognized a Google
+Sheets translator failure (`ds_<id>_google-sheets`) but never generalized to the other four
+live-translator connector types. Clicking on an already-created ServiceNow table with a
+rejected credential (confirmed live: `TEIID30504 ds_42_servicenow: ServiceNow HTTP 401:
+{"error":{"message":"User is not authenticated"...}`) still surfaced the raw Teiid error
+instead of the reauthorize prompt, even though the ServiceNow "Create Data Source" picker
+correctly showed the Reconnect action for the very same broken credential — a visibly
+inconsistent experience for the exact scenario this branch exists to fix.
+
+**Fix:**
+- `query_sql_helpers.py`: `SourceReauthRequiredError` now carries `data_source_id` +
+  `connector_type` (was `file_source_meta_id`, implicitly Google-Sheets-only). The detection
+  regex (`_live_translator_reauth_match`, was `_google_sheets_reauth_source_id`) now matches
+  `ds_<id>_(google-sheets|servicenow|salesforce|hubspot|quickbooks)`, and the auth-hint
+  pattern was widened to also catch `HTTP 400/401/403` and "not authenticated" (observed in
+  the real ServiceNow translator error) alongside the existing token/refresh/invalid_grant
+  wording (observed in the real Google translator error).
+- `query.py`: `_reauth_required_error` now resolves the credential differently depending on
+  `connector_type` — via `FileSourceMeta.live_source_params` for Google Sheets (unchanged),
+  or via `SaasObjectDataSource.credential_id` (joined on `database_data_source_id`) for the
+  other four. The 409 detail now also carries `connectorType` (translated from Teiid's
+  internal `"google-sheets"` spelling to the frontend's `"google_drive"` convention; the
+  other four pass through unchanged) so the frontend can pick the right reconnect UI.
+- Frontend: `ApiError` gained `connectorType: string | null`. `DataReviewModal` ("click on a
+  table") now branches on it: Google Drive still opens `GoogleSheetsConnectionModal` as
+  before; the four SaaS types now fetch the credential (`listSaasCredentials`) and open the
+  same `ConnectionModal` reconnect flow `saas-source-modal.tsx` already uses, retrying the
+  preview automatically on success. Extracted `saasCredentialAsCreatedConnection` from
+  `saas-source-modal.tsx` into `lib/api/connectors.ts` so both call sites share it.
+
 ### Files changed
 
 **Backend:** `app/connectors/base.py`, `app/connectors/saas/{servicenow,hubspot,quickbooks,salesforce}.py`,
@@ -175,7 +209,9 @@ job, never from a manual reconnect.
 **Backend tests (new/updated):** `tests/test_saas_connectors.py`,
 `tests/test_spreadsheet_connections_routes.py` (+1: reauthorizing re-registers an
 already-confirmed Google Sheet), `tests/test_saas_sources_reauth.py` (new; +3 on the
-SaaS re-registration fix), `tests/test_query_datasource_reauth.py` (new).
+SaaS re-registration fix), `tests/test_query_datasource_reauth.py` (new; covers Google
+Sheets, ServiceNow, and the generalized `_live_translator_reauth_match` unit tests for
+all five connector types).
 
 **Frontend:** `lib/api-client.ts`, `lib/api/connectors.ts`,
 `components/tablescope/database-connectors/google-sheets-connection-modal.tsx`,
@@ -201,7 +237,7 @@ files.
 
 | Suite | Result |
 |---|---|
-| `pytest -q tests/test_saas_sources_reauth.py tests/test_saas_connectors.py tests/test_spreadsheet_connections_routes.py tests/test_google_drive_oauth.py tests/test_google_drive_client.py tests/test_query_datasource_reauth.py tests/test_query_datasource_authorization.py tests/test_datasource_lifecycle.py` | 70 passed, 0 regressions |
+| `pytest -q tests/test_saas_sources_reauth.py tests/test_saas_connectors.py tests/test_spreadsheet_connections_routes.py tests/test_google_drive_oauth.py tests/test_google_drive_client.py tests/test_query_datasource_reauth.py tests/test_query_datasource_authorization.py tests/test_query_datasource_global_filters.py tests/test_project_table_schema.py tests/test_datasource_lifecycle.py` | 92 passed, 0 regressions |
 | `ruff check` (all touched backend files, incl. `saas_source_service.py`/`registration.py`/both token-refresh tasks) | clean |
 | `mypy` (same files) | clean |
 | `npm run typecheck` (web-ui) | clean |
@@ -215,11 +251,15 @@ pytest -q
 ruff check app/connectors/base.py app/connectors/saas/hubspot.py app/connectors/saas/quickbooks.py \
   app/connectors/saas/salesforce.py app/connectors/saas/servicenow.py app/routes/query.py \
   app/routes/query_sql_helpers.py app/routes/saas_sources.py app/routes/spreadsheet_connections.py \
-  app/services/google_drive/client.py app/services/google_drive/oauth.py
+  app/services/google_drive/client.py app/services/google_drive/oauth.py \
+  app/services/google_drive/registration.py app/services/saas_source_service.py \
+  app/tasks/google_drive_token_refresh.py app/tasks/quickbooks_token_refresh.py
 mypy app/connectors/base.py app/connectors/saas/hubspot.py app/connectors/saas/quickbooks.py \
   app/connectors/saas/salesforce.py app/connectors/saas/servicenow.py app/routes/query.py \
   app/routes/query_sql_helpers.py app/routes/saas_sources.py app/routes/spreadsheet_connections.py \
-  app/services/google_drive/client.py app/services/google_drive/oauth.py
+  app/services/google_drive/client.py app/services/google_drive/oauth.py \
+  app/services/google_drive/registration.py app/services/saas_source_service.py \
+  app/tasks/google_drive_token_refresh.py app/tasks/quickbooks_token_refresh.py
 
 cd ../web-ui
 npm ci --no-audit --no-fund
@@ -279,8 +319,14 @@ docker compose up -d platform-api platform-api-worker web-ui
    was wired into the callback, so re-clicking the same table after reconnecting is the
    real proof, not just a green "connected" state.
 4. Repeat step 3 for an already-created ServiceNow/Salesforce/HubSpot/QuickBooks table
-   after reconnecting its credential via PATCH (the "Reconnect" action from step 2) — same
-   underlying gap, fixed the same way for all four connectors.
+   after reconnecting its credential via PATCH (the "Reconnect" action from step 2): confirm
+   clicking the table shows a "Reconnect <Connector>" button (not the raw
+   `TEIID30504 ... HTTP 401 ... not authenticated` string) and that completing it loads the
+   preview. This is the second live finding on this exact flow — the query-time reauth
+   detection originally only recognized Google Sheets' Teiid naming, so clicking an
+   already-created ServiceNow table kept showing the raw error even after "Create Data
+   Source" correctly offered Reconnect for the same credential; confirm the two are now
+   consistent.
 5. Confirm an unrelated query failure (e.g. a malformed saved query) still shows a plain
    error, not a reauth prompt.
 
