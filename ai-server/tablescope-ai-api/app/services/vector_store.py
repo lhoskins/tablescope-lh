@@ -21,6 +21,7 @@ from qdrant_client.models import (
 )
 
 from app.core.config import settings
+from app.models.schemas import VectorAccessClaims
 from app.services import llm_client
 
 
@@ -73,6 +74,12 @@ async def upsert_vectors(
     point_ids = []
     points = []
     for vec, payload in zip(vectors, payloads):
+        if payload.get("tenant_id") != tenant_id:
+            raise VectorStoreError("Vector payload tenant does not match target collection")
+        if payload.get("visibility") not in {"shared_project", "private"}:
+            raise VectorStoreError("Vector payload has an unsupported document visibility")
+        if payload.get("visibility") == "private" and not payload.get("owner_user_id"):
+            raise VectorStoreError("Private vector payload requires owner_user_id")
         pid = str(uuid.uuid4())
         point_ids.append(pid)
         payload["vector_id"] = pid
@@ -84,49 +91,46 @@ async def upsert_vectors(
 
 
 async def search_vectors(
-    tenant_id: int,
-    project_id: int,
-    user_id: int,
+    access: VectorAccessClaims,
     query_vector: list[float],
-    scope: str = "project",
-    is_project_member: bool = True,
     limit: int = 10,
 ) -> list[dict[str, Any]]:
-    """Search vectors with mandatory tenant + project + visibility filters.
+    """Search vectors using only platform-minted authorization claims.
 
-    The LLM never decides what to search. The caller (context_builder)
-    provides the authenticated scope, and this function enforces it.
+    Every result must be either shared with active members of this project, or
+    private content owned by this exact principal. Missing/unknown visibility
+    values match neither branch and are therefore denied. Legacy private
+    visibility labels remain owner-gated during re-indexing.
     """
     client = get_client()
-    name = _collection_name(tenant_id)
+    name = _collection_name(access.tenant_id)
 
-    # Build mandatory filters
-    must_conditions: list[FieldCondition] = [
-        FieldCondition(key="tenant_id", match=MatchValue(value=tenant_id)),
-        FieldCondition(key="project_id", match=MatchValue(value=project_id)),
+    must_conditions: list[Any] = [
+        FieldCondition(key="tenant_id", match=MatchValue(value=access.tenant_id)),
+        FieldCondition(key="project_id", match=MatchValue(value=access.project_id)),
     ]
-
-    if scope == "personal":
-        must_conditions.append(
-            FieldCondition(key="owner_user_id", match=MatchValue(value=user_id))
-        )
-    elif scope == "private_project":
-        must_conditions.append(
-            FieldCondition(key="owner_user_id", match=MatchValue(value=user_id))
-        )
-        must_conditions.append(
-            FieldCondition(key="visibility", match=MatchValue(value="private_project"))
-        )
-    elif scope == "shared_project":
-        if not is_project_member:
-            logger.warning(
-                "Non-member user %d attempted shared_project search on project %d",
-                user_id, project_id,
-            )
-            return []
-        must_conditions.append(
+    visibility_branches: list[Any] = []
+    if access.can_read_shared_documents:
+        visibility_branches.append(
             FieldCondition(key="visibility", match=MatchValue(value="shared_project"))
         )
+    for private_visibility in ("private", "private_project", "personal"):
+        visibility_branches.append(
+            Filter(
+                must=[
+                    FieldCondition(
+                        key="visibility", match=MatchValue(value=private_visibility)
+                    ),
+                    FieldCondition(
+                        key="owner_user_id",
+                        match=MatchValue(value=access.private_document_owner_user_id),
+                    ),
+                ]
+            )
+        )
+    if not visibility_branches:
+        raise VectorStoreError("Vector access claims authorize no document visibility")
+    must_conditions.append(Filter(should=visibility_branches))
 
     results = client.query_points(
         collection_name=name,
@@ -374,8 +378,7 @@ async def upsert_reference_vectors(
 
 
 async def search_reference_vectors(
-    tenant_id: int,
-    project_id: int,
+    access: VectorAccessClaims,
     query_vector: list[float],
     limit: int = 5,
 ) -> list[dict[str, Any]]:
@@ -391,13 +394,14 @@ async def search_reference_vectors(
             Filter(
                 must=[
                     FieldCondition(key="tier", match=MatchValue(value="company")),
-                    FieldCondition(key="tenant_id", match=MatchValue(value=tenant_id)),
+                    FieldCondition(key="tenant_id", match=MatchValue(value=access.tenant_id)),
                 ]
             ),
             Filter(
                 must=[
                     FieldCondition(key="tier", match=MatchValue(value="project")),
-                    FieldCondition(key="project_id", match=MatchValue(value=project_id)),
+                    FieldCondition(key="tenant_id", match=MatchValue(value=access.tenant_id)),
+                    FieldCondition(key="project_id", match=MatchValue(value=access.project_id)),
                 ]
             ),
         ]

@@ -8,12 +8,17 @@ final grounding package back to the SQL-generation and ask endpoints.
 import logging
 import uuid
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, status
 
 from app.core.activity import update_activity
 from app.core.security import verify_signature
-from app.models.schemas import GroundingSearchRequest, GroundingSearchResponse, GroundingPassage
-from app.services import llm_client, vector_store
+from app.models.schemas import (
+    GroundingPassage,
+    GroundingSearchRequest,
+    GroundingSearchResponse,
+)
+from app.services import context_builder, llm_client, vector_store
+from app.services.context_builder import ContextBuildError
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -40,17 +45,29 @@ async def grounding_search(req: GroundingSearchRequest) -> GroundingSearchRespon
     request_id = str(uuid.uuid4())
     verify_signature(req.model_dump(exclude={"signature"}, exclude_unset=True), req.signature)
 
+    try:
+        permissions = await context_builder._verify_permissions(
+            req.tenant_id, req.user_id, req.project_id
+        )
+        vector_access = context_builder.resolve_vector_access(
+            permissions,
+            tenant_id=req.tenant_id,
+            user_id=req.user_id,
+            project_id=req.project_id,
+        )
+    except ContextBuildError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Vector retrieval is not authorized",
+        ) from exc
+
     query_embedding = await llm_client.generate_embedding(req.question)
 
     project_passages: list[GroundingPassage] = []
     try:
         results = await vector_store.search_vectors(
-            tenant_id=req.tenant_id,
-            project_id=req.project_id,
-            user_id=req.user_id,
+            access=vector_access,
             query_vector=query_embedding,
-            scope=req.scope,
-            is_project_member=True,
             limit=req.limit,
         )
         project_passages = [_to_passage(r, source_type="project_asset") for r in results]
@@ -60,8 +77,7 @@ async def grounding_search(req: GroundingSearchRequest) -> GroundingSearchRespon
     reference_passages: list[GroundingPassage] = []
     try:
         results = await vector_store.search_reference_vectors(
-            tenant_id=req.tenant_id,
-            project_id=req.project_id,
+            access=vector_access,
             query_vector=query_embedding,
             limit=max(3, req.limit // 2),
         )

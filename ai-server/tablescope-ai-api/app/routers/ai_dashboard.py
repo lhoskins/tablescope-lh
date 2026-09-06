@@ -96,7 +96,7 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
             tenant_id=req.tenant_id,
             user_id=req.user_id,
             project_id=req.project_id,
-            scope="project",
+            scope="authorized_project",
             question="",
             feature="suggest_dashboard",
         )
@@ -375,7 +375,7 @@ async def suggest_dashboards_multi(
             tenant_id=req.tenant_id,
             user_id=req.user_id,
             project_id=req.project_id,
-            scope="project",
+            scope="authorized_project",
             question="",
             feature="suggest_dashboard",
         )

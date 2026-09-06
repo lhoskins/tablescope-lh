@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
@@ -26,6 +26,7 @@ from app.services.internal_ai_auth import verify_internal_ai_request
 
 from .ai_proxy_schemas import (
     AIPermissionsResponse,
+    AIVectorAccessClaims,
 )
 from .ai_proxy_shared import _authorize_project_access
 
@@ -235,6 +236,10 @@ async def check_permissions(
         ProjectAsset.project_id == project_id,
         ProjectAsset.tenant_id == tenant_id,
         ProjectAsset.status != "deleted",
+        or_(
+            ProjectAsset.visibility == "shared_project",
+            ProjectAsset.owner_user_id == user_id,
+        ),
     )
     doc_result = await session.execute(doc_stmt)
     documents: list[dict[str, Any]] = []
@@ -321,6 +326,15 @@ async def check_permissions(
         is_member=is_member,
         is_owner=is_owner,
         project_visibility="shared" if project.is_shared else "private",
+        vector_access=AIVectorAccessClaims(
+            tenant_id=tenant_id,
+            project_id=project_id,
+            principal_user_id=user_id,
+            project_access="owner" if is_owner else "active_member",
+            project_visibility="shared" if project.is_shared else "private",
+            can_read_shared_documents=True,
+            private_document_owner_user_id=user_id,
+        ),
         datasources=datasources,
         saved_queries=saved_queries,
         dashboards=dashboards,

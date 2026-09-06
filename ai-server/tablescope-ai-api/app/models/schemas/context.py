@@ -1,9 +1,9 @@
 """Vector payload and the controlled context package sent to the LLM."""
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .grounding import GroundingEvidence
 
@@ -31,6 +31,32 @@ class VectorPayload(BaseModel):
     content_hash: str = ""
     token_count: int = 0
     created_at: datetime | None = None
+
+
+class VectorAccessClaims(BaseModel):
+    """Platform-minted authorization facts for one vector retrieval.
+
+    The signed permission callback returns these claims only after checking
+    current project ownership or active membership. Every identifier is bound
+    back to the signed request envelope before Qdrant is queried.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: Literal[1] = 1
+    tenant_id: int
+    project_id: int
+    principal_user_id: int
+    project_access: Literal["owner", "active_member"]
+    project_visibility: Literal["shared", "private"]
+    can_read_shared_documents: bool = True
+    private_document_owner_user_id: int
+
+    @model_validator(mode="after")
+    def private_owner_must_be_principal(self) -> "VectorAccessClaims":
+        if self.private_document_owner_user_id != self.principal_user_id:
+            raise ValueError("private document owner must match the authorized principal")
+        return self
 
 
 class ContextPackage(BaseModel):

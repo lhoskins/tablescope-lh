@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -10,7 +10,10 @@ from pydantic import BaseModel, Field
 class AIAskRequest(BaseModel):
     project_id: int
     question: str
-    scope: str = "project"
+    # ``project`` is accepted only as a legacy UI spelling. The platform never
+    # forwards it as an authorization decision; it mints authorized-project
+    # vector claims after checking current membership.
+    scope: Literal["project", "authorized_project"] = "project"
     include_query_history: bool = True
     include_dashboard_context: bool = True
     history: list[dict[str, Any]] = Field(default_factory=list)
@@ -36,7 +39,7 @@ class AIIndexDocumentRequest(BaseModel):
     source_type: str
     source_id: int
     content: str = ""
-    visibility: str = "shared_project"
+    visibility: Literal["shared_project", "private"] = "shared_project"
 
 
 class AISaveQueryRequest(BaseModel):
@@ -189,6 +192,17 @@ class AICreateScopeRequest(BaseModel):
     targetColumn: str
 
 
+class AIVectorAccessClaims(BaseModel):
+    version: Literal[1] = 1
+    tenant_id: int
+    project_id: int
+    principal_user_id: int
+    project_access: Literal["owner", "active_member"]
+    project_visibility: Literal["shared", "private"]
+    can_read_shared_documents: bool = True
+    private_document_owner_user_id: int
+
+
 class AIPermissionsResponse(BaseModel):
     tenant_id: int
     user_id: int
@@ -196,6 +210,7 @@ class AIPermissionsResponse(BaseModel):
     is_member: bool
     is_owner: bool
     project_visibility: str
+    vector_access: AIVectorAccessClaims
     datasources: list[dict[str, Any]]
     saved_queries: list[dict[str, Any]]
     dashboards: list[dict[str, Any]]

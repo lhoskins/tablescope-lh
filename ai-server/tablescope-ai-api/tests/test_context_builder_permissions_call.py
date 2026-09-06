@@ -9,9 +9,8 @@ Run from ``tablescope-ai-api``: ``pytest -q tests/test_context_builder_permissio
 
 from __future__ import annotations
 
-import pytest
 import httpx
-
+import pytest
 from app.core.config import settings
 from app.core.security import sign_request
 from app.services import context_builder
@@ -40,6 +39,16 @@ async def test_verify_permissions_posts_a_signed_payload(monkeypatch):
                 "is_member": True,
                 "is_owner": True,
                 "project_visibility": "shared",
+                "vector_access": {
+                    "version": 1,
+                    "tenant_id": json["tenant_id"],
+                    "project_id": json["project_id"],
+                    "principal_user_id": json["user_id"],
+                    "project_access": "owner",
+                    "project_visibility": "shared",
+                    "can_read_shared_documents": True,
+                    "private_document_owner_user_id": json["user_id"],
+                },
                 "datasources": [],
                 "saved_queries": [],
                 "dashboards": [],
@@ -50,7 +59,7 @@ async def test_verify_permissions_posts_a_signed_payload(monkeypatch):
     monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
 
     result = await context_builder._verify_permissions(
-        tenant_id=1, user_id=2, project_id=3, scope="shared_project"
+        tenant_id=1, user_id=2, project_id=3
     )
 
     assert captured["url"].endswith("/api/ai/permissions")
@@ -76,5 +85,27 @@ async def test_verify_permissions_fails_closed_on_non_200(monkeypatch):
 
     with pytest.raises(context_builder.ContextBuildError):
         await context_builder._verify_permissions(
-            tenant_id=1, user_id=2, project_id=3, scope="shared_project"
+            tenant_id=1, user_id=2, project_id=3
         )
+
+
+async def test_vector_access_claims_are_bound_to_signed_request():
+    permissions = {
+        "vector_access": {
+            "version": 1,
+            "tenant_id": 1,
+            "project_id": 3,
+            "principal_user_id": 999,
+            "project_access": "active_member",
+            "project_visibility": "shared",
+            "can_read_shared_documents": True,
+            "private_document_owner_user_id": 999,
+        }
+    }
+
+    with pytest.raises(context_builder.ContextBuildError) as exc:
+        context_builder.resolve_vector_access(
+            permissions, tenant_id=1, user_id=2, project_id=3
+        )
+
+    assert exc.value.denied_type == "mismatched_vector_access_claims"

@@ -88,7 +88,7 @@ class Settings(BaseSettings):
     tablescope_ai_enabled: bool = False
     tablescope_ai_api_url: str = ""
     tablescope_ai_signing_secret: str = ""
-    tablescope_ai_default_scope: str = "project"
+    tablescope_ai_default_scope: str = "authorized_project"
 
     # --- LLM Framework (offline Ollama model deployment) ---
     # Master switch. When false, /api/llm-framework/* returns 503 and the UI

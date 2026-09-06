@@ -1,6 +1,7 @@
 """Schemas for proactive AI grounding evidence."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -104,7 +105,7 @@ class GroundingSearchRequest(BaseModel):
     user_id: int
     project_id: int
     question: str
-    scope: str = "project"
+    scope: Literal["authorized_project"] = "authorized_project"
     limit: int = 12
     signature: str = ""
     timestamp: float = 0.0
