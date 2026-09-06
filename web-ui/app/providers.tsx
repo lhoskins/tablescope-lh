@@ -5,6 +5,14 @@ import { ReactNode, useEffect, useState } from "react";
 import { startIdleTimer, stopIdleTimer, getUserMeta } from "@/lib/auth";
 import { useBlockStrayFileDrops } from "@/lib/hooks/use-block-stray-file-drops";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { installDevMocks } from "@/lib/dev-mock/mock-api";
+
+// Local design-preview mocks — only active when NEXT_PUBLIC_MOCK_API=1 is set
+// in a gitignored .env.local. Installed at module load (before any query can
+// fire), not in an effect, so nothing races it. No-op in every other build.
+if (typeof window !== "undefined" && process.env.NEXT_PUBLIC_MOCK_API === "1") {
+  installDevMocks();
+}
 
 export function Providers({ children }: { children: ReactNode }) {
   const [client] = useState(
