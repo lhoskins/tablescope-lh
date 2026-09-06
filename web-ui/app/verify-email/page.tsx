@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -7,7 +8,7 @@ import { verifyEmail } from "@/lib/auth";
 
 type Status = "verifying" | "verified" | "error";
 
-export default function VerifyEmailPage() {
+function VerifyEmailContent() {
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
 
@@ -95,5 +96,22 @@ export default function VerifyEmailPage() {
         </>
       )}
     </main>
+  );
+}
+
+export default function VerifyEmailPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 text-center">
+          <h1 className="mb-2 text-2xl font-semibold text-slate-900">
+            Confirming your email…
+          </h1>
+          <p className="text-sm text-slate-600">This will only take a moment.</p>
+        </main>
+      }
+    >
+      <VerifyEmailContent />
+    </Suspense>
   );
 }
