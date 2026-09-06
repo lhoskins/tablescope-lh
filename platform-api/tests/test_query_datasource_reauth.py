@@ -1,13 +1,15 @@
-"""Tests for surfacing a Google Sheets reauth prompt from /api/query/datasource.
+"""Tests for surfacing a reauth prompt from /api/query/datasource.
 
-Live finding: "click on a table" for an already-created Google Sheets source
-runs its query live through Teiid (not through the platform-api Google Drive
-routes already fixed for reauth in ``spreadsheet_connections.py``). When the
-stored refresh token is rejected, Teiid's own resource adapter fails the
-query with a raw error string embedding its datasource name (e.g. "Query
-failed: TEIID30504 ds_378_google-sheets: Google token refresh failed 400
-..."), which previously reached the UI as a dead-end 502 instead of a
-reconnect prompt.
+Live finding: "click on a table" for an already-created live-translator
+source (Google Sheets, or a ServiceNow/Salesforce/HubSpot/QuickBooks "live"
+object) runs its query live through Teiid (not through the platform-api
+routes already fixed for reauth in ``spreadsheet_connections.py``/
+``saas_sources.py``). When the stored credential is rejected, Teiid's own
+translator fails the query with a raw error string embedding its datasource
+name (e.g. "Query failed: TEIID30504 ds_378_google-sheets: Google token
+refresh failed 400 ..." or "Query failed: TEIID30504 ds_42_servicenow:
+ServiceNow HTTP 401: ... User is not authenticated ..."), which previously
+reached the UI as a dead-end 502 instead of a reconnect prompt.
 
 Run from ``platform-api``:
 ``pytest -q tests/test_query_datasource_reauth.py``.
@@ -21,10 +23,11 @@ from app.auth.jwt import create_access_token
 from app.models.database_data_source import DatabaseDataSource
 from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project
+from app.models.saas_object_data_source import SaasObjectDataSource
 from app.models.user_vdb import UserVDB
 from app.routes.query_sql_helpers import (
     SourceReauthRequiredError,
-    _google_sheets_reauth_source_id,
+    _live_translator_reauth_match,
 )
 
 pytestmark = pytest.mark.anyio
@@ -123,6 +126,47 @@ async def _setup_project_with_sheet(client, db_session, service_headers, slug: s
     return tenant_id, owner_id, project, sheet
 
 
+async def _setup_project_with_servicenow_table(client, db_session, service_headers, slug: str):
+    tenant_id = await _tenant(client, service_headers, slug)
+    owner_id = await _user(client, service_headers, tenant_id, f"owner@{slug}.com")
+
+    project = Project(tenant_id=tenant_id, owner_id=owner_id, name="Mine", is_shared=False)
+    db_session.add(project)
+    db_session.add(
+        UserVDB(
+            tenant_id=tenant_id, user_id=owner_id, vdb_id="owner-vdb",
+            vdb_username="u", encrypted_password="p", is_active=True,
+        )
+    )
+    await db_session.commit()
+    await db_session.refresh(project)
+
+    ds = DatabaseDataSource(
+        tenant_id=tenant_id, project_id=project.id, created_by=owner_id,
+        display_name="alm_asset", source_type="saas_object",
+        connector_type="servicenow", db_type="servicenow",
+        host="https://dev.service-now.com", port=0, database_name="",
+        schema_name="", table_name="alm_asset",
+        username="svc", teiid_model_name="ds_1_src",
+        teiid_table_name="alm_asset", teiid_view_name="alm_asset_SERVICENOW",
+        teiid_jndi_name="java:/ds_1_servicenow", status="active", archived=False,
+    )
+    db_session.add(ds)
+    await db_session.commit()
+    await db_session.refresh(ds)
+    db_session.add(
+        SaasObjectDataSource(
+            tenant_id=tenant_id, database_data_source_id=ds.id, credential_id=99,
+            connector_type="servicenow", object_type="alm_asset",
+            selected_properties=["number"], staging_schema="", staging_table="",
+            sync_mode="live", last_sync_status="live",
+        )
+    )
+    await db_session.commit()
+
+    return tenant_id, owner_id, project, ds
+
+
 async def test_table_path_reports_reauth_required_on_a_google_sheets_token_failure(
     client, db_session, service_headers, monkeypatch
 ):
@@ -139,7 +183,8 @@ async def test_table_path_reports_reauth_required_on_a_google_sheets_token_failu
         raise SourceReauthRequiredError(
             f"Query failed: TEIID30504 ds_{sheet.id}_google-sheets: "
             "Google token refresh failed 400 invalid_grant",
-            file_source_meta_id=sheet.id,
+            data_source_id=sheet.id,
+            connector_type="google-sheets",
         )
 
     monkeypatch.setattr(query_module, "project_table_schema", fake_project_table_schema)
@@ -155,6 +200,7 @@ async def test_table_path_reports_reauth_required_on_a_google_sheets_token_failu
     detail = r.json()["detail"]
     assert detail["code"] == "CONNECTOR_REAUTH_REQUIRED"
     assert detail["credentialId"] == 42
+    assert detail["connectorType"] == "google_drive"
 
 
 async def test_sql_path_reports_reauth_required_on_a_google_sheets_token_failure(
@@ -173,7 +219,8 @@ async def test_sql_path_reports_reauth_required_on_a_google_sheets_token_failure
         raise SourceReauthRequiredError(
             f"Query failed: TEIID30504 ds_{sheet.id}_google-sheets: "
             "Google token refresh failed 400 invalid_grant",
-            file_source_meta_id=sheet.id,
+            data_source_id=sheet.id,
+            connector_type="google-sheets",
         )
 
     monkeypatch.setattr(query_module, "project_table_schema", fake_project_table_schema)
@@ -191,14 +238,56 @@ async def test_sql_path_reports_reauth_required_on_a_google_sheets_token_failure
     detail = r.json()["detail"]
     assert detail["code"] == "CONNECTOR_REAUTH_REQUIRED"
     assert detail["credentialId"] == 42
+    assert detail["connectorType"] == "google_drive"
+
+
+async def test_table_path_reports_reauth_required_on_a_servicenow_401(
+    client, db_session, service_headers, monkeypatch
+):
+    """The reported bug: "click on a table" for an already-created
+    ServiceNow object surfaces the raw Teiid 401 instead of a reauth
+    prompt, even after "Create Data Source" already showed the correct
+    Reconnect action for the same broken credential."""
+    tenant_id, owner_id, project, ds = await _setup_project_with_servicenow_table(
+        client, db_session, service_headers, "qd-reauth-servicenow"
+    )
+
+    import app.routes.query as query_module
+
+    async def fake_project_table_schema(session, *, tenant_id, project_id):
+        return [{"table": ds.teiid_view_name, "columns": []}]
+
+    async def fake_run_sql(**kwargs):
+        raise SourceReauthRequiredError(
+            f'Query failed: TEIID30504 ds_{ds.id}_servicenow: ServiceNow HTTP 401: '
+            '{"error":{"message":"User is not authenticated",'
+            '"detail":"Required to provide Auth information"},"status":"failure"}',
+            data_source_id=ds.id,
+            connector_type="servicenow",
+        )
+
+    monkeypatch.setattr(query_module, "project_table_schema", fake_project_table_schema)
+    monkeypatch.setattr(query_module, "_run_sql", fake_run_sql)
+    monkeypatch.setattr(query_module, "TenantTeiidResolver", _FakeResolver)
+
+    r = await client.post(
+        "/api/query/datasource",
+        json={"project_id": project.id, "tableName": ds.teiid_view_name},
+        headers=_headers(tenant_id, owner_id),
+    )
+    assert r.status_code == 409
+    detail = r.json()["detail"]
+    assert detail["code"] == "CONNECTOR_REAUTH_REQUIRED"
+    assert detail["credentialId"] == 99
+    assert detail["connectorType"] == "servicenow"
 
 
 async def test_reauth_required_with_no_resolvable_credential_still_returns_409(
     client, db_session, service_headers, monkeypatch
 ):
-    """A source id Teiid names that no longer maps to a FileSourceMeta row
-    (deleted, or the message is misparsed) must still surface a reconnect
-    prompt rather than falling back to a dead-end 502."""
+    """A source id Teiid names that no longer maps to a row (deleted, or the
+    message is misparsed) must still surface a reconnect prompt rather than
+    falling back to a dead-end 502."""
     tenant_id, owner_id, project, sheet = await _setup_project_with_sheet(
         client, db_session, service_headers, "qd-reauth-missing"
     )
@@ -212,7 +301,8 @@ async def test_reauth_required_with_no_resolvable_credential_still_returns_409(
         raise SourceReauthRequiredError(
             "Query failed: TEIID30504 ds_999999_google-sheets: "
             "Google token refresh failed 400 invalid_grant",
-            file_source_meta_id=999999,
+            data_source_id=999999,
+            connector_type="google-sheets",
         )
 
     monkeypatch.setattr(query_module, "project_table_schema", fake_project_table_schema)
@@ -239,8 +329,9 @@ async def test_a_non_reauth_teiid_failure_still_returns_a_plain_502(
         client, db_session, service_headers, "qd-reauth-unrelated"
     )
 
-    import app.routes.query as query_module
     from fastapi import HTTPException
+
+    import app.routes.query as query_module
 
     async def fake_project_table_schema(session, *, tenant_id, project_id):
         return [{"table": sheet.view_name, "columns": []}]
@@ -263,19 +354,33 @@ async def test_a_non_reauth_teiid_failure_still_returns_a_plain_502(
     assert r.status_code == 502
 
 
-def test_google_sheets_reauth_source_id_extracts_the_id_when_auth_related():
+def test_live_translator_reauth_match_extracts_google_sheets_id_and_type():
     err = (
         "Query failed: TEIID30504 ds_378_google-sheets: "
         "Google token refresh failed 400 invalid_grant"
     )
-    assert _google_sheets_reauth_source_id(err) == 378
+    assert _live_translator_reauth_match(err) == (378, "google-sheets")
 
 
-def test_google_sheets_reauth_source_id_is_none_for_a_non_auth_failure():
+def test_live_translator_reauth_match_extracts_servicenow_401():
+    err = (
+        'Query failed: TEIID30504 ds_42_servicenow: ServiceNow HTTP 401: '
+        '{"error":{"message":"User is not authenticated"}}'
+    )
+    assert _live_translator_reauth_match(err) == (42, "servicenow")
+
+
+@pytest.mark.parametrize("connector_type", ["salesforce", "hubspot", "quickbooks"])
+def test_live_translator_reauth_match_extracts_other_saas_connectors(connector_type):
+    err = f"Query failed: TEIID30504 ds_7_{connector_type}: HTTP 401: unauthorized"
+    assert _live_translator_reauth_match(err) == (7, connector_type)
+
+
+def test_live_translator_reauth_match_is_none_for_a_non_auth_failure():
     err = "Query failed: TEIID30504 ds_378_google-sheets: connection reset by peer"
-    assert _google_sheets_reauth_source_id(err) is None
+    assert _live_translator_reauth_match(err) is None
 
 
-def test_google_sheets_reauth_source_id_is_none_for_a_non_google_sheets_source():
-    err = "Query failed: TEIID30504 ds_378_servicenow: credential rejected, refresh failed"
-    assert _google_sheets_reauth_source_id(err) is None
+def test_live_translator_reauth_match_is_none_for_an_unknown_source_type():
+    err = "Query failed: TEIID30504 ds_378_mysql: HTTP 401 unauthorized"
+    assert _live_translator_reauth_match(err) is None
