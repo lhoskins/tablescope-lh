@@ -122,15 +122,60 @@ looks auth-related is reclassified.
   Google Drive" button (using the `credentialId` the backend resolved, scoping the reconnect
   to the right connection), which retries the preview automatically once reconnected.
 
+### 5. A second, wider bug found live-testing this fix: reconnecting didn't fix an
+   already-created table
+
+Live-testing this branch surfaced a follow-on bug: after fixing the redirect URI and
+successfully reauthorizing Google Drive, "Create Data Source" worked again — but clicking
+an **already-created** table (e.g. "SAPPHIRE Leads") still showed the reauthorize prompt.
+
+Root cause: `complete_authorization`'s in-place credential update (part 2 above) updates
+`ConnectorCredential.secret_encrypted`, but Teiid's own resource adapter for an
+already-registered Google Sheets source holds its own **copy** of the refresh token from
+whenever it was confirmed/last re-registered — it does not read back from
+`ConnectorCredential` on every query. Reconnecting the credential alone never reached that
+already-registered source, so it kept failing on the stale token even though the
+connection was "successfully" reconnected. A `reregister_live_sources_for_credential`
+helper already existed for exactly this (used by the periodic `google_drive_token_refresh`
+cron job on a proactive token refresh) but was never called from the manual-reconnect path.
+
+Asked whether this generalizes: **yes, and worse** — ServiceNow, Salesforce, HubSpot, and
+QuickBooks "live" sources (`SaasObjectDataSource.sync_mode == "live"`) are registered into
+Teiid the same way, with their own baked-in copy of the username/password/access token.
+`PATCH /saas-sources/credentials/{id}` (`update_credential`, exactly what the new SaaS
+"Reconnect" button calls) had the identical gap for all four connectors, and — unlike
+Google Drive — three of them (ServiceNow, Salesforce, HubSpot) had *no* re-registration
+mechanism at all, not even a periodic one; QuickBooks had one, but only from its own cron
+job, never from a manual reconnect.
+
+**Fix:**
+- `google_drive/registration.py`: `reregister_live_sources_for_credential(session,
+  credential)` extracted as a public helper (previously private to
+  `google_drive_token_refresh.py`); now called from `complete_authorization`'s in-place
+  update branch immediately after the credential commits.
+- `saas_source_service.py`: new `reregister_live_saas_sources_for_credential(session,
+  credential)`, generalizing the same pattern (previously QuickBooks-only, private to
+  `quickbooks_token_refresh.py`) to all four live-translator connector types. Re-derives
+  each connector's registration fields from the *current* decrypted config and re-registers
+  every `SaasObjectDataSource` with `sync_mode == "live"` backed by that credential, using
+  each connector's own `TeiidRegistrationService.register_<type>_source` call. Best-effort
+  per source (a failure on one source is logged, not raised).
+- `saas_sources.py`: `update_credential` now calls this immediately after a config change
+  commits. A display-name-only update (no config change) skips it — nothing to re-register.
+- `quickbooks_token_refresh.py`: its private duplicate of this logic replaced with a call
+  to the shared function (no behavior change to the cron job itself, just deduplicated).
+
 ### Files changed
 
 **Backend:** `app/connectors/base.py`, `app/connectors/saas/{servicenow,hubspot,quickbooks,salesforce}.py`,
-`app/services/google_drive/{oauth,client}.py`, `app/routes/spreadsheet_connections.py`,
-`app/routes/saas_sources.py`, `app/routes/query.py`, `app/routes/query_sql_helpers.py`.
+`app/services/google_drive/{oauth,client,registration}.py`, `app/services/saas_source_service.py`,
+`app/routes/spreadsheet_connections.py`, `app/routes/saas_sources.py`, `app/routes/query.py`,
+`app/routes/query_sql_helpers.py`, `app/tasks/{google_drive_token_refresh,quickbooks_token_refresh}.py`.
 
 **Backend tests (new/updated):** `tests/test_saas_connectors.py`,
-`tests/test_spreadsheet_connections_routes.py`, `tests/test_saas_sources_reauth.py` (new),
-`tests/test_query_datasource_reauth.py` (new).
+`tests/test_spreadsheet_connections_routes.py` (+1: reauthorizing re-registers an
+already-confirmed Google Sheet), `tests/test_saas_sources_reauth.py` (new; +3 on the
+SaaS re-registration fix), `tests/test_query_datasource_reauth.py` (new).
 
 **Frontend:** `lib/api-client.ts`, `lib/api/connectors.ts`,
 `components/tablescope/database-connectors/google-sheets-connection-modal.tsx`,
@@ -156,13 +201,13 @@ files.
 
 | Suite | Result |
 |---|---|
-| `pytest -q tests/test_saas_sources_reauth.py tests/test_saas_connectors.py tests/test_spreadsheet_connections_routes.py tests/test_google_drive_oauth.py tests/test_google_drive_client.py tests/test_query_datasource_reauth.py tests/test_query_datasource_authorization.py tests/test_query_datasource_global_filters.py tests/test_project_table_schema.py` | 79 passed, 0 regressions |
-| `ruff check` (all 11 touched backend files) | clean |
-| `mypy` (all 11 touched backend files) | clean |
+| `pytest -q tests/test_saas_sources_reauth.py tests/test_saas_connectors.py tests/test_spreadsheet_connections_routes.py tests/test_google_drive_oauth.py tests/test_google_drive_client.py tests/test_query_datasource_reauth.py tests/test_query_datasource_authorization.py tests/test_datasource_lifecycle.py` | 70 passed, 0 regressions |
+| `ruff check` (all touched backend files, incl. `saas_source_service.py`/`registration.py`/both token-refresh tasks) | clean |
+| `mypy` (same files) | clean |
 | `npm run typecheck` (web-ui) | clean |
 | `npm run lint` (web-ui) | clean — pre-existing `max-lines`/`exhaustive-deps` warnings on unrelated files only |
 | `npm run build` (web-ui) | succeeds |
-| Full `pytest -q` (whole platform-api suite) | 1894 passed, 12 failed, 4 skipped in 1061s. All 12 failures confirmed pre-existing on `UX-design-03` (identical to the 12 documented in the `fix/query-authorization-database-datasources` merge doc): `test_billing.py::test_provision_isolated_data_plane`/`test_provision_isolated_vpn_awaits_details` (broken by the tenant-private-S3 data-plane feature's fail-closed storage resolver, unrelated), `test_visualization_engine.py::test_many_categories_is_horizontal_bar`, `test_percent_change_summary.py` (4 tests), `test_ai_dashboard_pipeline.py::test_correct_widget_converts_oversized_pie`, `test_ask_pipeline.py::test_matrix_resolves_to_heatmap_not_a_narrowed_bar`, `test_business_insight_phase1.py` (3 snapshot-staleness tests) — none touch any file this branch changes. |
+| Full `pytest -q` (whole platform-api suite) | _fill in after full run completes_ |
 
 ```bash
 cd platform-api
@@ -228,8 +273,15 @@ docker compose up -d platform-api platform-api-worker web-ui
 3. Preview an **already-created** Google Sheets data source whose token has expired
    (click on its table in the tree): confirm it now shows a "Reauthorize Google Drive"
    button instead of the raw `TEIID30504 ... Google token refresh failed` string, and that
-   completing reauthorization automatically loads the preview.
-4. Confirm an unrelated query failure (e.g. a malformed saved query) still shows a plain
+   completing reauthorization **actually loads the preview** after clicking it — not just
+   that the reauthorize popup completes. This is the exact live finding: reauthorizing
+   alone did not fix an already-created source until `reregister_live_sources_for_credential`
+   was wired into the callback, so re-clicking the same table after reconnecting is the
+   real proof, not just a green "connected" state.
+4. Repeat step 3 for an already-created ServiceNow/Salesforce/HubSpot/QuickBooks table
+   after reconnecting its credential via PATCH (the "Reconnect" action from step 2) — same
+   underlying gap, fixed the same way for all four connectors.
+5. Confirm an unrelated query failure (e.g. a malformed saved query) still shows a plain
    error, not a reauth prompt.
 
 ## Report back

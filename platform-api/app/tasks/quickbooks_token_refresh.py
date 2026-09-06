@@ -2,8 +2,10 @@
 
 Runs as an arq cron job every ~15 minutes. It refreshes access tokens for
 QuickBooks connector credentials that have a refresh token, persists the
-rotated tokens, and re-deploys the live translator VDB block so queries keep
-working after token expiry.
+rotated tokens, and re-registers every live-translator source backed by that
+credential (``reregister_live_saas_sources_for_credential``, shared with the
+manual-reconnect path in ``saas_sources.py``'s ``update_credential``) so
+queries keep working after token expiry.
 """
 
 from __future__ import annotations
@@ -18,16 +20,10 @@ from sqlalchemy import select
 
 from app.database import SessionLocal
 from app.models.connector_credential import ConnectorCredential
-from app.models.database_data_source import DatabaseDataSource, DataSourceColumn
-from app.models.saas_object_data_source import SaasObjectDataSource
-from app.models.user_vdb import UserVDB
-from app.services import database_introspection_service as intro
 from app.services.crypto import encrypt_secret
-from app.services.saas_source_service import SaasSourceError, decrypt_config
-from app.services.teiid_registration_service import (
-    TeiidRegistrationService,
-    generate_teiid_names,
-    generate_view_name,
+from app.services.saas_source_service import (
+    decrypt_config,
+    reregister_live_saas_sources_for_credential,
 )
 
 logger = logging.getLogger(__name__)
@@ -92,92 +88,8 @@ async def _refresh_quickbooks_credential(credential: ConnectorCredential) -> boo
 
 async def _reregister_live_quickbooks_sources(credential: ConnectorCredential) -> int:
     """Re-register every live QuickBooks source backed by this credential."""
-    re_registered = 0
     async with SessionLocal() as session:
-        stmt = select(SaasObjectDataSource).where(
-            SaasObjectDataSource.credential_id == credential.id,
-            SaasObjectDataSource.connector_type == "quickbooks",
-            SaasObjectDataSource.sync_mode == "live",
-        )
-        saas_rows = list((await session.scalars(stmt)).all())
-        if not saas_rows:
-            return 0
-
-        config = decrypt_config(credential)
-        access_token = config.get("access_token", "")
-        realm_id = str(config.get("realm_id") or "").strip()
-        environment = str(config.get("environment") or "production").lower()
-
-        for saas in saas_rows:
-            ds = await session.get(DatabaseDataSource, saas.database_data_source_id)
-            if ds is None:
-                continue
-            if ds.created_by is None:
-                continue
-            user_vdb = await session.scalar(
-                select(UserVDB).where(
-                    UserVDB.tenant_id == credential.tenant_id,
-                    UserVDB.user_id == ds.created_by,
-                )
-            )
-            if user_vdb is None:
-                continue
-
-            col_rows = list(
-                (
-                    await session.scalars(
-                        select(DataSourceColumn)
-                        .where(DataSourceColumn.data_source_id == ds.id)
-                        .order_by(DataSourceColumn.ordinal_position)
-                    )
-                ).all()
-            )
-            columns = [
-                {
-                    "name": c.column_name,
-                    "name_in_source": intro.source_identifier(ds.db_type, c.column_name),
-                    "teiid_type": intro.map_to_teiid_type(c.data_type or "text"),
-                }
-                for c in col_rows
-            ]
-
-            names = generate_teiid_names(
-                data_source_id=ds.id, db_type=ds.db_type, table_name=ds.table_name
-            )
-            view_name = ds.teiid_view_name or generate_view_name(
-                display_name=ds.display_name, db_type=ds.db_type
-            )
-
-            reg = TeiidRegistrationService()
-            try:
-                await reg.register_quickbooks_source(
-                    vdb_id=user_vdb.vdb_id,
-                    org_id=credential.tenant_id,
-                    user_id=ds.created_by,
-                    access_token=access_token,
-                    realm_id=realm_id,
-                    environment=environment,
-                    object_type=ds.table_name,
-                    model_name=names["model_name"],
-                    teiid_table_name=names["teiid_table_name"],
-                    ds_name=names["ds_name"],
-                    jndi_name=names["jndi_name"],
-                    view_name=view_name,
-                    columns=columns,
-                )
-                re_registered += 1
-            except SaasSourceError:
-                raise
-            except Exception as exc:
-                logger.warning(
-                    "Failed to re-register QuickBooks source %s: %s",
-                    saas.id,
-                    exc,
-                )
-            finally:
-                await reg.aclose()
-
-    return re_registered
+        return await reregister_live_saas_sources_for_credential(session, credential)
 
 
 async def refresh_quickbooks_tokens(ctx: dict[str, object]) -> dict[str, int]:

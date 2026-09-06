@@ -390,6 +390,201 @@ async def create_saas_source(
     return saas
 
 
+def _live_translator_fields(connector_type: str, config: dict) -> dict[str, str] | None:
+    """Derive the Teiid registration fields for a live-translator connector
+    from a decrypted credential config, mirroring ``create_saas_source``
+    exactly so a re-registration produces the same shape it was created with.
+
+    Returns ``None`` for a connector type that isn't a live translator.
+    """
+    if connector_type == "servicenow":
+        instance_url = (config.get("instance_url") or "").strip().rstrip("/")
+        if instance_url and not instance_url.startswith("http"):
+            instance_url = f"https://{instance_url}"
+        return {
+            "username": config.get("username", ""),
+            "password": config.get("password", ""),
+            "instance_url": instance_url,
+        }
+    if connector_type == "salesforce":
+        instance_url = (
+            config.get("login_url") or "https://login.salesforce.com"
+        ).strip().rstrip("/")
+        if instance_url and not instance_url.startswith("http"):
+            instance_url = f"https://{instance_url}"
+        return {
+            "username": config.get("username", ""),
+            "password": config.get("password", "") + config.get("security_token", ""),
+            "instance_url": instance_url,
+        }
+    if connector_type == "hubspot":
+        return {
+            "password": config.get("access_token", ""),
+            "instance_url": "https://api.hubapi.com",
+        }
+    if connector_type == "quickbooks":
+        environment = str(config.get("environment") or "production").lower()
+        return {
+            "password": config.get("access_token", ""),
+            "realm_id": str(config.get("realm_id") or "").strip(),
+            "environment": environment,
+            "instance_url": (
+                "https://sandbox-quickbooks.api.intuit.com"
+                if environment == "sandbox"
+                else "https://quickbooks.api.intuit.com"
+            ),
+        }
+    return None
+
+
+async def reregister_live_saas_sources_for_credential(
+    session: AsyncSession, credential: ConnectorCredential
+) -> int:
+    """Re-register every live-translator SaaS source backed by ``credential``.
+
+    ServiceNow, Salesforce, HubSpot and QuickBooks "live" sources (see
+    ``create_saas_source``'s ``is_live_translator`` branch) are registered
+    directly into Teiid with a *copy* of the credential's username/password/
+    access token at creation time -- Teiid's resource adapter does not read
+    back from ``ConnectorCredential`` on every query. Updating the stored
+    credential in place (a manual reconnect via ``PATCH /credentials/{id}``,
+    or a rotated password) leaves any already-created live source running on
+    the stale value it was registered with until this runs, so a caller that
+    changes a credential's secret in place must call this immediately after
+    -- exactly the reason a query against an already-created source can keep
+    failing even though the connection was "successfully" reconnected.
+
+    Best-effort per source: a registration failure for one source is logged
+    and does not stop the others or raise to the caller.
+    """
+    fields = _live_translator_fields(credential.connector_type, decrypt_config(credential))
+    if fields is None:
+        return 0
+
+    stmt = select(SaasObjectDataSource).where(
+        SaasObjectDataSource.credential_id == credential.id,
+        SaasObjectDataSource.sync_mode == "live",
+    )
+    saas_rows = list((await session.scalars(stmt)).all())
+
+    re_registered = 0
+    for saas in saas_rows:
+        ds = await session.get(DatabaseDataSource, saas.database_data_source_id)
+        if ds is None or ds.created_by is None:
+            continue
+        user_vdb = await session.scalar(
+            select(UserVDB).where(
+                UserVDB.tenant_id == credential.tenant_id,
+                UserVDB.user_id == ds.created_by,
+            )
+        )
+        if user_vdb is None:
+            continue
+
+        col_rows = list(
+            (
+                await session.scalars(
+                    select(DataSourceColumn)
+                    .where(DataSourceColumn.data_source_id == ds.id)
+                    .order_by(DataSourceColumn.ordinal_position)
+                )
+            ).all()
+        )
+        teiid_columns = [
+            {
+                "name": c.column_name,
+                "name_in_source": intro.source_identifier(ds.db_type, c.column_name),
+                "teiid_type": intro.map_to_teiid_type(c.data_type or "text"),
+            }
+            for c in col_rows
+        ]
+        names = generate_teiid_names(
+            data_source_id=ds.id, db_type=ds.db_type, table_name=ds.table_name
+        )
+        view_name = ds.teiid_view_name or generate_view_name(
+            display_name=ds.display_name, db_type=ds.db_type
+        )
+
+        reg = TeiidRegistrationService()
+        try:
+            if credential.connector_type == "servicenow":
+                await reg.register_servicenow_source(
+                    vdb_id=user_vdb.vdb_id,
+                    org_id=credential.tenant_id,
+                    user_id=ds.created_by,
+                    instance_url=fields["instance_url"],
+                    username=fields["username"],
+                    password=fields["password"],
+                    object_type=ds.table_name,
+                    model_name=names["model_name"],
+                    teiid_table_name=names["teiid_table_name"],
+                    ds_name=names["ds_name"],
+                    jndi_name=names["jndi_name"],
+                    view_name=view_name,
+                    columns=teiid_columns,
+                )
+            elif credential.connector_type == "salesforce":
+                await reg.register_salesforce_source(
+                    vdb_id=user_vdb.vdb_id,
+                    org_id=credential.tenant_id,
+                    user_id=ds.created_by,
+                    instance_url=fields["instance_url"],
+                    username=fields["username"],
+                    password=fields["password"],
+                    object_type=ds.table_name,
+                    model_name=names["model_name"],
+                    teiid_table_name=names["teiid_table_name"],
+                    ds_name=names["ds_name"],
+                    jndi_name=names["jndi_name"],
+                    view_name=view_name,
+                    columns=teiid_columns,
+                )
+            elif credential.connector_type == "hubspot":
+                await reg.register_hubspot_source(
+                    vdb_id=user_vdb.vdb_id,
+                    org_id=credential.tenant_id,
+                    user_id=ds.created_by,
+                    access_token=fields["password"],
+                    object_type=ds.table_name,
+                    model_name=names["model_name"],
+                    teiid_table_name=names["teiid_table_name"],
+                    ds_name=names["ds_name"],
+                    jndi_name=names["jndi_name"],
+                    view_name=view_name,
+                    columns=teiid_columns,
+                )
+            elif credential.connector_type == "quickbooks":
+                await reg.register_quickbooks_source(
+                    vdb_id=user_vdb.vdb_id,
+                    org_id=credential.tenant_id,
+                    user_id=ds.created_by,
+                    access_token=fields["password"],
+                    realm_id=fields["realm_id"],
+                    environment=fields["environment"],
+                    object_type=ds.table_name,
+                    model_name=names["model_name"],
+                    teiid_table_name=names["teiid_table_name"],
+                    ds_name=names["ds_name"],
+                    jndi_name=names["jndi_name"],
+                    view_name=view_name,
+                    columns=teiid_columns,
+                )
+            re_registered += 1
+        except Exception as exc:
+            logger.warning(
+                "Failed to re-register %s source %s (data source %s) for credential %s: %s",
+                credential.connector_type,
+                saas.id,
+                ds.id,
+                credential.id,
+                exc,
+            )
+        finally:
+            await reg.aclose()
+
+    return re_registered
+
+
 async def run_sync(
     session: AsyncSession,
     *,
