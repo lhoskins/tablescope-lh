@@ -36,6 +36,20 @@ class ForgotPasswordResponse(BaseModel):
     message: str = "If that email has an account, a password-reset link is on its way."
 
 
+class VerifyEmailRequest(BaseModel):
+    """Consume an account_confirmation link's token (step 1 of onboarding)."""
+
+    token: str = Field(min_length=10)
+
+
+class VerifyEmailResponse(BaseModel):
+    """Confirms the address is verified; credentials are sent separately."""
+
+    email: str
+    tenant_slug: str
+    already_verified: bool = False
+
+
 class AuthTokenResponse(BaseModel):
     access_token: str
     token_type: str = "Bearer"

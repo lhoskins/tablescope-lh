@@ -19,13 +19,23 @@ type ProvisioningStatus = {
   error_message: string | null;
 };
 
-const STEPS: { key: string; label: string; done: (s: ProvisioningStatus) => boolean }[] = [
+// Two-step admin onboarding: the credential/password-setup email is no longer
+// guaranteed to have gone out by the time overall provisioning finishes -- it
+// waits on the admin confirming their email address -- so that step must NOT
+// be force-completed just because `status.status === "provisioned"` (see
+// `independent` below).
+const STEPS: {
+  key: string;
+  label: string;
+  done: (s: ProvisioningStatus) => boolean;
+  independent?: boolean;
+}[] = [
   { key: "payment", label: "Payment confirmed", done: (s) => s.status !== "pending_payment" },
   { key: "tenant", label: "Workspace created", done: (s) => s.tenant_status === "active" },
   {
     key: "admin",
     label: "Administrator account created",
-    done: (s) => ["membership_created", "invite_sent"].includes(s.root_admin_status),
+    done: (s) => s.root_admin_status !== "pending",
   },
   {
     key: "dataplane",
@@ -34,9 +44,15 @@ const STEPS: { key: string; label: string; done: (s: ProvisioningStatus) => bool
       ["provisioned", "shared_cloud_bound", "not_required"].includes(s.data_plane_status),
   },
   {
+    key: "confirm",
+    label: "Confirmation email sent",
+    done: (s) => ["pending_email_verification", "invite_sent"].includes(s.root_admin_status),
+  },
+  {
     key: "invite",
-    label: "Setup email sent",
+    label: "Email verified & password setup sent",
     done: (s) => s.root_admin_status === "invite_sent",
+    independent: true,
   },
   { key: "ready", label: "Workspace ready", done: (s) => s.status === "provisioned" },
 ];
@@ -89,11 +105,21 @@ function SuccessInner() {
             Thank you for your payment. Your {companyName} tenant has finished
             provisioning and your Tablescope workspace is ready.
           </p>
-          <p>
-            We&apos;ve sent an email to the tenant administrator with
-            instructions to finish setting up the account and create a password.
-          </p>
-          <p>Please check your email to complete setup and sign in.</p>
+          {status?.root_admin_status === "invite_sent" ? (
+            <>
+              <p>
+                We&apos;ve sent an email to the tenant administrator with
+                instructions to finish setting up the account and create a password.
+              </p>
+              <p>Please check your email to complete setup and sign in.</p>
+            </>
+          ) : (
+            <p>
+              We&apos;ve sent a confirmation email to the tenant administrator
+              to verify their address. Once confirmed, we&apos;ll send a
+              separate email with instructions to create a password and sign in.
+            </p>
+          )}
         </div>
       ) : (
         <p className="mb-8 text-sm text-slate-600">
@@ -109,7 +135,9 @@ function SuccessInner() {
       {status && (
         <ol className="space-y-3">
           {STEPS.map((step) => {
-            const done = status.status === "provisioned" || step.done(status);
+            const done = step.independent
+              ? step.done(status)
+              : status.status === "provisioned" || step.done(status);
             return (
               <li key={step.key} className="flex items-center gap-3">
                 <span

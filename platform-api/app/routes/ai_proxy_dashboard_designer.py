@@ -807,25 +807,6 @@ def _operational_widgets(prompt: str, suggestion: dict[str, Any]) -> list[dict[s
             "updatedAt": now,
             "layout": {"position": 0, "width": "wide"},
         },
-        {
-            "id": "improvement-opportunities",
-            "type": "improvement_opportunities",
-            "title": "Best Improvement Opportunities",
-            "editable": True,
-            "aiManaged": True,
-            "prompt": prompt,
-            "items": opportunities[:5]
-            or ["Continue monitoring the validated measures for the highest-impact change."],
-            "updatedAt": now,
-            "layout": {
-                "position": 1,
-                "width": "standard",
-                "gridX": 9,
-                "gridY": 5,
-                "gridW": 3,
-                "gridH": 3,
-            },
-        },
     ]
 
 
@@ -850,9 +831,7 @@ def _apply_operational_layout(configs: list[dict[str, Any]]) -> list[dict[str, A
 
     KPIs occupy a single top row, then charts fill a balanced grid. A
     horizontal ranking bar is capped at half width so it never stretches the
-    full page (see the ITSM Insights shell, which does the same), leaving the
-    bottom-right cell free for the "Best Improvement Opportunities" panel that
-    ``_operational_widgets`` pins there.
+    full page (see the ITSM Insights shell, which does the same).
     """
     kpis = [config for config in configs if config.get("type") == "kpi"]
     charts = [config for config in configs if config.get("type") != "kpi"]
@@ -863,7 +842,7 @@ def _apply_operational_layout(configs: list[dict[str, Any]]) -> list[dict[str, A
     placements = [
         {"gridX": 0, "gridY": 2, "gridW": 6, "gridH": 6},
         {"gridX": 6, "gridY": 2, "gridW": 6, "gridH": 3},
-        {"gridX": 6, "gridY": 5, "gridW": 3, "gridH": 3},
+        {"gridX": 6, "gridY": 5, "gridW": 6, "gridH": 3},
     ]
     for index, config in enumerate(charts):
         placement = placements[index] if index < len(placements) else {

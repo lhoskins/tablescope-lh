@@ -84,6 +84,7 @@ class UserRead(BaseModel):
     external_id: str | None
     is_active: bool
     is_super_admin: bool = False
+    email_verified: bool = False
     created_at: datetime
     updated_at: datetime
 

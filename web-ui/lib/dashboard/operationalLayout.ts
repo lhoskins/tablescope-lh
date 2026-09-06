@@ -30,7 +30,7 @@ function generatedPlacement(widget: WidgetConfig, index: number, kpiCount: numbe
   const chartIndex = index - kpiCount;
   if (chartIndex === 0) return { i: widget.id, x: 0, y: 2, w: 6, h: 6, minW: 3, minH: 3, maxW: isHorizontalBar(widget) ? 6 : undefined };
   if (chartIndex === 1) return { i: widget.id, x: 6, y: 2, w: 6, h: 3, minW: 3, minH: 3, maxW: isHorizontalBar(widget) ? 6 : undefined };
-  if (chartIndex === 2) return { i: widget.id, x: 6, y: 5, w: 3, h: 3, minW: 3, minH: 3, maxW: isHorizontalBar(widget) ? 6 : undefined };
+  if (chartIndex === 2) return { i: widget.id, x: 6, y: 5, w: 6, h: 3, minW: 3, minH: 3, maxW: isHorizontalBar(widget) ? 6 : undefined };
 
   const tail = chartIndex - 3;
   return {

@@ -596,3 +596,159 @@ async def test_acknowledged_insight_ids_survive_regeneration(
     workflow = {w["id"]: w for w in body["insightValidationWorkflow"]}
     assert workflow["i1"]["status"] == "reviewed"
     assert workflow["i2"]["status"] == "new"
+
+
+# ── 7. rebuild_project_insights_cards ("insights" suite background job) ──
+
+
+async def test_rebuild_project_insights_cards_skips_missing_project(
+    db_engine, db_session, monkeypatch
+):
+    import app.tasks.workflows as workflows
+
+    _bind_sessions(monkeypatch, db_engine)
+    tenant, user = await _tenant_user(db_session, "cards-missing-project")
+    await db_session.commit()
+
+    result = await workflows.rebuild_project_insights_cards(
+        {"job_try": 1},
+        tenant_id=tenant.id,
+        user_id=user.id,
+        project_id=999999,
+        granularity=3,
+    )
+    assert result == {
+        "status": "skipped",
+        "reason": "project_not_found",
+        "project_id": 999999,
+    }
+
+
+async def test_rebuild_project_insights_cards_retries_on_retryable_ai_error(
+    db_engine, db_session, monkeypatch
+):
+    """A retryable AIUnavailableError must raise arq's Retry (so the job is
+    rescheduled) without touching the snapshot's is_stale flag -- clearing it
+    prematurely would hide the still-in-progress state from the UI."""
+    from arq.worker import Retry
+
+    import app.routes.home_intelligence_suite as hir_suite
+    import app.tasks.workflows as workflows
+    from app.services.ai_intelligence_client import AIUnavailableError
+
+    _bind_sessions(monkeypatch, db_engine)
+    tenant, user = await _tenant_user(db_session, "cards-retry")
+    project = await _project(db_session, tenant.id, user.id, "cards-retry")
+
+    snap = ProjectIntelligenceSnapshot(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        project_id=project.id,
+        suite="insights",
+        payload={"insights": [{"title": "old"}]},
+        is_stale=True,
+    )
+    db_session.add(snap)
+    await db_session.commit()
+
+    async def failing_run_for_project(*args, **kwargs):
+        raise AIUnavailableError("busy", status_code=503, retryable=True)
+
+    monkeypatch.setattr(hir_suite, "_run_for_project", failing_run_for_project)
+
+    with pytest.raises(Retry):
+        await workflows.rebuild_project_insights_cards(
+            {"job_try": 1},
+            tenant_id=tenant.id,
+            user_id=user.id,
+            project_id=project.id,
+            granularity=3,
+        )
+
+    await db_session.refresh(snap)
+    assert snap.is_stale is True
+    assert snap.payload == {"insights": [{"title": "old"}]}
+
+
+async def test_rebuild_project_insights_cards_clears_stale_on_terminal_ai_error(
+    db_engine, db_session, monkeypatch
+):
+    """A non-retryable (or exhausted-retry) AI failure must still clear
+    is_stale so the UI does not spin on the in-progress indicator forever,
+    while keeping the last-good payload intact."""
+    import app.routes.home_intelligence_suite as hir_suite
+    import app.tasks.workflows as workflows
+    from app.services.ai_intelligence_client import AIUnavailableError
+
+    _bind_sessions(monkeypatch, db_engine)
+    tenant, user = await _tenant_user(db_session, "cards-terminal")
+    project = await _project(db_session, tenant.id, user.id, "cards-terminal")
+
+    snap = ProjectIntelligenceSnapshot(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        project_id=project.id,
+        suite="insights",
+        payload={"insights": [{"title": "old"}]},
+        is_stale=True,
+    )
+    db_session.add(snap)
+    await db_session.commit()
+
+    async def failing_run_for_project(*args, **kwargs):
+        raise AIUnavailableError("rejected", status_code=422, retryable=False)
+
+    monkeypatch.setattr(hir_suite, "_run_for_project", failing_run_for_project)
+
+    result = await workflows.rebuild_project_insights_cards(
+        {"job_try": 1},
+        tenant_id=tenant.id,
+        user_id=user.id,
+        project_id=project.id,
+        granularity=3,
+    )
+    assert result["status"] == "error"
+
+    await db_session.refresh(snap)
+    assert snap.is_stale is False
+    assert snap.payload == {"insights": [{"title": "old"}]}
+
+
+async def test_rebuild_project_insights_cards_success_clears_stale(
+    db_engine, db_session, monkeypatch
+):
+    import app.routes.home_intelligence_suite as hir_suite
+    import app.tasks.workflows as workflows
+
+    _bind_sessions(monkeypatch, db_engine)
+    tenant, user = await _tenant_user(db_session, "cards-success")
+    project = await _project(db_session, tenant.id, user.id, "cards-success")
+
+    snap = ProjectIntelligenceSnapshot(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        project_id=project.id,
+        suite="insights",
+        payload={"insights": [{"title": "old"}]},
+        is_stale=True,
+    )
+    db_session.add(snap)
+    await db_session.commit()
+
+    async def spy_run_for_project(*args, **kwargs):
+        return [{"title": "new", "insightType": "risk_test", "severity": "warning"}]
+
+    monkeypatch.setattr(hir_suite, "_run_for_project", spy_run_for_project)
+
+    result = await workflows.rebuild_project_insights_cards(
+        {"job_try": 1},
+        tenant_id=tenant.id,
+        user_id=user.id,
+        project_id=project.id,
+        granularity=3,
+    )
+    assert result == {"status": "ok", "project_id": project.id}
+
+    await db_session.refresh(snap)
+    assert snap.is_stale is False
+    assert snap.payload["insights"][0]["title"] == "new"

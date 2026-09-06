@@ -33,9 +33,17 @@ from app.schemas.auth import (
     DirectLoginRequest,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
+    VerifyEmailRequest,
+    VerifyEmailResponse,
 )
 from app.services.allowed_domains import enforce_allowed_domain
 from app.services.email import send_transactional_email
+from app.services.email_verification_service import (
+    TENANT_ADMIN_INVITE,
+    USER_INVITE,
+    VerificationTokenError,
+    consume_verification_token,
+)
 from app.services.enterprise_auth import (
     record_identity_link,
     resolve_user_for_external_identity,
@@ -396,3 +404,45 @@ async def forgot_password(
     except Exception:
         logger.exception("Forgot-password flow failed for %s", payload.email)
     return generic
+
+
+@router.post("/verify-email", response_model=VerifyEmailResponse)
+async def verify_email(
+    payload: VerifyEmailRequest,
+    session: AsyncSession = Depends(get_db),
+) -> VerifyEmailResponse:
+    """Consume an account_confirmation link's token.
+
+    Step 1 of onboarding (tenant creation and tenant-user invites both send
+    this link first) is complete once this succeeds; only now is the
+    Supabase identity created and the real credential/set-password email
+    sent -- so a typo'd or unowned address never receives login information.
+    """
+    try:
+        result = await consume_verification_token(session, payload.token)
+    except VerificationTokenError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    tenant = await session.get(Tenant, result.user.tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    if not result.already_verified:
+        await session.commit()
+        if result.purpose == TENANT_ADMIN_INVITE:
+            from app.services.tenant_onboarding_service import TenantOnboardingService
+
+            await TenantOnboardingService(session).complete_root_admin_verification(
+                result.user, tenant
+            )
+        elif result.purpose == USER_INVITE:
+            from app.routes.tenants_users import complete_user_invitation
+
+            await complete_user_invitation(session, result.user, tenant)
+        await session.commit()
+
+    return VerifyEmailResponse(
+        email=result.user.email,
+        tenant_slug=tenant.slug,
+        already_verified=result.already_verified,
+    )

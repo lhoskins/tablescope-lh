@@ -81,7 +81,7 @@ const OPERATIONAL_PERIODS: Array<[DatePresetId, string]> = [
 
 interface OperationalNarrativeWidget {
   id: string;
-  type: "operational_brief" | "improvement_opportunities";
+  type: "operational_brief";
   title?: string;
   summary?: string;
   items?: Array<string | OperationalNarrativeItem>;
@@ -625,7 +625,6 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
 
   const narratives = useMemo(() => operationalNarratives(dashboard), [dashboard]);
   const brief = narratives.find((item) => item.type === "operational_brief");
-  const improvements = narratives.find((item) => item.type === "improvement_opportunities");
   const headerDashboards = dashboardOptions?.length ? dashboardOptions : [{ id: dashboard.id, name: dashboard.name }];
   // Operational dashboards keep their ITSM presentation while using one
   // React Grid Layout in both view and edit modes. Editing only unlocks the
@@ -638,7 +637,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   const layoutRef = useRef<LayoutItem[]>([]);
   const layouts = useMemo(() => {
     const lg: LayoutItem[] = operational
-      ? operationalLayout(widgets, improvements?.layout, (dashboard.config?.operationalLayoutVersion ?? 0) >= 2).filter((item) => improvements || item.i !== OPERATIONAL_IMPROVEMENTS_LAYOUT_ID)
+      ? operationalLayout(widgets, undefined, (dashboard.config?.operationalLayoutVersion ?? 0) >= 2).filter((item) => item.i !== OPERATIONAL_IMPROVEMENTS_LAYOUT_ID)
       : widgets.map((w, idx) => ({
         i: w.id,
         x: w.gridX ?? ((idx * (w.colSpan || 6)) % 12),
@@ -650,7 +649,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
       }));
     layoutRef.current = lg;
     return { lg };
-  }, [dashboard.config?.operationalLayoutVersion, improvements?.layout, operational, widgets]);
+  }, [dashboard.config?.operationalLayoutVersion, operational, widgets]);
 
   const persistLayout = useCallback((layout: Layout) => {
     const prev = layoutRef.current;
@@ -665,11 +664,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
       if (!l) return w;
       return { ...w, gridX: l.x, gridY: l.y, gridW: l.w, gridH: l.h };
     });
-    const improvementLayout = layout.find((item) => item.i === OPERATIONAL_IMPROVEMENTS_LAYOUT_ID);
-    const updatedNarratives = narratives.map((item) => item.type === "improvement_opportunities" && improvementLayout
-      ? { ...item, layout: { ...item.layout, gridX: improvementLayout.x, gridY: improvementLayout.y, gridW: Math.min(improvementLayout.w, 6), gridH: improvementLayout.h } }
-      : item);
-    updateMutation.mutate({ config: { ...dashboard.config, widgets: updatedWidgets, globalFilters, ...(operational ? { operationalLayoutVersion: 2, operationalWidgets: updatedNarratives as unknown as Array<Record<string, unknown>> } : {}) } });
+    updateMutation.mutate({ config: { ...dashboard.config, widgets: updatedWidgets, globalFilters, ...(operational ? { operationalLayoutVersion: 2, operationalWidgets: narratives as unknown as Array<Record<string, unknown>> } : {}) } });
   }, [dashboard.config, widgets, globalFilters, narratives, operational, updateMutation]);
 
   const handleDragStop: EventCallback = useCallback(
@@ -1050,29 +1045,6 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
                 </div>
               </div>
             ))}
-            {operational && improvements && (
-              <div key={OPERATIONAL_IMPROVEMENTS_LAYOUT_ID}>
-                <div className="h-full overflow-hidden rounded-xl border border-line-tertiary bg-white p-4">
-                  <div className={`widget-drag-handle flex items-start justify-between gap-3 ${editingLayout ? "cursor-grab active:cursor-grabbing" : "cursor-default"}`}>
-                    <div>
-                      <h4 className="text-sm font-semibold text-ink-primary">{improvements.title || "Best Improvement Opportunities"}</h4>
-                      <p className="mt-0.5 text-[11px] text-ink-tertiary">Prioritized by operational impact</p>
-                    </div>
-                    <button type="button" onClick={() => { setEditingWidget(null); setDesignerMode("edit_dashboard"); }} title="Edit with AI" className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
-                      <IconSparkles size={14} />
-                    </button>
-                  </div>
-                  <ol className="mt-3 space-y-2.5">
-                    {(improvements.items ?? []).slice(0, 5).map((item, index) => (
-                      <li key={`improvement-${index}`} className="flex gap-2 border-b border-line-tertiary pb-2 text-[11px] leading-4 text-ink-secondary last:border-0">
-                        <span className="font-semibold text-brand-600">{index + 1}.</span>
-                        <span>{typeof item === "string" ? item : item.detail || item.label}</span>
-                      </li>
-                    ))}
-                  </ol>
-                </div>
-              </div>
-            )}
               </ResponsiveGridLayout>
             )}
           </div>

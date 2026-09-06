@@ -1001,6 +1001,139 @@ async def rebuild_project_insight(
 rebuild_project_insight.keep_result = 0  # type: ignore[attr-defined]
 
 
+async def enqueue_rebuild_project_insights_cards(
+    *, tenant_id: int, user_id: int, project_id: int, granularity: int
+) -> str:
+    """Enqueue one user's manual Analyze/Refresh of Project Insight's
+    risk/trend/opportunity cards (the ``insights`` suite) as a background job,
+    so navigating away from the page does not interrupt the run."""
+    pool = await create_pool(_redis_settings())
+    try:
+        job = await pool.enqueue_job(
+            "rebuild_project_insights_cards",
+            tenant_id=tenant_id,
+            user_id=user_id,
+            project_id=project_id,
+            granularity=granularity,
+        )
+        return job.job_id if job else ""
+    finally:
+        await pool.close()
+
+
+async def rebuild_project_insights_cards(
+    ctx: dict[str, Any],
+    *,
+    tenant_id: int,
+    user_id: int,
+    project_id: int,
+    granularity: int,
+) -> dict[str, Any]:
+    """Rebuild one user's Project Insight risk/trend/opportunity cards in the
+    background after a manual Analyze/Refresh click.
+
+    Mirrors the ``project_insight`` suite's ``is_stale`` snapshot lifecycle
+    (mark stale, run, clear stale on completion) rather than Business
+    Insight's Redis-streamed run tracking: this suite has no progressive-
+    reveal UI, just one snapshot that is either fresh or still being rebuilt --
+    exactly what ``is_stale`` already models. The route enqueuing this job
+    marks the snapshot stale before returning, so a caller that reloads the
+    page mid-run still sees ``stale=true`` until this task clears it.
+    """
+    from app.models.project import Project
+    from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
+    from app.routes.home_intelligence_suite import _run_for_project
+    from app.services import home_intelligence as hi
+    from app.services.ai_intelligence_client import AIUnavailableError
+
+    settings = get_settings()
+    job_try = int(ctx.get("job_try", 1) or 1)
+    max_tries = max(1, settings.home_intelligence_job_max_tries)
+
+    async with SessionLocal() as session:
+        project = await session.get(Project, project_id)
+        if project is None or project.tenant_id != tenant_id:
+            return {
+                "status": "skipped",
+                "reason": "project_not_found",
+                "project_id": project_id,
+            }
+
+        snap = await session.scalar(
+            select(ProjectIntelligenceSnapshot).where(
+                ProjectIntelligenceSnapshot.tenant_id == tenant_id,
+                ProjectIntelligenceSnapshot.user_id == user_id,
+                ProjectIntelligenceSnapshot.project_id == project_id,
+                ProjectIntelligenceSnapshot.suite == "insights",
+            )
+        )
+
+        try:
+            context = _worker_context(tenant_id, user_id)
+            cards = await _run_for_project(
+                session,
+                context,
+                project,
+                hi.ALL_PROMPT_TYPES,
+                write_audit=False,
+                granularity=granularity,
+                raise_on_error=True,
+            )
+        except AIUnavailableError as exc:
+            await session.rollback()
+            if exc.retryable and job_try < max_tries:
+                defer = (
+                    exc.retry_after
+                    if exc.retry_after is not None
+                    else settings.home_intelligence_busy_retry_seconds
+                )
+                raise Retry(defer=defer) from exc
+            logger.warning(
+                "project insights cards rebuild failed for project %s user %s: %s",
+                project_id,
+                user_id,
+                exc,
+            )
+            if snap is not None:
+                snap.is_stale = False
+                await session.commit()
+            return {"status": "error", "project_id": project_id, "reason": str(exc)}
+        except Exception as exc:
+            await session.rollback()
+            logger.warning(
+                "project insights cards rebuild failed for project %s user %s: %s",
+                project_id,
+                user_id,
+                exc,
+            )
+            if snap is not None:
+                snap.is_stale = False
+                await session.commit()
+            return {"status": "error", "project_id": project_id, "reason": str(exc)}
+
+        payload = {
+            "projectId": str(project.id),
+            "projectName": project.name,
+            "projectColor": hi.project_color(project.id),
+            "insights": cards,
+        }
+        if snap is None:
+            snap = ProjectIntelligenceSnapshot(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                project_id=project_id,
+                suite="insights",
+            )
+            session.add(snap)
+        snap.payload = payload
+        snap.is_stale = False
+        await session.commit()
+        return {"status": "ok", "project_id": project_id}
+
+
+rebuild_project_insights_cards.keep_result = 0  # type: ignore[attr-defined]
+
+
 async def index_for_search(
     ctx: dict[str, Any],
     *,
@@ -1500,6 +1633,7 @@ class WorkerSettings:
         reprocess_project,
         refresh_business_insight_result,
         rebuild_project_insight,
+        rebuild_project_insights_cards,
         schedule_stale_insight_refresh,
         refresh_quickbooks_tokens,
         refresh_google_drive_tokens,
