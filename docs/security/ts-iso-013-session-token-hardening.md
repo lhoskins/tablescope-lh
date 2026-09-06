@@ -1,11 +1,16 @@
 # TS-ISO-013: Session Token Hardening — Standalone Implementation Plan
 
-**Status:** Open — partial renewal protection exists; implementation required  
-**Severity:** Medium  
-**Owner:** Platform / Identity / Security / Web  
-**Target branch:** `UX-design-03`  
-**Plan branch:** `codex/ts-iso-013-session-token-hardening`  
-**Depends on:** Existing tenant-scoped authentication and SMS MFA enforcement  
+**Status:** Open — partial renewal protection exists; implementation required
+
+**Severity:** Medium
+
+**Owner:** Platform / Identity / Security / Web
+
+**Target branch:** `UX-design-03`
+
+**Plan branch:** `codex/ts-iso-013-session-token-hardening`
+
+**Depends on:** Existing tenant-scoped authentication and SMS MFA enforcement
 **Related findings:** TS-ISO-001 (tenant context), TS-ISO-011 (session deletion/revocation), TS-ISO-015 (tenant login ambiguity)
 
 ## 1. Objective
