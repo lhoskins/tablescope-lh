@@ -243,7 +243,7 @@ files.
 | `npm run typecheck` (web-ui) | clean |
 | `npm run lint` (web-ui) | clean — pre-existing `max-lines`/`exhaustive-deps` warnings on unrelated files only |
 | `npm run build` (web-ui) | succeeds |
-| Full `pytest -q` (whole platform-api suite) | _fill in after full run completes_ |
+| Full `pytest -q` (whole platform-api suite) | 1903 passed, 12 failed, 4 skipped in 1055s. All 12 failures confirmed pre-existing on `UX-design-03` — identical set documented in every prior full run on this base (`test_billing.py` x2 provisioning tests broken by the tenant-private-S3 data-plane feature, `test_visualization_engine.py`, `test_percent_change_summary.py` x4, `test_ai_dashboard_pipeline.py`, `test_ask_pipeline.py`, `test_business_insight_phase1.py` x3 snapshot-staleness tests) — none touch any file this branch changes. |
 
 ```bash
 cd platform-api
