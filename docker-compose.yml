@@ -113,6 +113,17 @@ services:
       TWILIO_VERIFY_SERVICE_SID: ${TWILIO_VERIFY_SERVICE_SID:-}
       MFA_ENFORCEMENT_ENABLED: ${MFA_ENFORCEMENT_ENABLED:-false}
       MFA_SESSION_TTL_MINUTES: ${MFA_SESSION_TTL_MINUTES:-720}
+      # --- Google Drive Spreadsheet connector ---
+      # One shared Tablescope-registered OAuth client; redirect_uri must match
+      # both this deployment's web-ui callback page and the "Authorized
+      # redirect URIs" entry on that OAuth client in Google Cloud Console
+      # exactly, or Google rejects the request before the consent screen (a
+      # mismatch after consent instead sends the browser to a stale/wrong URL
+      # -- see docs/devin-connector-reauth-ux-validated-plan.md).
+      GOOGLE_DRIVE_CONNECTOR_V1_ENABLED: ${GOOGLE_DRIVE_CONNECTOR_V1_ENABLED:-false}
+      GOOGLE_DRIVE_CLIENT_ID: ${GOOGLE_DRIVE_CLIENT_ID:-}
+      GOOGLE_DRIVE_CLIENT_SECRET: ${GOOGLE_DRIVE_CLIENT_SECRET:-}
+      GOOGLE_DRIVE_REDIRECT_URI: ${GOOGLE_DRIVE_REDIRECT_URI:-${APP_BASE_URL:-https://app.tablescope.cloud}/connector-callbacks/google}
       # Business Insight / Project Insight feature flags (off by default)
       BUSINESS_INSIGHT_SHARED_CACHE_ENABLED: ${BUSINESS_INSIGHT_SHARED_CACHE_ENABLED:-false}
       BUSINESS_INSIGHT_EVENT_REFRESH_ENABLED: ${BUSINESS_INSIGHT_EVENT_REFRESH_ENABLED:-false}
