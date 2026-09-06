@@ -1,11 +1,16 @@
 # TS-ISO-012: Data-Plane Fallback Completion — Standalone Implementation Plan
 
-**Status:** Open — partial foundations exist; implementation required  
-**Severity:** High  
-**Owner:** Platform / Data Plane / Security / Operations  
-**Target branch:** `UX-design-03`  
-**Plan branch:** `codex/ts-iso-012-data-plane-fallback-completion`  
-**Depends on:** Isolated S3 tenant storage resolution (merged)  
+**Status:** Open — partial foundations exist; implementation required
+
+**Severity:** High
+
+**Owner:** Platform / Data Plane / Security / Operations
+
+**Target branch:** `UX-design-03`
+
+**Plan branch:** `codex/ts-iso-012-data-plane-fallback-completion`
+
+**Depends on:** Isolated S3 tenant storage resolution (merged)
 **Related findings:** TS-ISO-010 (file proxy hardening), TS-ISO-011 (cross-store deletion)
 
 ## 1. Objective
