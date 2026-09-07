@@ -254,7 +254,7 @@ async def append_canonical_turn(
         active_resources=resolved_resources,
     )
 
-    if turn.status == "success":
+    if turn.status == "success" and turn.intent_type != "create_dashboard":
         conversation.last_successful_turn_id = turn.id
     conversation.updated_at = datetime.now(UTC)
     await session.flush()

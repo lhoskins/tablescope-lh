@@ -29,10 +29,21 @@ vi.mock("@/lib/api/conversational-analytics", () => ({
   submitTurn: (id: number, data: unknown) => submitTurn(id, data),
   renameConversation: vi.fn(),
   deleteConversation: vi.fn(),
+  decideArtifactProposal: vi.fn(),
 }));
 
 vi.mock("@/components/tablescope/project-shell", () => ({
   ProjectShell: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+}));
+
+// ProjectChatsScreen always mounts AIDashboardDesigner (for the dashboard
+// artifact-confirmation flow) even when its own confirmation dialog is
+// closed, and that component calls useRouter() unconditionally -- so this
+// screen's tests need the same next/navigation mock AIDashboardDesigner's
+// own test file uses, not just a mock for screens that call useRouter()
+// directly themselves.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
 }));
 
 import { ProjectChatsScreen } from "./project-chats-screen";

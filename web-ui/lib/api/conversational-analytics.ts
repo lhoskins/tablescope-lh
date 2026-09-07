@@ -56,6 +56,23 @@ export interface ChatAttachmentSummary {
   status: string;
 }
 
+export type ArtifactProposalStatus = "pending" | "accepted" | "rejected";
+
+export interface ChatArtifactProposal {
+  kind: "query" | "dashboard";
+  status: ArtifactProposalStatus;
+  title: string;
+  prompt: string;
+  description: string;
+  sql?: string | null;
+  dataSources?: string[];
+  createdAt?: string;
+  decidedAt?: string;
+  decidedBy?: number;
+  assetId?: number | null;
+  assetUrl?: string | null;
+}
+
 export interface ConversationTurn {
   id: number;
   sequence: number;
@@ -71,6 +88,8 @@ export interface ConversationTurn {
   result: TurnResult | null;
   chart_config: ChartConfig | null;
   explanation: Record<string, unknown> | null;
+  /** Durable query/dashboard draft awaiting an explicit user decision. */
+  artifact_proposal?: ChatArtifactProposal | null;
   error_code: string | null;
   matched_insight: MatchedInsight | null;
   attachments: ChatAttachmentSummary[];
@@ -114,6 +133,12 @@ export interface SubmitTurnRequest {
   data_source_id?: number;
   attachment_ids?: number[];
   client_request_id?: string;
+}
+
+export interface ArtifactDecisionRequest {
+  decision: "accept" | "reject";
+  artifact_kind: "query" | "dashboard";
+  asset_id?: number;
 }
 
 export type WorkspaceResourceType = "table" | "dashboard" | "document" | "data_source";
@@ -200,6 +225,17 @@ export function submitTurn(
     `/api/conversational-analytics/conversations/${conversationId}/turns`,
     data,
     { signal },
+  );
+}
+
+export function decideArtifactProposal(
+  conversationId: number,
+  turnId: number,
+  data: ArtifactDecisionRequest,
+): Promise<{ conversation_id: number; turn: ConversationTurn }> {
+  return apiClient.post(
+    `/api/conversational-analytics/conversations/${conversationId}/turns/${turnId}/artifact-decision`,
+    data,
   );
 }
 

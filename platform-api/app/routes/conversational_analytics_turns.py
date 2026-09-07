@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -12,7 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.database import get_db
-from app.models import AnalyticsConversationTurn
+from app.models import AnalyticsConversationTurn, Dashboard, FileSourceMeta, SavedQuery
+from app.routes.ai_proxy_shared import _detect_datasource
 from app.routes.conversational_analytics_conversations import (
     TurnResponse,
     _check_project_access,
@@ -28,6 +31,7 @@ from app.services.canonical_conversations import (
 from app.services.conversational_analytics import execute_turn
 
 router = APIRouter(prefix="/conversational-analytics", tags=["Conversational Analytics"])
+logger = logging.getLogger(__name__)
 
 
 class SubmitTurnRequest(BaseModel):
@@ -40,6 +44,12 @@ class SubmitTurnRequest(BaseModel):
 class TurnSubmissionResponse(BaseModel):
     conversation_id: int
     turn: TurnResponse
+
+
+class ArtifactDecisionRequest(BaseModel):
+    decision: Literal["accept", "reject"]
+    artifact_kind: Literal["query", "dashboard"]
+    asset_id: int | None = None
 
 
 @router.post("/conversations/{conversation_id}/turns", response_model=TurnSubmissionResponse)
@@ -101,7 +111,11 @@ async def submit_turn(
         datasource_id=req.data_source_id,
         attachment_ids=req.attachment_ids,
     )
-    if turn.status == "success" and turn.id is not None:
+    if (
+        turn.status == "success"
+        and turn.id is not None
+        and turn.intent_type != "create_dashboard"
+    ):
         conversation.last_successful_turn_id = turn.id
     conversation.updated_at = datetime.now(UTC)
     await session.flush()
@@ -109,6 +123,146 @@ async def submit_turn(
 
     return TurnSubmissionResponse(
         conversation_id=conversation_id,
+        turn=_turn_to_response(turn),
+    )
+
+
+@router.post(
+    "/conversations/{conversation_id}/turns/{turn_id}/artifact-decision",
+    response_model=TurnSubmissionResponse,
+)
+async def decide_artifact_proposal(
+    conversation_id: int,
+    turn_id: int,
+    req: ArtifactDecisionRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> TurnSubmissionResponse:
+    """Accept or reject a chat artifact proposal.
+
+    Query acceptance creates the SavedQuery here from SQL that was already
+    validated and executed by the conversational pipeline. Dashboard
+    acceptance is recorded only after the existing dashboard designer has
+    applied its separately reviewed design and supplies the resulting id.
+    """
+    conversation = await _load_conversation(session, context, conversation_id)
+    if conversation.project_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Artifact proposals require a project-scoped conversation",
+        )
+    await _check_project_access(session, context, conversation.project_id)
+
+    turn = await session.scalar(
+        select(AnalyticsConversationTurn)
+        .where(
+            AnalyticsConversationTurn.id == turn_id,
+            AnalyticsConversationTurn.conversation_id == conversation.id,
+        )
+        .with_for_update()
+    )
+    if turn is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Turn not found")
+
+    explanation = dict(turn.explanation or {})
+    proposal = dict(explanation.get("artifactProposal") or {})
+    if not proposal or proposal.get("kind") != req.artifact_kind:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This turn does not contain the requested artifact proposal",
+        )
+
+    current_status = proposal.get("status") or "pending"
+    if current_status == "accepted" and req.decision == "accept":
+        return TurnSubmissionResponse(
+            conversation_id=conversation.id,
+            turn=_turn_to_response(turn),
+        )
+    if current_status == "rejected" and req.decision == "reject":
+        return TurnSubmissionResponse(
+            conversation_id=conversation.id,
+            turn=_turn_to_response(turn),
+        )
+    if current_status in {"accepted", "rejected"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"This proposal was already {current_status}",
+        )
+
+    asset_id: int | None = None
+    asset_url: str | None = None
+    if req.decision == "accept" and req.artifact_kind == "query":
+        if not turn.sql or turn.status != "success":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="The proposal has no validated SQL to save",
+            )
+        sources = list(
+            await session.scalars(
+                select(FileSourceMeta).where(
+                    FileSourceMeta.project_id == conversation.project_id,
+                    FileSourceMeta.tenant_id == context.tenant_id,
+                    FileSourceMeta.archived.is_(False),
+                )
+            )
+        )
+        saved_query = SavedQuery(
+            project_id=conversation.project_id,
+            owner_id=context.user_id,
+            name=str(proposal.get("title") or "AI Query")[:255],
+            description=str(proposal.get("prompt") or turn.user_message),
+            sql_text=turn.sql,
+            left_datasource=_detect_datasource(
+                turn.sql, [source.view_name for source in sources]
+            ),
+            ai_generated=True,
+        )
+        session.add(saved_query)
+        await session.flush()
+        asset_id = saved_query.id
+        asset_url = f"/projects/{conversation.project_id}/queries"
+
+    if req.decision == "accept" and req.artifact_kind == "dashboard":
+        if req.asset_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="A created dashboard id is required",
+            )
+        dashboard = await session.get(Dashboard, req.asset_id)
+        if (
+            dashboard is None
+            or dashboard.project_id != conversation.project_id
+            or dashboard.tenant_id != context.tenant_id
+        ):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dashboard not found")
+        asset_id = dashboard.id
+        asset_url = f"/projects/{conversation.project_id}/dashboards/{dashboard.id}"
+
+    proposal.update(
+        {
+            "status": "accepted" if req.decision == "accept" else "rejected",
+            "decidedAt": datetime.now(UTC).isoformat(),
+            "decidedBy": context.user_id,
+            "assetId": asset_id,
+            "assetUrl": asset_url,
+        }
+    )
+    explanation["artifactProposal"] = proposal
+    turn.explanation = explanation
+    await session.flush()
+    await session.refresh(turn)
+    logger.info(
+        "Conversation artifact decision | conversation=%d turn=%d kind=%s decision=%s asset=%s tenant=%d user=%d",
+        conversation.id,
+        turn.id,
+        req.artifact_kind,
+        req.decision,
+        asset_id,
+        context.tenant_id,
+        context.user_id,
+    )
+    return TurnSubmissionResponse(
+        conversation_id=conversation.id,
         turn=_turn_to_response(turn),
     )
 
@@ -219,7 +373,11 @@ async def retry_turn(
     await execute_turn(
         session, context, conversation, turn, datasource_id=conversation.active_datasource_id
     )
-    if turn.status == "success" and turn.id is not None:
+    if (
+        turn.status == "success"
+        and turn.id is not None
+        and turn.intent_type != "create_dashboard"
+    ):
         conversation.last_successful_turn_id = turn.id
     await session.flush()
     await session.refresh(turn)

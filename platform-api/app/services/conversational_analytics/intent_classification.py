@@ -19,6 +19,8 @@ class ConversationalIntent(str):
     NEW_ANALYSIS = "new_analysis"
     QUERY_CHANGE = "query_change"
     CHART_CHANGE = "chart_change"
+    CREATE_QUERY = "create_query"
+    CREATE_DASHBOARD = "create_dashboard"
     EXPLAIN = "explain"
     CLARIFICATION = "clarification"
     DOCUMENT_QA = "document_qa"
@@ -96,6 +98,72 @@ _FALLBACK_EXPLAIN = re.compile(
 )
 
 
+# Artifact commands are deliberately detected before the general analytical
+# classifier.  Creating a durable query/dashboard is a materially different
+# user intent from merely answering a question, and it must always end in an
+# explicit confirmation step.  Keeping this small command grammar in the
+# platform also makes the safety behaviour deterministic when the AI service
+# is unavailable.
+_ARTIFACT_COMMAND_PREFIX = (
+    r"^\s*(?:(?:please|kindly)\s+)?"
+    r"(?:(?:can|could|would|will)\s+you\s+|i\s+(?:want|need)\s+you\s+to\s+)?"
+)
+_CREATE_DASHBOARD = re.compile(
+    _ARTIFACT_COMMAND_PREFIX
+    + r"(?:create|build|generate|make|design|prepare)\s+(?:me\s+)?(?:a\s+|an\s+|new\s+)?dashboard\b",
+    re.IGNORECASE,
+)
+_CREATE_QUERY = re.compile(
+    _ARTIFACT_COMMAND_PREFIX
+    + r"(?:create|build|generate|make|prepare)\s+(?:me\s+)?(?:a\s+|an\s+|new\s+)?(?:saved\s+)?query\b",
+    re.IGNORECASE,
+)
+_SAVE_AS_DASHBOARD = re.compile(
+    _ARTIFACT_COMMAND_PREFIX
+    # The referent accepts a bare demonstrative ("this", "that", "the"), a
+    # demonstrative plus noun ("this result"), matching natural phrasing
+    # users actually type -- not just one form or the other.
+    + r"(?:save|turn|add)\s+(?:this|that|the)(?:\s+(?:result|analysis|answer))?\s+(?:as|into|to)\s+(?:a\s+|an\s+)?dashboard\b",
+    re.IGNORECASE,
+)
+_SAVE_AS_QUERY = re.compile(
+    _ARTIFACT_COMMAND_PREFIX
+    + r"(?:save|turn)\s+(?:this|that|the)(?:\s+(?:result|analysis|answer|sql))?\s+(?:as|into)\s+(?:a\s+|an\s+)?query\b",
+    re.IGNORECASE,
+)
+
+
+def artifact_intent(question: str) -> str | None:
+    """Return an explicit durable-artifact command, if present.
+
+    Dashboard is checked first because dashboard requests commonly contain the
+    word "query" when describing their supporting data.
+    """
+    if _CREATE_DASHBOARD.search(question) or _SAVE_AS_DASHBOARD.search(question):
+        return ConversationalIntent.CREATE_DASHBOARD
+    if _CREATE_QUERY.search(question) or _SAVE_AS_QUERY.search(question):
+        return ConversationalIntent.CREATE_QUERY
+    return None
+
+
+def artifact_data_question(question: str) -> str:
+    """Strip the leading create-query command before SQL generation."""
+    cleaned = _CREATE_QUERY.sub("", question, count=1).strip(" :-")
+    cleaned = re.sub(
+        r"^(?:(?:that|which)\s+)?(?:shows?|showing|returns?|returning|lists?|listing)\s+",
+        "",
+        cleaned,
+        flags=re.I,
+    )
+    cleaned = re.sub(r"^(?:for|of)\s+", "", cleaned, flags=re.I)
+    return cleaned or question
+
+
+def is_save_existing_query_request(question: str) -> bool:
+    """True when the user explicitly refers to the preceding result."""
+    return bool(_SAVE_AS_QUERY.search(question))
+
+
 def _normalize_question(question: str) -> str:
     return re.sub(r"\s+", " ", question.strip().lower())
 
@@ -168,13 +236,22 @@ async def classify_turn(
     conversation_id: int | None = None,
     turn_id: int | None = None,
 ) -> tuple[str, dict[str, Any], str | None]:
-    """Classify a turn LLM-first; degrade deterministically when AI is off.
+    """Classify an explicit artifact command, otherwise use the LLM first.
 
     Returns the intent, the structured chart patch produced by the model
     (already sanitized server-side, re-validated in :func:`apply_chart_patch`),
     and an optional ``data_question`` to send to the SQL generator with chart
     language removed.
     """
+    explicit_artifact_intent = artifact_intent(question)
+    if explicit_artifact_intent is not None:
+        data_question = (
+            artifact_data_question(question)
+            if explicit_artifact_intent == ConversationalIntent.CREATE_QUERY
+            else None
+        )
+        return explicit_artifact_intent, {}, data_question
+
     state = _prior_turn_state(prior_turn)
     if ai_intelligence_client.is_enabled():
         try:
@@ -196,6 +273,8 @@ async def classify_turn(
                 ConversationalIntent.NEW_ANALYSIS,
                 ConversationalIntent.QUERY_CHANGE,
                 ConversationalIntent.CHART_CHANGE,
+                ConversationalIntent.CREATE_QUERY,
+                ConversationalIntent.CREATE_DASHBOARD,
                 ConversationalIntent.EXPLAIN,
                 ConversationalIntent.CLARIFICATION,
             }:
