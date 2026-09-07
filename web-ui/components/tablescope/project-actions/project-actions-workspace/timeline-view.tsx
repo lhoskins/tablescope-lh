@@ -59,6 +59,7 @@ export function TimelineView({
   onDueChange,
   onArchive,
   onRestore,
+  onDelete,
   onSubtaskStatusChange,
   onSubtaskFieldChange,
   onSubtaskArchive,
@@ -80,6 +81,7 @@ export function TimelineView({
   onDueChange: (id: number, due_date: string | null, version: number) => void;
   onArchive: (id: number, version: number) => void;
   onRestore: (id: number) => void;
+  onDelete: (id: number) => void;
   onSubtaskStatusChange: (actionId: number, subtaskId: number, status: ProjectActionStatus) => void;
   onSubtaskFieldChange: (
     actionId: number,
@@ -142,6 +144,7 @@ export function TimelineView({
                 onDueChange={onDueChange}
                 onArchive={() => onArchive(item.id, item.lock_version)}
                 onRestore={() => onRestore(item.id)}
+                onDelete={() => onDelete(item.id)}
                 onSubtaskStatusChange={onSubtaskStatusChange}
                 onSubtaskFieldChange={onSubtaskFieldChange}
                 onSubtaskArchive={onSubtaskArchive}

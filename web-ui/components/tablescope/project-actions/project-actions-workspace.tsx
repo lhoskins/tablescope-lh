@@ -72,6 +72,7 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
     updateAction,
     archiveAction,
     restoreAction,
+    deleteAction,
     createSubtask,
     updateSubtask,
     archiveSubtask,
@@ -254,6 +255,11 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
   };
 
   const handleRestore = (id: number) => restoreAction.mutate(id);
+
+  const handleDelete = (id: number) =>
+    deleteAction.mutate(id, {
+      onError: (err: Error) => pushToast(err.message, "error"),
+    });
 
   const handleSubtaskStatusChange = (
     actionId: number,
@@ -509,6 +515,7 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
             onDueChange={handleDueChange}
             onArchive={handleArchive}
             onRestore={handleRestore}
+            onDelete={handleDelete}
             onSubtaskStatusChange={handleSubtaskStatusChange}
             onSubtaskFieldChange={handleSubtaskFieldChange}
             onSubtaskArchive={handleSubtaskArchive}
@@ -537,6 +544,7 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
                 onDueChange={handleDueChange}
                 onArchive={handleArchive}
                 onRestore={handleRestore}
+                onDelete={handleDelete}
                 onSubtaskStatusChange={handleSubtaskStatusChange}
                 onSubtaskFieldChange={handleSubtaskFieldChange}
                 onSubtaskArchive={handleSubtaskArchive}

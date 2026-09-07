@@ -12,6 +12,7 @@ import {
   IconPlus,
   IconTrash,
   IconArchive,
+  IconRestore,
   IconSparkles,
   IconChevronDown,
 } from "@tabler/icons-react";
@@ -19,6 +20,7 @@ import { ProjectShell } from "@/components/tablescope/project-shell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { AutosizeTextarea } from "@/components/ui/autosize-textarea";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToasts } from "@/components/ui/toast";
 import { useProjectMembers } from "@/lib/ui/use-project-data";
 import { canManageProjectActions } from "@/lib/auth";
@@ -66,6 +68,7 @@ export function ProjectActionDetail({
   const [ownerUserId, setOwnerUserId] = useState<string>("");
   const [dueDate, setDueDate] = useState("");
   const [newSubtask, setNewSubtask] = useState("");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   useEffect(() => {
     if (!action) return;
@@ -101,6 +104,26 @@ export function ProjectActionDetail({
     mutationFn: () => projectActionsApi.archive(projectId, actionId, action?.lock_version),
     onSuccess: () => {
       pushToast("Action archived", "success");
+      router.push(`/projects/${projectId}/actions`);
+    },
+    onError: (err: Error) => pushToast(err.message, "error"),
+  });
+
+  const restoreAction = useMutation({
+    mutationFn: () => projectActionsApi.restore(projectId, actionId),
+    onSuccess: () => {
+      pushToast("Action restored", "success");
+      queryClient.invalidateQueries({
+        queryKey: ["project", projectId, "actions", actionId],
+      });
+    },
+    onError: (err: Error) => pushToast(err.message, "error"),
+  });
+
+  const deleteAction = useMutation({
+    mutationFn: () => projectActionsApi.deletePermanently(projectId, actionId),
+    onSuccess: () => {
+      pushToast("Action deleted", "success");
       router.push(`/projects/${projectId}/actions`);
     },
     onError: (err: Error) => pushToast(err.message, "error"),
@@ -147,15 +170,40 @@ export function ProjectActionDetail({
       breadcrumbLabel="Action Detail"
       actions={
         canEdit && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => archiveAction.mutate()}
-            disabled={archiveAction.isPending}
-          >
-            <IconArchive size={14} />
-            Archive
-          </Button>
+          <div className="flex items-center gap-2">
+            {action.archived_at ? (
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => restoreAction.mutate()}
+                  disabled={restoreAction.isPending}
+                >
+                  <IconRestore size={14} />
+                  Restore
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setConfirmingDelete(true)}
+                  disabled={deleteAction.isPending}
+                >
+                  <IconTrash size={14} />
+                  Delete
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => archiveAction.mutate()}
+                disabled={archiveAction.isPending}
+              >
+                <IconArchive size={14} />
+                Archive
+              </Button>
+            )}
+          </div>
         )
       }
     >
@@ -294,6 +342,17 @@ export function ProjectActionDetail({
           </div>
         </div>
       </div>
+      <ConfirmDialog
+        open={confirmingDelete}
+        title="Delete this action?"
+        message={`"${action.title}" will be permanently deleted. This cannot be undone.`}
+        confirmLabel="Delete"
+        onConfirm={() => {
+          deleteAction.mutate();
+          setConfirmingDelete(false);
+        }}
+        onCancel={() => setConfirmingDelete(false)}
+      />
     </ProjectShell>
   );
 }

@@ -142,6 +142,11 @@ export function useProjectActionsBoard(
     onSuccess: () => invalidateBoard(),
   });
 
+  const deleteAction = useMutation({
+    mutationFn: (actionId: number) => projectActionsApi.deletePermanently(projectId, actionId),
+    onSuccess: () => invalidateBoard(),
+  });
+
   const createSubtask = useMutation({
     mutationFn: ({
       actionId,
@@ -203,6 +208,7 @@ export function useProjectActionsBoard(
     updateAction,
     archiveAction,
     restoreAction,
+    deleteAction,
     createSubtask,
     updateSubtask,
     archiveSubtask,
