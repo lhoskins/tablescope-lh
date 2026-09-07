@@ -970,6 +970,29 @@ async def rebuild_project_insight(
                     snap.payload = payload
                     snap.is_stale = False
                     await session.commit()
+                    try:
+                        from app.services.ai_action_proposals import (
+                            project_insight_cards,
+                            sync_ai_action_proposals,
+                        )
+
+                        grounding = payload.get("kgGrounding") or {}
+                        await sync_ai_action_proposals(
+                            session,
+                            tenant_id=tenant_id,
+                            project_id=project_id,
+                            user_id=user_id,
+                            cards=project_insight_cards(payload),
+                            source_surface="project_insight",
+                            kg_version_id=grounding.get("kgVersionId"),
+                        )
+                    except Exception:
+                        logger.exception(
+                            "AI action proposal sync failed for project %s user %s",
+                            project_id,
+                            user_id,
+                        )
+                        await session.rollback()
                     refreshed += 1
                 except AIUnavailableError as exc:
                     await session.rollback()

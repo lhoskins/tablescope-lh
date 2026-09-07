@@ -101,6 +101,86 @@ async def _create_action(
     return r.json()
 
 
+async def test_ai_proposal_requires_human_review_and_is_not_active(client, service_headers):
+    _, user, project, headers = await _setup(client, service_headers, "proposal-review")
+    pid = project["id"]
+    response = await client.post(
+        f"/api/projects/{pid}/actions",
+        headers=headers,
+        json={
+            "title": "Reduce supplier lead-time variance",
+            "status": "pending_review",
+            "priority": "high",
+            "source_type": "ai_proposal",
+            "source_surface": "project_insight",
+            "source_insight_id": "risk-17",
+            "source_insight_type": "risk",
+            "source_insight_title": "Supplier lead time exceeds SLA",
+            "source_insight_snapshot": {
+                "title": "Supplier lead time exceeds SLA",
+                "sources": {"tables": ["supplier_delivery"]},
+            },
+            "proposal_metadata": {"duplicateCheck": "No matching action"},
+            "initial_subtasks": [{"title": "Validate late-order cohort"}],
+        },
+    )
+    assert response.status_code == 201, response.text
+    proposal = response.json()
+    assert proposal["status"] == "pending_review"
+    assert proposal["reviewer_user_id"] == user["id"]
+
+    board = await client.get(f"/api/projects/{pid}/actions/board", headers=headers)
+    assert board.status_code == 200
+    assert board.json()["summary"]["pending_review"] == 1
+    assert board.json()["summary"]["active"] == 0
+
+    accepted = await client.post(
+        f"/api/projects/{pid}/actions/{proposal['id']}/review",
+        headers=headers,
+        json={"decision": "accept", "expected_version": proposal["lock_version"]},
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["status"] == "not_started"
+    assert accepted.json()["outcome_status"] == "pending_execution"
+    assert accepted.json()["reviewed_by_user_id"] == user["id"]
+
+    rejected_response = await client.post(
+        f"/api/projects/{pid}/actions",
+        headers=headers,
+        json={
+            "title": "Duplicate low-value proposal",
+            "status": "pending_review",
+            "source_type": "ai_proposal",
+            "source_insight_id": "risk-18",
+            "source_insight_title": "Minor risk",
+        },
+    )
+    rejected = await client.post(
+        f"/api/projects/{pid}/actions/{rejected_response.json()['id']}/review",
+        headers=headers,
+        json={
+            "decision": "reject",
+            "note": "Insufficient business impact",
+            "expected_version": rejected_response.json()["lock_version"],
+        },
+    )
+    assert rejected.status_code == 200, rejected.text
+    assert rejected.json()["status"] == "rejected"
+    assert rejected.json()["review_note"] == "Insufficient business impact"
+
+
+async def test_completed_action_waits_for_refreshed_insight_outcome(client, service_headers):
+    _, _, project, headers = await _setup(client, service_headers, "proposal-outcome")
+    action = await _create_action(client, project["id"], headers, "Measure result")
+    completed = await client.patch(
+        f"/api/projects/{project['id']}/actions/{action['id']}",
+        headers=headers,
+        json={"status": "completed", "expected_version": action["lock_version"]},
+    )
+    assert completed.status_code == 200, completed.text
+    assert completed.json()["outcome_status"] == "awaiting_refresh"
+
+
 async def test_create_action_computes_fingerprint_and_progress(client, service_headers):
     _, _, project, headers = await _setup(client, service_headers)
     pid = project["id"]

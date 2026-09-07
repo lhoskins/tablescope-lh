@@ -53,7 +53,7 @@ export function StatusCell({
   onChange: (v: ProjectActionStatus) => void;
 }) {
   const color = STATUS_COLORS[value];
-  if (!canManage) {
+  if (!canManage || value === "pending_review" || value === "rejected") {
     return (
       <span className={cn("inline-flex rounded-full px-2.5 py-1 text-[11px] font-medium", color)}>
         {STATUS_BADGE_LABELS[value]}
@@ -71,7 +71,7 @@ export function StatusCell({
           color,
         )}
       >
-        {Object.entries(STATUS_BADGE_LABELS).map(([k, label]) => (
+        {Object.entries(STATUS_BADGE_LABELS).filter(([k]) => !["pending_review", "rejected"].includes(k)).map(([k, label]) => (
           <option key={k} value={k}>
             {label}
           </option>

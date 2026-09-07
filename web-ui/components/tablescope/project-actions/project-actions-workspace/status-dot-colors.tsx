@@ -42,9 +42,11 @@ import {
 
 
 export const STATUS_DOT_COLORS: Record<ProjectActionStatus, string> = {
+  pending_review: "bg-violet-500",
   not_started: "bg-neutral-400",
   in_progress: "bg-amber-500",
   blocked: "bg-orange-500",
   completed: "bg-emerald-500",
   cancelled: "bg-gray-400",
+  rejected: "bg-red-500",
 };

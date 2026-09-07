@@ -112,6 +112,26 @@ async def _save_snapshot(
     snap.payload = payload
     snap.is_stale = is_stale
     await session.commit()
+    if suite == "project_insight" and not is_stale:
+        try:
+            from app.services.ai_action_proposals import (
+                project_insight_cards,
+                sync_ai_action_proposals,
+            )
+
+            grounding = payload.get("kgGrounding") or {}
+            await sync_ai_action_proposals(
+                session,
+                tenant_id=context.tenant_id,
+                project_id=project_id,
+                user_id=context.user_id,
+                cards=project_insight_cards(payload),
+                source_surface="project_insight",
+                kg_version_id=grounding.get("kgVersionId"),
+            )
+        except Exception:
+            logger.exception("AI action proposal sync failed for project %s", project_id)
+            await session.rollback()
 
 
 @router.get("/{project_id}/insight", response_model=ProjectInsightResponse)

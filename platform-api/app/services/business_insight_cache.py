@@ -18,7 +18,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -43,6 +43,20 @@ logger = logging.getLogger(__name__)
 #   5: expanded trend chart window from 12 to 24 data points so 24-month
 #      demos render the full intended lookback.
 ANALYSIS_VERSION = 5
+
+
+async def mark_results_stale(
+    session: AsyncSession, *, tenant_id: int, project_id: int
+) -> None:
+    """Expire cached cards without deleting the prior result shown during refresh."""
+    await session.execute(
+        update(BusinessInsightResult)
+        .where(
+            BusinessInsightResult.tenant_id == tenant_id,
+            BusinessInsightResult.project_id == project_id,
+        )
+        .values(updated_at=datetime(1970, 1, 1, tzinfo=UTC))
+    )
 
 
 async def _active_kg_version_id(
@@ -156,6 +170,26 @@ async def store_result(
         # that changes nothing else still renews the TTL window.
         row.updated_at = datetime.now(UTC)
         await session.commit()
+        if built_by is not None:
+            try:
+                from app.services.ai_action_proposals import sync_ai_action_proposals
+
+                await sync_ai_action_proposals(
+                    session,
+                    tenant_id=tenant_id,
+                    project_id=project_id,
+                    user_id=built_by,
+                    cards=cards,
+                    source_surface="business_insight",
+                    kg_version_id=active_version_id,
+                )
+            except Exception:
+                logger.exception(
+                    "AI action proposal sync failed (tenant=%s project=%s)",
+                    tenant_id,
+                    project_id,
+                )
+                await session.rollback()
     except Exception:
         logger.exception(
             "business insight cache write failed (tenant=%s project=%s)",

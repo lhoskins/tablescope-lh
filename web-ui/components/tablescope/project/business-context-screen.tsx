@@ -159,7 +159,7 @@ export function BusinessContextScreen({ projectId }: { projectId: string }) {
         </Button>
       }
     >
-      <div className="space-y-6">
+      <div className="w-full max-w-none space-y-6">
         {!isLoading && (
           <div>
             <h1 className="text-2xl font-semibold text-ink-primary">Goals</h1>

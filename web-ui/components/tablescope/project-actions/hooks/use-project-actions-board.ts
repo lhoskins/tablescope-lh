@@ -147,6 +147,17 @@ export function useProjectActionsBoard(
     onSuccess: () => invalidateBoard(),
   });
 
+  const reviewAction = useMutation({
+    mutationFn: ({
+      actionId,
+      payload,
+    }: {
+      actionId: number;
+      payload: Parameters<typeof projectActionsApi.review>[2];
+    }) => projectActionsApi.review(projectId, actionId, payload),
+    onSuccess: () => invalidateBoard(),
+  });
+
   const createSubtask = useMutation({
     mutationFn: ({
       actionId,
@@ -209,6 +220,7 @@ export function useProjectActionsBoard(
     archiveAction,
     restoreAction,
     deleteAction,
+    reviewAction,
     createSubtask,
     updateSubtask,
     archiveSubtask,

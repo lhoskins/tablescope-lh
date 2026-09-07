@@ -36,6 +36,7 @@ from app.routes.project_actions_shared import (
     _require_project_access,
     _risk_impact_from_snapshot,
     _status_percent,
+    _validate_goal_metric_scope,
     _validate_owner,
     _validate_priority_value,
     _validate_status_value,
@@ -95,7 +96,7 @@ async def list_actions(
             base = base.where(
                 ProjectAction.due_date.isnot(None),
                 ProjectAction.due_date < now,
-                ProjectAction.status.notin_(["completed", "cancelled"]),
+                ProjectAction.status.notin_(["pending_review", "completed", "cancelled", "rejected"]),
                 ProjectAction.archived_at.is_(None),
             )
         else:
@@ -138,7 +139,12 @@ async def list_actions(
 
     rows = (await session.execute(stmt)).scalars().all()
 
-    owner_ids = {a.owner_user_id for a in rows if a.owner_user_id}
+    owner_ids = {
+        user_id
+        for a in rows
+        for user_id in (a.owner_user_id, a.reviewer_user_id)
+        if user_id
+    }
     users = {}
     if owner_ids:
         users = {
@@ -176,6 +182,7 @@ async def list_actions(
             ProjectActionListItem(
                 id=a.id,
                 title=a.title,
+                description=a.description,
                 status=a.status,
                 priority=a.priority,
                 owner_user_id=a.owner_user_id,
@@ -183,8 +190,24 @@ async def list_actions(
                 due_date=a.due_date,
                 percent_complete=a.percent_complete,
                 source_insight_type=a.source_insight_type,
+                source_type=a.source_type,
+                source_insight_id=a.source_insight_id,
+                source_insight_fingerprint=a.source_insight_fingerprint,
                 source_insight_title=a.source_insight_title,
                 source_insight_snapshot=a.source_insight_snapshot,
+                source_surface=a.source_surface,
+                reviewer_user_id=a.reviewer_user_id,
+                reviewer_name=users.get(a.reviewer_user_id) if a.reviewer_user_id is not None else None,
+                reviewed_by_user_id=a.reviewed_by_user_id,
+                reviewed_at=a.reviewed_at,
+                review_note=a.review_note,
+                review_due_at=a.review_due_at,
+                goal_id=a.goal_id,
+                primary_metric_id=a.primary_metric_id,
+                proposal_metadata=a.proposal_metadata,
+                outcome_snapshot=a.outcome_snapshot,
+                outcome_status=a.outcome_status,
+                outcome_refreshed_at=a.outcome_refreshed_at,
                 risk_impact=_risk_impact_from_snapshot(a.source_insight_snapshot),
                 active_subtasks=active,
                 total_subtasks=total,
@@ -205,7 +228,7 @@ async def create_action(
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> ProjectActionOut:
     """Create a project action, optionally with initial subtasks."""
-    await _require_project_access(project_id, session, context)
+    project = await _require_project_access(project_id, session, context)
 
     if body.idempotency_key:
         existing = await session.scalar(
@@ -221,10 +244,30 @@ async def create_action(
 
     if body.status != "not_started":
         _validate_status_value(body.status)
+    if body.status == "rejected":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Rejected is a review outcome, not a creation status",
+        )
+    if body.status == "pending_review" and body.source_type not in {"ai_proposal", "insight"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Pending review is reserved for insight-grounded AI proposals",
+        )
     if body.priority:
         _validate_priority_value(body.priority)
 
     await _validate_owner(project_id, body.owner_user_id, session)
+    proposed_reviewer = body.reviewer_user_id or (project.owner_id if body.status == "pending_review" else None)
+    if proposed_reviewer is not None and proposed_reviewer != project.owner_id:
+        await _validate_owner(project_id, proposed_reviewer, session)
+    await _validate_goal_metric_scope(
+        tenant_id=context.tenant_id,
+        project_id=project_id,
+        goal_id=body.goal_id,
+        metric_id=body.primary_metric_id,
+        session=session,
+    )
     for st in body.initial_subtasks:
         if st.owner_user_id is not None:
             await _validate_owner(project_id, st.owner_user_id, session)
@@ -251,6 +294,13 @@ async def create_action(
         source_insight_type=body.source_insight_type,
         source_insight_title=body.source_insight_title,
         source_insight_snapshot=body.source_insight_snapshot,
+        source_surface=body.source_surface,
+        reviewer_user_id=proposed_reviewer,
+        review_due_at=body.review_due_at,
+        goal_id=body.goal_id,
+        primary_metric_id=body.primary_metric_id,
+        proposal_metadata=body.proposal_metadata,
+        outcome_status=("awaiting_review" if body.status == "pending_review" else "pending_execution"),
         created_by_user_id=context.user_id,
         updated_by_user_id=context.user_id,
         idempotency_key=body.idempotency_key,
@@ -292,6 +342,7 @@ async def create_action(
         _ensure_can_complete(action)
         action.completed_at = datetime.now(UTC)
         action.percent_complete = 100
+        action.outcome_status = "awaiting_refresh"
 
     await _audit(
         session,
@@ -439,7 +490,7 @@ async def board_actions(
             base = base.where(
                 ProjectAction.due_date.isnot(None),
                 ProjectAction.due_date < now,
-                ProjectAction.status.notin_(["completed", "cancelled"]),
+                ProjectAction.status.notin_(["pending_review", "completed", "cancelled", "rejected"]),
                 ProjectAction.archived_at.is_(None),
             )
         else:
@@ -566,7 +617,11 @@ async def board_actions(
 
     summary = ProjectActionBoardSummary()
     for a in filtered:
-        if a.archived_at is None and a.status not in ("completed", "cancelled"):
+        if a.status == "pending_review" and a.archived_at is None:
+            summary.pending_review += 1
+        if a.archived_at is None and a.status not in (
+            "pending_review", "completed", "cancelled", "rejected"
+        ):
             summary.active += 1
             if a.due_date is not None and a.due_date < now:
                 summary.overdue += 1
@@ -577,7 +632,10 @@ async def board_actions(
             ):
                 summary.risk_mitigations_completed += 1
     active_for_avg = [
-        a for a in filtered if a.archived_at is None and a.status not in ("completed", "cancelled")
+        a
+        for a in filtered
+        if a.archived_at is None
+        and a.status not in ("pending_review", "completed", "cancelled", "rejected")
     ]
     if active_for_avg:
         summary.avg_progress = round(
@@ -593,9 +651,13 @@ async def board_actions(
             group_map[key] = {"count": 0, "overdue": 0, "progress_sum": 0, "progress_n": 0}
         g = group_map[key]
         g["count"] += 1
-        if a.due_date is not None and a.due_date < now and a.status not in ("completed", "cancelled"):
+        if a.due_date is not None and a.due_date < now and a.status not in (
+            "pending_review", "completed", "cancelled", "rejected"
+        ):
             g["overdue"] += 1
-        if a.archived_at is None and a.status not in ("completed", "cancelled"):
+        if a.archived_at is None and a.status not in (
+            "pending_review", "completed", "cancelled", "rejected"
+        ):
             g["progress_sum"] += a.percent_complete
             g["progress_n"] += 1
     groups = []
@@ -641,7 +703,12 @@ async def board_actions(
     sorted_rows = sorted(filtered, key=_sort_key)
     page = sorted_rows[offset : offset + limit]
 
-    owner_ids = {a.owner_user_id for a in page if a.owner_user_id}
+    owner_ids = {
+        user_id
+        for a in page
+        for user_id in (a.owner_user_id, a.reviewer_user_id)
+        if user_id
+    }
     users = {}
     if owner_ids:
         users = {
@@ -669,6 +736,19 @@ async def board_actions(
                 source_insight_type=a.source_insight_type,
                 source_insight_title=a.source_insight_title,
                 source_insight_snapshot=a.source_insight_snapshot,
+                source_surface=a.source_surface,
+                reviewer_user_id=a.reviewer_user_id,
+                reviewer_name=users.get(a.reviewer_user_id) if a.reviewer_user_id is not None else None,
+                reviewed_by_user_id=a.reviewed_by_user_id,
+                reviewed_at=a.reviewed_at,
+                review_note=a.review_note,
+                review_due_at=a.review_due_at,
+                goal_id=a.goal_id,
+                primary_metric_id=a.primary_metric_id,
+                proposal_metadata=a.proposal_metadata,
+                outcome_snapshot=a.outcome_snapshot,
+                outcome_status=a.outcome_status,
+                outcome_refreshed_at=a.outcome_refreshed_at,
                 risk_impact=_risk_impact_from_snapshot(a.source_insight_snapshot),
                 active_subtasks=active,
                 total_subtasks=total,
@@ -709,7 +789,7 @@ async def update_action(
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> ProjectActionOut:
     """Update action metadata, status, or due date; server recomputes percent."""
-    await _require_project_access(project_id, session, context)
+    project = await _require_project_access(project_id, session, context)
     action = await _get_action(session, context, project_id, action_id, active_only=False)
 
     if body.expected_version is not None and action.lock_version != body.expected_version:
@@ -738,8 +818,37 @@ async def update_action(
     if body.due_date is not None:
         action.due_date = body.due_date
     if body.status is not None:
+        if action.status in ("pending_review", "rejected") and body.status != action.status:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Use the proposal review action to accept or reject this item",
+            )
         _validate_status_value(body.status)
         _apply_status_transition(action, body.status)
+    if body.goal_id is not None or body.primary_metric_id is not None:
+        await _validate_goal_metric_scope(
+            tenant_id=context.tenant_id,
+            project_id=project_id,
+            goal_id=body.goal_id if body.goal_id is not None else action.goal_id,
+            metric_id=(
+                body.primary_metric_id
+                if body.primary_metric_id is not None
+                else action.primary_metric_id
+            ),
+            session=session,
+        )
+    if body.reviewer_user_id is not None:
+        if body.reviewer_user_id != project.owner_id:
+            await _validate_owner(project_id, body.reviewer_user_id, session)
+        action.reviewer_user_id = body.reviewer_user_id
+    if body.review_due_at is not None:
+        action.review_due_at = body.review_due_at
+    if body.goal_id is not None:
+        action.goal_id = body.goal_id
+    if body.primary_metric_id is not None:
+        action.primary_metric_id = body.primary_metric_id
+    if body.proposal_metadata is not None:
+        action.proposal_metadata = body.proposal_metadata
 
     action.updated_by_user_id = context.user_id
     action.lock_version = action.lock_version + 1
@@ -764,4 +873,3 @@ async def update_action(
     await _after_mutation(session, context, project_id)
 
     return ProjectActionOut.model_validate(action)
-

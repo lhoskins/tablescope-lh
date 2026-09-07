@@ -22,6 +22,7 @@ import {
   type ProjectActionView,
   type ProjectAction,
   type ProjectActionFilters,
+  type ReviewProjectActionPayload,
 } from "@/lib/api/project-actions";
 import {
   IconPlus,
@@ -68,6 +69,8 @@ export function GroupSection({
   onSubtaskFieldChange,
   onSubtaskArchive,
   onAddSubtask,
+  onReview,
+  reviewing,
   members,
   adding,
   newActionTitle,
@@ -102,6 +105,8 @@ export function GroupSection({
   ) => void;
   onSubtaskArchive: (actionId: number, subtaskId: number) => void;
   onAddSubtask: (actionId: number, title: string) => void;
+  onReview: (actionId: number, payload: ReviewProjectActionPayload) => void;
+  reviewing: boolean;
   members: { user_id: number; display_name: string | null; email: string }[];
   adding: boolean;
   newActionTitle: string;
@@ -163,6 +168,8 @@ export function GroupSection({
               onSubtaskFieldChange={onSubtaskFieldChange}
               onSubtaskArchive={onSubtaskArchive}
               onAddSubtask={onAddSubtask}
+              onReview={onReview}
+              reviewing={reviewing}
               members={members}
             />
           ))}
@@ -208,7 +215,7 @@ export function GroupSection({
           )}
 
           <div className="flex items-center justify-between border-t border-line-tertiary px-3 py-2">
-            {canManage ? (
+            {canManage && !["pending_review", "rejected"].includes(group.group) ? (
               <button
                 type="button"
                 onClick={onAddAction}

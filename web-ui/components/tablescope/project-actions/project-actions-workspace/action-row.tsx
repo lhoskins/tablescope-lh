@@ -22,6 +22,7 @@ import {
   type ProjectActionView,
   type ProjectAction,
   type ProjectActionFilters,
+  type ReviewProjectActionPayload,
 } from "@/lib/api/project-actions";
 import {
   IconPlus,
@@ -48,6 +49,8 @@ import { StatusCell } from "./status-cell";
 import { RiskCell } from "./risk-cell";
 import { SourceCell } from "./source-cell";
 import { RowMenu } from "./row-menu";
+import { ActionProposalPanel } from "./action-proposal-panel";
+import { ActionOutcomePanel } from "./action-outcome-panel";
 
 
 
@@ -72,6 +75,8 @@ export function ActionRow({
   onSubtaskFieldChange,
   onSubtaskArchive,
   onAddSubtask,
+  onReview,
+  reviewing,
   members,
 }: {
   projectId: string;
@@ -98,6 +103,8 @@ export function ActionRow({
   ) => void;
   onSubtaskArchive: (actionId: number, subtaskId: number) => void;
   onAddSubtask: (actionId: number, title: string) => void;
+  onReview: (actionId: number, payload: ReviewProjectActionPayload) => void;
+  reviewing: boolean;
   members: { user_id: number; display_name: string | null; email: string }[];
 }) {
   const progress = item.percent_complete ?? 0;
@@ -194,7 +201,7 @@ export function ActionRow({
           onChange={(v) => onDueChange(item.id, v, item.lock_version)}
         />
         <RiskCell impact={item.risk_impact} />
-        <SourceCell item={item} />
+        <SourceCell item={item} projectId={projectId} />
         <div className="truncate text-[12px] text-ink-tertiary">{timeAgo(item.updated_at)}</div>
         <RowMenu
           projectId={projectId}
@@ -208,6 +215,13 @@ export function ActionRow({
 
       {expanded && (
         <div className="border-t border-line-tertiary bg-bg-secondary/50 px-8 py-4">
+          {detail?.status === "pending_review" ? (
+            <ActionProposalPanel projectId={projectId} action={detail} canManage={canManage} reviewing={reviewing} onReview={(payload) => onReview(item.id, payload)} />
+          ) : (
+          <div className="space-y-4">
+          {detail?.status === "completed" && detail.outcome_status && (
+            <ActionOutcomePanel projectId={projectId} action={detail} />
+          )}
           <SubtaskPanel
             actionId={item.id}
             subtasks={activeSubtasks}
@@ -218,6 +232,8 @@ export function ActionRow({
             onAddSubtask={onAddSubtask}
             members={members}
           />
+          </div>
+          )}
         </div>
       )}
     </div>

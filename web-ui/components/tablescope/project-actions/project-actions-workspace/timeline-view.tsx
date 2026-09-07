@@ -22,6 +22,7 @@ import {
   type ProjectActionView,
   type ProjectAction,
   type ProjectActionFilters,
+  type ReviewProjectActionPayload,
 } from "@/lib/api/project-actions";
 import {
   IconPlus,
@@ -64,6 +65,8 @@ export function TimelineView({
   onSubtaskFieldChange,
   onSubtaskArchive,
   onAddSubtask,
+  onReview,
+  reviewing,
   members,
 }: {
   projectId: string;
@@ -95,6 +98,8 @@ export function TimelineView({
   ) => void;
   onSubtaskArchive: (actionId: number, subtaskId: number) => void;
   onAddSubtask: (actionId: number, title: string) => void;
+  onReview: (actionId: number, payload: ReviewProjectActionPayload) => void;
+  reviewing: boolean;
   members: { user_id: number; display_name: string | null; email: string }[];
 }) {
   const sections = useMemo(() => {
@@ -149,6 +154,8 @@ export function TimelineView({
                 onSubtaskFieldChange={onSubtaskFieldChange}
                 onSubtaskArchive={onSubtaskArchive}
                 onAddSubtask={onAddSubtask}
+                onReview={onReview}
+                reviewing={reviewing}
                 members={members}
               />
             ))}
