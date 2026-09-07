@@ -39,6 +39,7 @@ import {
   IconCalendar,
   IconTrash,
 } from "@tabler/icons-react";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 
 export function RowMenu({
@@ -47,14 +48,17 @@ export function RowMenu({
   canManage,
   onArchive,
   onRestore,
+  onDelete,
 }: {
   projectId: string;
   item: ProjectActionListItem;
   canManage: boolean;
   onArchive: () => void;
   onRestore: () => void;
+  onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -90,16 +94,28 @@ export function RowMenu({
           {canManage && (
             <>
               {item.archived_at ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onRestore();
-                    setOpen(false);
-                  }}
-                  className="block w-full px-3 py-1.5 text-left text-[12px] text-ink-primary hover:bg-bg-secondary"
-                >
-                  Restore
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onRestore();
+                      setOpen(false);
+                    }}
+                    className="block w-full px-3 py-1.5 text-left text-[12px] text-ink-primary hover:bg-bg-secondary"
+                  >
+                    Restore
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpen(false);
+                      setConfirmingDelete(true);
+                    }}
+                    className="block w-full px-3 py-1.5 text-left text-[12px] text-danger hover:bg-bg-secondary"
+                  >
+                    Delete
+                  </button>
+                </>
               ) : (
                 <button
                   type="button"
@@ -116,6 +132,17 @@ export function RowMenu({
           )}
         </div>
       )}
+      <ConfirmDialog
+        open={confirmingDelete}
+        title="Delete this action?"
+        message={`"${item.title}" will be permanently deleted. This cannot be undone.`}
+        confirmLabel="Delete"
+        onConfirm={() => {
+          onDelete();
+          setConfirmingDelete(false);
+        }}
+        onCancel={() => setConfirmingDelete(false)}
+      />
     </div>
   );
 }

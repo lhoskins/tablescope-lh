@@ -72,6 +72,7 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
     updateAction,
     archiveAction,
     restoreAction,
+    deleteAction,
     createSubtask,
     updateSubtask,
     archiveSubtask,
@@ -254,6 +255,11 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
   };
 
   const handleRestore = (id: number) => restoreAction.mutate(id);
+
+  const handleDelete = (id: number) =>
+    deleteAction.mutate(id, {
+      onError: (err: Error) => pushToast(err.message, "error"),
+    });
 
   const handleSubtaskStatusChange = (
     actionId: number,
@@ -487,7 +493,7 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
             <IconLoader2 className="mr-2 animate-spin" size={20} />
             Loading actions…
           </div>
-        ) : viewItems.length === 0 ? (
+        ) : viewItems.length === 0 && (prefs.view === "timeline" || !addingGroup) ? (
           <div className="flex h-48 flex-col items-center justify-center rounded-lg border border-dashed border-line-tertiary text-ink-secondary">
             <IconClipboardList size={32} stroke={1.2} />
             <p className="mt-2 text-[13px]">No actions match the current filters.</p>
@@ -509,6 +515,7 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
             onDueChange={handleDueChange}
             onArchive={handleArchive}
             onRestore={handleRestore}
+            onDelete={handleDelete}
             onSubtaskStatusChange={handleSubtaskStatusChange}
             onSubtaskFieldChange={handleSubtaskFieldChange}
             onSubtaskArchive={handleSubtaskArchive}
@@ -537,6 +544,7 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
                 onDueChange={handleDueChange}
                 onArchive={handleArchive}
                 onRestore={handleRestore}
+                onDelete={handleDelete}
                 onSubtaskStatusChange={handleSubtaskStatusChange}
                 onSubtaskFieldChange={handleSubtaskFieldChange}
                 onSubtaskArchive={handleSubtaskArchive}

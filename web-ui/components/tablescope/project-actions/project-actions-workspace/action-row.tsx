@@ -67,6 +67,7 @@ export function ActionRow({
   onDueChange,
   onArchive,
   onRestore,
+  onDelete,
   onSubtaskStatusChange,
   onSubtaskFieldChange,
   onSubtaskArchive,
@@ -88,6 +89,7 @@ export function ActionRow({
   onDueChange: (id: number, due_date: string | null, version: number) => void;
   onArchive: () => void;
   onRestore: () => void;
+  onDelete: () => void;
   onSubtaskStatusChange: (actionId: number, subtaskId: number, status: ProjectActionStatus) => void;
   onSubtaskFieldChange: (
     actionId: number,
@@ -194,7 +196,14 @@ export function ActionRow({
         <RiskCell impact={item.risk_impact} />
         <SourceCell item={item} />
         <div className="truncate text-[12px] text-ink-tertiary">{timeAgo(item.updated_at)}</div>
-        <RowMenu projectId={projectId} item={item} canManage={canManage} onArchive={onArchive} onRestore={onRestore} />
+        <RowMenu
+          projectId={projectId}
+          item={item}
+          canManage={canManage}
+          onArchive={onArchive}
+          onRestore={onRestore}
+          onDelete={onDelete}
+        />
       </div>
 
       {expanded && (

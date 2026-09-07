@@ -363,6 +363,12 @@ export const projectActionsApi = {
   restore: (projectId: string, actionId: number): Promise<ProjectAction> =>
     apiClient.post(`/api/projects/${projectId}/actions/${actionId}/restore`, {}),
 
+  deletePermanently: (
+    projectId: string,
+    actionId: number,
+  ): Promise<{ status: string; id: number; lock_version: number }> =>
+    apiClient.delete(`/api/projects/${projectId}/actions/${actionId}/permanent`),
+
   bulkUpdate: (
     projectId: string,
     payload: ProjectActionBulkPayload,
