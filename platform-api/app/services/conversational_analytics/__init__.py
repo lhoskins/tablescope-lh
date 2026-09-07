@@ -806,6 +806,12 @@ async def execute_turn(
         question, result_cache, run.get("dataSourcesUsed") or []
     )
     if live_score < 0.95:
+        # LLM-verified relevance (the default), not the raw deterministic
+        # data-shape score alone -- a keyword-overlap-only match can pick a
+        # topically-adjacent but wrong card (e.g. a "budget vs forecast"
+        # card offered for a "budget vs actual" question) purely because
+        # its summary shares filler words with the question. See
+        # insight_card_match.py's own documented failure mode.
         insight_matches = await find_matching_insight_cards(
             session,
             context=context,
@@ -814,7 +820,6 @@ async def execute_turn(
             question=question,
             allow_cross_project=not is_project_scoped,
             max_cards=2,
-            use_llm=False,
         )
         if insight_matches:
             primary = insight_matches[0]

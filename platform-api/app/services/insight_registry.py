@@ -437,6 +437,65 @@ async def load_project_insight_snapshot_cards(
     return cards
 
 
+async def load_project_insights_suite_cards(
+    session: Any,
+    *,
+    tenant_id: int,
+    user_id: int,
+    project_id: int,
+    exclude_titles: set[str],
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Cards from the caller's own Project Insight ``"insights"`` suite snapshot.
+
+    This is the *other* Project Insight snapshot suite -- distinct from
+    ``"project_insight"`` (read by :func:`load_project_insight_snapshot_cards`,
+    which only ever holds header/summary metadata plus a structurally
+    ``callout``-less card set). ``"insights"`` is written by the
+    Analyze/Refresh background job (``rebuild_project_insights_cards``) and is
+    what the Project Insight page's Risks/Trends/Opportunities/Analysis tabs
+    actually render -- these are the AI-authored cards with a populated
+    ``callout``/``recommendedAction``, the ones a user is actually looking at
+    when they ask the docked assistant about one. Without this, a genuinely
+    on-topic card here was invisible to card-matching entirely, regardless of
+    scoring or LLM relevance -- it was never offered as a candidate.
+    """
+    if limit <= 0:
+        return []
+    from sqlalchemy import select
+
+    from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
+
+    snap = await session.scalar(
+        select(ProjectIntelligenceSnapshot).where(
+            ProjectIntelligenceSnapshot.tenant_id == tenant_id,
+            ProjectIntelligenceSnapshot.user_id == user_id,
+            ProjectIntelligenceSnapshot.project_id == project_id,
+            ProjectIntelligenceSnapshot.suite == "insights",
+        )
+    )
+    if snap is None:
+        return []
+
+    payload = snap.payload or {}
+    section = payload.get("insights")
+    if not isinstance(section, list):
+        return []
+
+    cards: list[dict[str, Any]] = []
+    for card in section:
+        if not isinstance(card, dict) or not card.get("title"):
+            continue
+        title = str(card["title"]).strip().lower()
+        if title in exclude_titles:
+            continue
+        exclude_titles.add(title)
+        cards.append(_normalize_project_insight_card(card))
+        if len(cards) >= limit:
+            return cards
+    return cards
+
+
 def build_insight_context(question: str, cards: list[dict[str, Any]]) -> str:
     """Grounding text for a question, given the tenant's cards.
 

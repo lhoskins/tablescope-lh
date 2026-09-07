@@ -226,6 +226,66 @@ async def test_offers_the_callers_project_insight_snapshot_cards(
     assert "snap789" in offered_ids
 
 
+async def test_offers_the_callers_insights_suite_snapshot_cards(
+    client, db_session, service_headers, monkeypatch
+) -> None:
+    """The ``"insights"`` suite snapshot (written by the Project Insight
+    page's own Analyze/Refresh job) is what actually backs the
+    Risks/Trends/Opportunities/Analysis cards a user sees on that page --
+    distinct from the ``"project_insight"`` suite covered above, which only
+    ever holds header metadata. A card that exists only there (with a real
+    AI-authored ``callout``, e.g. a "Caution:" risk finding) must still be
+    offered to the selector -- otherwise a question about exactly the card
+    the user is looking at can never be matched at all."""
+    project, tenant, user = await _project(client, service_headers)
+    db_session.add(
+        ProjectIntelligenceSnapshot(
+            tenant_id=tenant["id"],
+            user_id=user["id"],
+            project_id=project["id"],
+            suite="insights",
+            payload={
+                "insights": [
+                    {
+                        "insightId": "risk-capex",
+                        "projectName": "MFG Project",
+                        "title": "Budget vs actual variance is unfavorable for COGS and Opex",
+                        "summary": "COGS and Opex both exceed budget while Revenue is favorable.",
+                        "callout": {
+                            "type": "risk",
+                            "text": "Opex variance $1,021,606.19 exceeds revenue variance",
+                        },
+                        "chart": {"type": "bar", "data": {"rows": []}},
+                        "severity": "critical",
+                    }
+                ]
+            },
+        )
+    )
+    await db_session.commit()
+
+    captured: dict = {}
+
+    async def _fake_select(**kwargs):
+        captured.update(kwargs)
+        return {"insight_id": "risk-capex", "confidence": 0.9, "reason": "on topic"}
+
+    _mock_select(monkeypatch, _fake_select)
+
+    match = await icm.find_matching_insight_card(
+        db_session,
+        context=_context(tenant["id"], user["id"]),
+        tenant_id=tenant["id"],
+        project_id=project["id"],
+        question="Give me a summary on budget vs actual is unfavorable for COGS and OPEX",
+    )
+
+    assert match is not None
+    assert match.insight_id == "risk-capex"
+    offered_ids = {c["insight_id"] for c in captured["candidates"]}
+    assert "risk-capex" in offered_ids
+
+
 async def test_snapshot_card_skipped_when_cache_already_has_the_title(
     client, db_session, service_headers, monkeypatch
 ) -> None:

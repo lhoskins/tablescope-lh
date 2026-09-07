@@ -369,15 +369,31 @@ async def _cards_for_projects(
 
     if user_id is not None:
         for pid in project_ids:
+            titles = seen_titles_by_project.setdefault(pid, set())
             snapshot_cards = await insight_registry.load_project_insight_snapshot_cards(
                 session,
                 tenant_id=tenant_id,
                 user_id=user_id,
                 project_id=pid,
-                exclude_titles=seen_titles_by_project.get(pid, set()),
+                exclude_titles=titles,
                 limit=_MAX_CANDIDATES,
             )
             pairs.extend((pid, card) for card in snapshot_cards)
+            # The "insights" suite -- not "project_insight" above -- is what
+            # actually backs the Project Insight page's visible Risks/Trends/
+            # Opportunities/Analysis cards (see
+            # insight_registry.load_project_insights_suite_cards). Without
+            # this, the exact card a user is looking at on that page could
+            # never be offered as a match candidate at all.
+            suite_cards = await insight_registry.load_project_insights_suite_cards(
+                session,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                project_id=pid,
+                exclude_titles=titles,
+                limit=_MAX_CANDIDATES - len(snapshot_cards),
+            )
+            pairs.extend((pid, card) for card in suite_cards)
     return pairs
 
 
