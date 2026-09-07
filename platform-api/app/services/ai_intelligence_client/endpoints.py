@@ -485,6 +485,34 @@ async def search_grounding_vectors(
     return result if isinstance(result, dict) else None
 
 
+async def delete_tenant_collection(*, tenant_id: int) -> bool:
+    """Delete a tenant's entire Qdrant collection (TS-ISO-011).
+
+    Best-effort: called during tenant deletion alongside the Postgres row
+    purge and VDB undeploy. Returns ``True`` if the call reached and
+    succeeded on the AI server, ``False`` when AI is disabled (nothing to
+    delete). Raises :class:`AIUnavailableError` on a genuine failure so the
+    caller can log it rather than silently treating a real error as success.
+    """
+    result = await _post(
+        "/vector-store/delete-tenant-collection", {"tenant_id": tenant_id}
+    )
+    return result is not None
+
+
+async def delete_project_vectors(*, tenant_id: int, project_id: int) -> bool:
+    """Delete one project's vectors from its tenant's Qdrant collection (TS-ISO-011).
+
+    Best-effort: called during project deletion. Same semantics as
+    :func:`delete_tenant_collection`.
+    """
+    result = await _post(
+        "/vector-store/delete-project-vectors",
+        {"tenant_id": tenant_id, "project_id": project_id},
+    )
+    return result is not None
+
+
 async def ask(
     *,
     tenant_id: int,

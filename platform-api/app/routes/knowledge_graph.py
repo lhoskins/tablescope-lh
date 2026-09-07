@@ -187,7 +187,7 @@ async def run_knowledge_graph_health_check(
     )
     hc = await health.run_health_check(project_id, check_type="on_demand")
     try:
-        await enqueue_run_knowledge_graph_health_check(project_id)
+        await enqueue_run_knowledge_graph_health_check(context.tenant_id, project_id)
     except Exception as exc:
         logger.warning("Failed to enqueue health check for project %s: %s", project_id, exc)
     await health.session.commit()

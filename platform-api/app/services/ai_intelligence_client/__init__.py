@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from .endpoints import ask as ask
 from .endpoints import classify_conversation_turn as classify_conversation_turn
+from .endpoints import delete_project_vectors as delete_project_vectors
+from .endpoints import delete_tenant_collection as delete_tenant_collection
 from .endpoints import generate_action_draft as generate_action_draft
 from .endpoints import generate_sql as generate_sql
 from .endpoints import interpret as interpret
