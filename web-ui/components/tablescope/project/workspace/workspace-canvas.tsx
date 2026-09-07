@@ -17,10 +17,15 @@ export function toCardPatch(cards: WorkspaceCardModel[]): NonNullable<UpdateWork
 export function WorkspaceCanvas({
   workspace,
   editable,
+  selectedCardId,
+  onSelect,
   onCardsChange,
 }: {
   workspace: Workspace | null;
   editable: boolean;
+  /** `${resource_type}:${resource_id}` of the card showing in Preview. */
+  selectedCardId?: string | null;
+  onSelect?: (card: WorkspaceCardModel) => void;
   onCardsChange: (cards: WorkspaceCardModel[]) => void;
 }) {
   if (!workspace) {
@@ -76,6 +81,11 @@ export function WorkspaceCanvas({
             key={card.id}
             card={card}
             editable={editable}
+            selected={
+              selectedCardId != null &&
+              `${card.resource_type}:${card.resource_id}` === selectedCardId
+            }
+            onSelect={onSelect ? () => onSelect(card) : undefined}
             onViewModeChange={(mode) => setViewMode(card, mode)}
             onRemove={() => remove(card)}
             onMove={(direction) => move(card, direction)}

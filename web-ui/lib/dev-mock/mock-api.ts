@@ -780,6 +780,54 @@ const routes: MockRoute[] = [
     respond: () => [],
   },
 
+  // ── Preview pane ───────────────────────────────────────────────────────
+  {
+    // Structured document preview -- see app/services/document_preview.py for
+    // the real shape and the "kind" values the viewer switches on.
+    method: "GET",
+    test: /\/api\/projects\/\d+\/assets\/\d+\/preview/,
+    respond: (url) => {
+      const assetId = Number(/\/assets\/(\d+)\//.exec(url)?.[1]);
+      const asset = projectAssets.find((a) => a.id === assetId);
+      return {
+        assetId,
+        filename: asset?.filename ?? "document.md",
+        contentType: "text/markdown",
+        fileSizeBytes: asset?.file_size_bytes ?? 0,
+        kind: "text",
+        truncated: false,
+        text:
+          `# ${asset?.title ?? "Document"}\n\n` +
+          `${asset?.ai_summary ?? ""}\n\n` +
+          "## Findings\n\n" +
+          "1. Access provisioning during onboarding is manual and slow.\n" +
+          "2. Two incidents in the period traced back to stale credentials.\n" +
+          "3. Mean time to resolution improved 18% quarter over quarter.\n\n" +
+          "## Recommendation\n\n" +
+          "Automate provisioning and expire credentials on role change.\n\n" +
+          "_This preview is local mock content (lib/dev-mock/mock-api.ts)._\n",
+      };
+    },
+  },
+  {
+    // Table / data-source result grids both post here.
+    method: "POST",
+    test: /\/api\/query\/datasource/,
+    // Shape per QueryResult in detail-views/query-result.tsx: rows are objects
+    // keyed by column name, not positional arrays.
+    respond: () => ({
+      columns: ["month", "vendor", "amount_usd"],
+      rows: [
+        { month: "2026-06", vendor: "OpenAI", amount_usd: 4820.55 },
+        { month: "2026-06", vendor: "Google Cloud", amount_usd: 2140.0 },
+        { month: "2026-07", vendor: "OpenAI", amount_usd: 5310.2 },
+        { month: "2026-07", vendor: "Google Cloud", amount_usd: 1980.75 },
+        { month: "2026-08", vendor: "OpenAI", amount_usd: 6102.4 },
+      ],
+      total: 5,
+    }),
+  },
+
   // ── Chat (canonical turns) ─────────────────────────────────────────────
   {
     method: "GET",

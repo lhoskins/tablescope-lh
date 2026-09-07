@@ -33,6 +33,8 @@ const VIEW_MODES: { mode: WorkspaceCardViewMode; label: string; short: string }[
 export function WorkspaceCard({
   card,
   editable,
+  selected = false,
+  onSelect,
   onViewModeChange,
   onRemove,
   onMove,
@@ -40,6 +42,9 @@ export function WorkspaceCard({
   card: WorkspaceCardModel;
   /** Card edits are owner-only, matching publish/unpublish. */
   editable: boolean;
+  /** This card's resource is the one showing in the Preview pane. */
+  selected?: boolean;
+  onSelect?: () => void;
   onViewModeChange: (mode: WorkspaceCardViewMode) => void;
   onRemove: () => void;
   onMove: (direction: -1 | 1) => void;
@@ -52,10 +57,12 @@ export function WorkspaceCard({
     <article
       aria-label={title}
       data-view-mode={card.view_mode}
+      data-selected={selected || undefined}
       className={cn(
         // The floor width keeps the header's controls inside the card even in
         // the narrowest pane; below this the row would spill past the border.
-        "flex min-w-[184px] flex-col rounded-lg border border-line-tertiary bg-bg-primary",
+        "flex min-w-[184px] flex-col rounded-lg border bg-bg-primary",
+        selected ? "border-brand-500 ring-1 ring-brand-500" : "border-line-tertiary",
         card.view_mode === "card" && "col-span-1 min-h-[180px]",
         card.view_mode === "row" && "col-span-full min-h-[120px]",
         card.view_mode === "full" && "col-span-full min-h-[420px]",
@@ -118,7 +125,16 @@ export function WorkspaceCard({
           </div>
         )}
       </header>
-      <div className="flex min-h-0 flex-1 flex-col gap-1 px-3 py-2">
+      {/* The body is the click target: selecting a card is what fills the
+          Preview pane, so the whole card surface opens it rather than a
+          separate "view" affordance competing with the header controls. */}
+      <button
+        type="button"
+        onClick={onSelect}
+        disabled={!onSelect}
+        aria-pressed={onSelect ? selected : undefined}
+        className="flex min-h-0 flex-1 flex-col gap-1 px-3 py-2 text-left enabled:hover:bg-bg-secondary/60"
+      >
         <div className="flex items-start gap-1.5">
           <Icon size={14} className="mt-px shrink-0 text-ink-tertiary" />
           <h3 className="break-words text-[13px] font-medium leading-snug text-ink-primary">
@@ -127,10 +143,10 @@ export function WorkspaceCard({
         </div>
         <p className="text-[12px] text-ink-tertiary">
           {card.label
-            ? `${card.resource_type.replace("_", " ")} preview`
+            ? `Open in Preview`
             : "This resource is no longer available in the project."}
         </p>
-      </div>
+      </button>
     </article>
   );
 }

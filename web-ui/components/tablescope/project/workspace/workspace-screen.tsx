@@ -15,7 +15,9 @@ import {
   type WorkspaceCard,
 } from "@/lib/api/workspaces";
 import { WorkspaceActionsPane } from "./workspace-actions-pane";
+import { WorkspaceCardInfo } from "./workspace-card-info";
 import { WorkspaceFilesPane } from "./workspace-files-pane";
+import { WorkspacePreviewPane } from "./workspace-preview-pane";
 import { WorkspaceAddCard, type AddableResource } from "./workspace-add-card";
 import { toCardPatch } from "./workspace-canvas";
 import { PaneViewsToggle, WorkspacePanes, type PaneSpec } from "./workspace-panes";
@@ -53,6 +55,9 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
   // Owned here rather than inside WorkspacePanes: the Pane Views swatches sit
   // up in the workspace tab bar and toggle the same layout the panes read.
   const paneLayout = usePaneLayout(projectId);
+  // Which card is showing in Preview. Keyed by resource rather than card id so
+  // the selection survives the optimistic id swap when cards are saved.
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -200,6 +205,11 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
     }
   }, [pendingDeleteId, projectId]);
 
+  const selectedCard =
+    active?.cards.find(
+      (card) => `${card.resource_type}:${card.resource_id}` === selectedKey,
+    ) ?? null;
+
   const panes: PaneSpec[] = [
     {
       id: "files",
@@ -217,25 +227,21 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
           // Errors live inside the pane: as a block above the row they shoved
           // all the panes down the screen.
           error={error}
+          selectedCardId={selectedKey}
+          onSelect={(card) => setSelectedKey(`${card.resource_type}:${card.resource_id}`)}
           onAdd={onAdd}
           onCardsChange={(cards) => void onCardsChange(cards)}
         />
       ),
-      info: <DrawerPlaceholder text="Metadata for the selected document appears here." />,
+      info: <WorkspaceCardInfo projectId={projectId} card={selectedCard} />,
       chat: <DrawerPlaceholder text="Ask about the documents in this workspace." />,
       onSendChatToPane: () => undefined,
     },
     {
       id: "preview",
       title: "Preview",
-      body: (
-        <p className="flex flex-1 items-center justify-center px-5 text-center text-[12px] leading-relaxed text-ink-tertiary">
-          Select a document or table in Documents
-          <br />
-          to preview it here.
-        </p>
-      ),
-      info: <DrawerPlaceholder text="Metadata for the previewed item appears here." />,
+      body: <WorkspacePreviewPane projectId={projectId} card={selectedCard} />,
+      info: <WorkspaceCardInfo projectId={projectId} card={selectedCard} />,
       chat: <DrawerPlaceholder text="Ask about the item shown in Preview." />,
       onSendChatToPane: () => undefined,
     },

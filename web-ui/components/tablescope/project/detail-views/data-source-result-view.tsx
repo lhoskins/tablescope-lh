@@ -25,8 +25,10 @@ export function DataSourceResultView({
 }: {
   projectId: string;
   source: DataSource;
-  backLabel: string;
-  onBack: () => void;
+  /** Omitted when embedded (the Workspace's Preview pane), where there is no
+   *  previous screen to go back to. */
+  backLabel?: string;
+  onBack?: () => void;
   onArchive?: () => void;
   archiveBusy?: boolean;
   archiveError?: string | null;
@@ -56,7 +58,7 @@ export function DataSourceResultView({
 
   return (
     <div className="space-y-4">
-      <DetailBackBar label={backLabel} onBack={onBack} />
+      {backLabel && onBack && <DetailBackBar label={backLabel} onBack={onBack} />}
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2.5">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-bg-secondary text-ink-tertiary">

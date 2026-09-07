@@ -20,12 +20,16 @@ export function WorkspaceFilesPane({
   workspace,
   editable,
   error,
+  selectedCardId,
+  onSelect,
   onAdd,
   onCardsChange,
 }: {
   workspace: Workspace | null;
   editable: boolean;
   error: string | null;
+  selectedCardId?: string | null;
+  onSelect?: (card: WorkspaceCard) => void;
   onAdd: (resource: AddableResource) => void;
   onCardsChange: (cards: WorkspaceCard[]) => void;
 }) {
@@ -86,6 +90,8 @@ export function WorkspaceFilesPane({
       <WorkspaceCanvas
         workspace={workspace}
         editable={editable}
+        selectedCardId={selectedCardId}
+        onSelect={onSelect}
         onCardsChange={onCardsChange}
       />
 
