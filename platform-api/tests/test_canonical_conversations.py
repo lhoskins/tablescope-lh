@@ -412,10 +412,11 @@ async def test_project_workspace_never_widens_insight_cards_to_another_project(
     search.
 
     Spies on `_cards_for_projects` (the function `allow_cross_project`
-    actually gates a second call to) rather than the LLM selector: the real
-    call site passes `use_llm=False`, so the LLM path this file's sibling
-    project_insights test mocks is never reached regardless of widening.
-    Also deliberately does NOT mock `_ask_and_run_core` into a
+    actually gates a second call to) rather than the LLM selector: this test
+    suite never enables `ai_intelligence_client`, so the LLM selector path
+    this file's sibling project_insights test explicitly mocks in is never
+    reached here regardless of widening. Also deliberately does NOT mock
+    `_ask_and_run_core` into a
     "generation_error" the way that sibling test does -- `execute_turn`
     returns early on any non-"success" status (before ever reaching the
     insight-matching block at all), which would make an assertion here pass
