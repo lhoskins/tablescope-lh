@@ -120,12 +120,15 @@ _CREATE_QUERY = re.compile(
 )
 _SAVE_AS_DASHBOARD = re.compile(
     _ARTIFACT_COMMAND_PREFIX
-    + r"(?:save|turn|add)\s+(?:this|that|the\s+(?:result|analysis|answer))\s+(?:as|into|to)\s+(?:a\s+|an\s+)?dashboard\b",
+    # The referent accepts a bare demonstrative ("this", "that", "the"), a
+    # demonstrative plus noun ("this result"), matching natural phrasing
+    # users actually type -- not just one form or the other.
+    + r"(?:save|turn|add)\s+(?:this|that|the)(?:\s+(?:result|analysis|answer))?\s+(?:as|into|to)\s+(?:a\s+|an\s+)?dashboard\b",
     re.IGNORECASE,
 )
 _SAVE_AS_QUERY = re.compile(
     _ARTIFACT_COMMAND_PREFIX
-    + r"(?:save|turn)\s+(?:this|that|the\s+(?:result|analysis|answer|sql))\s+(?:as|into)\s+(?:a\s+|an\s+)?query\b",
+    + r"(?:save|turn)\s+(?:this|that|the)(?:\s+(?:result|analysis|answer|sql))?\s+(?:as|into)\s+(?:a\s+|an\s+)?query\b",
     re.IGNORECASE,
 )
 
