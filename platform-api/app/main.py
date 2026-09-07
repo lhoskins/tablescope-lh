@@ -537,6 +537,17 @@ def create_app() -> FastAPI:
             "CORS_ALLOW_ORIGINS must be set to an explicit comma-separated "
             "origin allowlist in production, not left as the wildcard default."
         )
+    # TS-ISO-020: an empty tablescope_secret_key silently falls back to a key
+    # derived from JWT_SECRET_KEY (see config.py) so local dev keeps working --
+    # but that fallback must never happen unnoticed in production, since this
+    # key encrypts data-source passwords at rest. Same fail-closed shape as
+    # the TABLESCOPE_AI_SIGNING_SECRET check above.
+    if settings.environment == "production" and not settings.tablescope_secret_key:
+        raise RuntimeError(
+            "TABLESCOPE_SECRET_KEY must be set in production -- it encrypts "
+            "database data-source passwords at rest and must not silently "
+            "fall back to a key derived from JWT_SECRET_KEY."
+        )
 
     app = FastAPI(
         title="Tablescope Platform API",

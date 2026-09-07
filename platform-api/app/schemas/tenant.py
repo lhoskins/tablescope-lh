@@ -46,6 +46,7 @@ class TenantDeleteResponse(BaseModel):
     deleted_rows: dict[str, int]
     vdbs_undeployed: int
     folders_removed: bool
+    qdrant_collection_deleted: bool
 
 
 _LOOSE_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")

@@ -147,29 +147,60 @@ async def search_vectors(
 
 
 async def delete_tenant_collection(tenant_id: int) -> None:
-    """Drop entire tenant collection — used during tenant deletion."""
+    """Drop entire tenant collection — used during tenant deletion.
+
+    A missing collection (already deleted, or never created because the
+    tenant had no vectors) is not an error. Any other failure -- Qdrant
+    unreachable, a non-404 error response -- must propagate so a caller
+    doing best-effort cleanup during tenant deletion can log and account
+    for a real failure instead of it being silently treated the same as
+    "already gone" (TS-ISO-011).
+    """
     client = get_client()
     name = _collection_name(tenant_id)
     try:
         client.delete_collection(collection_name=name)
         logger.info("Deleted Qdrant collection: %s", name)
-    except Exception:
-        logger.warning("Collection %s not found for deletion", name)
+    except UnexpectedResponse as exc:
+        if exc.status_code == 404:
+            logger.info("Collection %s already absent; nothing to delete", name)
+            return
+        raise VectorStoreError(
+            f"Could not delete Qdrant collection {name}: {exc}"
+        ) from exc
 
 
 async def delete_project_vectors(tenant_id: int, project_id: int) -> None:
-    """Delete all vectors for a specific project within a tenant."""
+    """Delete all vectors for a specific project within a tenant.
+
+    Same not-found-is-fine, everything-else-propagates handling as
+    ``delete_tenant_collection`` (TS-ISO-011) -- a missing tenant
+    collection means there was nothing to delete, but a real Qdrant
+    failure must not be swallowed.
+    """
     client = get_client()
     name = _collection_name(tenant_id)
-    client.delete(
-        collection_name=name,
-        points_selector=Filter(
-            must=[
-                FieldCondition(key="tenant_id", match=MatchValue(value=tenant_id)),
-                FieldCondition(key="project_id", match=MatchValue(value=project_id)),
-            ]
-        ),
-    )
+    try:
+        client.delete(
+            collection_name=name,
+            points_selector=Filter(
+                must=[
+                    FieldCondition(key="tenant_id", match=MatchValue(value=tenant_id)),
+                    FieldCondition(key="project_id", match=MatchValue(value=project_id)),
+                ]
+            ),
+        )
+    except UnexpectedResponse as exc:
+        if exc.status_code == 404:
+            logger.info(
+                "Collection %s absent; nothing to delete for project %d",
+                name,
+                project_id,
+            )
+            return
+        raise VectorStoreError(
+            f"Could not delete project {project_id} vectors from {name}: {exc}"
+        ) from exc
     logger.info("Deleted project %d vectors from %s", project_id, name)
 
 

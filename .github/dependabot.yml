@@ -1,0 +1,75 @@
+# TS-ISO-022: baseline automated dependency tracking.
+#
+# This is intentionally a passive baseline (PRs only, no auto-merge, no CI
+# gate) -- see docs/security/ts-iso-022-assurance-release-gates.md for the
+# broader release-gating program this is Phase A of.
+#
+# Note: the repository also contains several pom.xml files under
+# apache-maven-3.9.6/MyProject/ -- that is a vendored copy of the Maven
+# distribution itself (includes the Maven binary tree and committed
+# target/ build output), not first-party source under active dependency
+# management, so it is intentionally NOT covered by a maven ecosystem
+# entry here. Revisit if that directory is ever cleaned up or replaced
+# with a real top-level Java project layout.
+
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "npm"
+    directory: "/web-ui"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/ai-server/tablescope-ai-api"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/platform-api"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/r-analytics"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/test-infra/vpn-smb-customer-simulator/compose/samba"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/web-ui"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/wildfly"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/wildfly/logrotate"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "pip"
+    directory: "/ai-server/tablescope-ai-api"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "pip"
+    directory: "/platform-api"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "pip"
+    directory: "/test-infra/vpn-smb-customer-simulator/scripts"
+    schedule:
+      interval: "weekly"

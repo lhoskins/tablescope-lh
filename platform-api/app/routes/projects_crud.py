@@ -26,6 +26,7 @@ from app.schemas.project import (
     ProjectRead,
     ProjectUpdate,
 )
+from app.services import ai_intelligence_client
 from app.services.customer_folders import CustomerFolderService
 
 logger = logging.getLogger(__name__)
@@ -175,6 +176,17 @@ async def delete_project(
 
     if project.owner_id != context.user_id and context.role != "admin":
         raise HTTPException(status_code=403, detail="Only the project owner or admin can delete")
+
+    # Best-effort, same pattern as tenant deletion: an AI server outage or a
+    # project with no vectors must never block project deletion (TS-ISO-011).
+    try:
+        await ai_intelligence_client.delete_project_vectors(
+            tenant_id=context.tenant_id, project_id=project_id
+        )
+    except ai_intelligence_client.AIUnavailableError as exc:
+        logger.warning(
+            "Failed to delete Qdrant vectors for project %s: %s", project_id, exc
+        )
 
     await session.delete(project)
     await session.commit()

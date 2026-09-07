@@ -31,6 +31,7 @@ from app.schemas.tenant import (
     TenantRead,
     TenantReprocessResponse,
 )
+from app.services import ai_intelligence_client
 from app.services.crypto import encrypt_secret
 from app.services.customer_folders import CustomerFolderError, CustomerFolderService
 from app.services.tenant_deletion_service import (
@@ -251,6 +252,18 @@ async def delete_tenant(
     finally:
         await vdb_svc.aclose()
 
+    # Best-effort, same as the VDB undeploy above: an AI server outage or a
+    # tenant with no vectors must never block tenant deletion (TS-ISO-011).
+    qdrant_collection_deleted = False
+    try:
+        qdrant_collection_deleted = await ai_intelligence_client.delete_tenant_collection(
+            tenant_id=tenant_id
+        )
+    except ai_intelligence_client.AIUnavailableError as exc:
+        logger.warning(
+            "Failed to delete Qdrant collection for tenant %s: %s", tenant_id, exc
+        )
+
     deleted_rows = await purge_app_tenant(session, tenant_id)
 
     folders_removed = False
@@ -267,6 +280,7 @@ async def delete_tenant(
         deleted_rows=deleted_rows,
         vdbs_undeployed=vdbs_undeployed,
         folders_removed=folders_removed,
+        qdrant_collection_deleted=qdrant_collection_deleted,
     )
 
 

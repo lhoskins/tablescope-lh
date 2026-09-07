@@ -34,10 +34,18 @@ router = APIRouter()
 
 
 def _client_ip(request: Request) -> str | None:
-    """Return the most trusted client IP for an internal Docker-network call."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    """Return the real TCP peer address for an internal Docker-network call.
+
+    TS-ISO-010: this route is not proxied through nginx (it is not under
+    ``/api`` -- see the module docstring) and is only ever reached directly
+    from a container on the Docker network. There is no legitimate reverse
+    proxy in front of it to have set or verified ``X-Forwarded-For``, so
+    that header must never be trusted here: any external caller reaching
+    this port directly can set it to an arbitrary value, including a
+    tenant's trusted CIDR, defeating the source-IP check this function
+    exists for. ``request.client.host`` (the actual TCP peer) cannot be
+    spoofed the same way.
+    """
     return request.client.host if request.client else None
 
 

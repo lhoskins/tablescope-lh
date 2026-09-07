@@ -28,7 +28,7 @@ from arq.worker import Retry
 from sqlalchemy import select
 
 from app.config import get_settings
-from app.database import SessionLocal
+from app.database import SessionLocal, tenant_session
 from app.models.business_insight_result import BusinessInsightResult
 from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
 from app.models.shared_vdb import SharedVDB
@@ -229,12 +229,14 @@ async def enqueue_rebuild_knowledge_graph(build_id: int) -> str:
         await pool.close()
 
 
-async def enqueue_run_knowledge_graph_health_check(project_id: int) -> str:
+async def enqueue_run_knowledge_graph_health_check(
+    tenant_id: int, project_id: int
+) -> str:
     """Enqueue a knowledge graph health check and return the job id."""
     pool = await create_pool(_redis_settings())
     try:
         job = await pool.enqueue_job(
-            "run_knowledge_graph_health_check", project_id
+            "run_knowledge_graph_health_check", tenant_id, project_id
         )
         return job.job_id if job else ""
     finally:
@@ -374,27 +376,35 @@ knowledge_graph_rebuilt.keep_result = 0  # type: ignore[attr-defined]
 
 
 async def run_knowledge_graph_health_check(
-    ctx: dict[str, Any], project_id: int
+    ctx: dict[str, Any], tenant_id: int, project_id: int
 ) -> dict[str, Any]:
-    """Run a knowledge graph health check for one project."""
+    """Run a knowledge graph health check for one project.
+
+    TS-ISO-017 canary: the first worker migrated from a bare ``SessionLocal()``
+    to ``tenant_session``, which binds Postgres RLS for the duration of the
+    job (``user_id=0`` is the reserved system/worker principal -- this is a
+    scheduled health check, not an action taken on behalf of a specific
+    user). See app/database.py's ``tenant_session`` docstring: existing jobs
+    remain an explicit rollout blocker until migrated like this one.
+    """
     from app.services.knowledge_graph_health import KnowledgeGraphHealthService
 
-    async with SessionLocal() as session:
-        health = KnowledgeGraphHealthService(session)
-        try:
+    try:
+        async with tenant_session(
+            tenant_id=tenant_id, user_id=0, project_id=project_id, source="worker"
+        ) as session:
+            health = KnowledgeGraphHealthService(session)
             hc = await health.run_health_check(project_id, check_type="scheduled")
-            await session.commit()
             return {
                 "status": "ok",
                 "project_id": project_id,
                 "health_status": hc.status,
             }
-        except Exception as exc:
-            logger.exception(
-                "run_knowledge_graph_health_check failed for project %s", project_id
-            )
-            await session.rollback()
-            return {"status": "error", "project_id": project_id, "error": str(exc)[:500]}
+    except Exception as exc:
+        logger.exception(
+            "run_knowledge_graph_health_check failed for project %s", project_id
+        )
+        return {"status": "error", "project_id": project_id, "error": str(exc)[:500]}
 
 
 async def recover_stale_graph_builds(ctx: dict[str, Any]) -> dict[str, Any]:
