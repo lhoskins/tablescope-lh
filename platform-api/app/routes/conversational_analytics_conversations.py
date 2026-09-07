@@ -114,6 +114,7 @@ class TurnResponse(BaseModel):
     result: dict[str, Any] | None
     chart_config: dict[str, Any] | None
     explanation: dict[str, Any] | None
+    artifact_proposal: dict[str, Any] | None
     error_code: str | None
     matched_insight: dict[str, Any] | None
     result_metadata: dict[str, Any] | None
@@ -208,6 +209,7 @@ def _turn_to_response(turn: AnalyticsConversationTurn) -> TurnResponse:
         result=turn.result_cache,
         chart_config=turn.chart_config,
         explanation=turn.explanation,
+        artifact_proposal=(turn.explanation or {}).get("artifactProposal"),
         error_code=turn.error_code,
         matched_insight=turn.matched_insight,
         result_metadata=turn.result_metadata,
@@ -328,7 +330,7 @@ async def create_conversation(
         await execute_turn(
             session, context, conversation, turn, datasource_id=req.data_source_id
         )
-        if turn.status == "success":
+        if turn.status == "success" and turn.intent_type != "create_dashboard":
             conversation.last_successful_turn_id = turn.id
         await session.flush()
 

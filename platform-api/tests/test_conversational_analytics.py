@@ -1041,3 +1041,120 @@ async def test_fallback_new_analysis_with_chart_type(client, service_headers, mo
     assert turn["intent_type"] == "new_analysis"
     assert turn["chart_config"]["type"] == "pie"
     assert turn["chart_config"]["subtype"] == "donut"
+
+
+async def test_create_query_intent_returns_confirmation_then_saves_once(
+    client, service_headers, monkeypatch
+):
+    """A chat command proposes an executed query but does not persist it
+    until the editor explicitly accepts the confirmation card."""
+    _, _, project, headers = await _setup(client, service_headers, "conv-query-artifact")
+
+    async def _fake(*args, **kwargs):
+        return _fake_ask_and_run_core_result(kwargs.get("question", "sales"))
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core",
+        _fake,
+    )
+
+    created = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={
+            "project_id": project["id"],
+            "initial_message": "Create a query showing sales by month",
+        },
+        headers=headers,
+    )
+    assert created.status_code == 200, created.text
+    conversation = created.json()
+    turn = conversation["turns"][0]
+    assert turn["intent_type"] == "create_query"
+    assert turn["artifact_proposal"]["kind"] == "query"
+    assert turn["artifact_proposal"]["status"] == "pending"
+    assert turn["artifact_proposal"]["assetId"] is None
+
+    before = await client.get(
+        f"/api/projects/{project['id']}/queries", headers=headers
+    )
+    assert before.status_code == 200
+    assert before.json() == []
+
+    decision_url = (
+        f"/api/conversational-analytics/conversations/{conversation['id']}"
+        f"/turns/{turn['id']}/artifact-decision"
+    )
+    accepted = await client.post(
+        decision_url,
+        json={"decision": "accept", "artifact_kind": "query"},
+        headers=headers,
+    )
+    assert accepted.status_code == 200, accepted.text
+    proposal = accepted.json()["turn"]["artifact_proposal"]
+    assert proposal["status"] == "accepted"
+    assert proposal["assetId"] is not None
+    assert proposal["assetUrl"] == f"/projects/{project['id']}/queries"
+
+    # Confirmation is idempotent; a double click/retry cannot duplicate it.
+    accepted_again = await client.post(
+        decision_url,
+        json={"decision": "accept", "artifact_kind": "query"},
+        headers=headers,
+    )
+    assert accepted_again.status_code == 200
+    assert (
+        accepted_again.json()["turn"]["artifact_proposal"]["assetId"]
+        == proposal["assetId"]
+    )
+    after = await client.get(
+        f"/api/projects/{project['id']}/queries", headers=headers
+    )
+    assert after.status_code == 200
+    assert len(after.json()) == 1
+
+
+async def test_create_dashboard_intent_is_non_destructive_until_review(
+    client, service_headers, monkeypatch
+):
+    """Chat persists only a dashboard proposal; the existing designer owns
+    review, query validation, preview and final creation."""
+    _, _, project, headers = await _setup(client, service_headers, "conv-dashboard-artifact")
+    analytical_calls = 0
+
+    async def _must_not_run(*args, **kwargs):
+        nonlocal analytical_calls
+        analytical_calls += 1
+        return _fake_ask_and_run_core_result(kwargs.get("question", ""))
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core",
+        _must_not_run,
+    )
+
+    created = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={
+            "project_id": project["id"],
+            "initial_message": "Please create a dashboard for revenue and backlog trends",
+        },
+        headers=headers,
+    )
+    assert created.status_code == 200, created.text
+    conversation = created.json()
+    turn = conversation["turns"][0]
+    assert analytical_calls == 0
+    assert turn["intent_type"] == "create_dashboard"
+    assert turn["result"] is None
+    assert turn["artifact_proposal"]["kind"] == "dashboard"
+    assert turn["artifact_proposal"]["status"] == "pending"
+
+    rejected = await client.post(
+        (
+            f"/api/conversational-analytics/conversations/{conversation['id']}"
+            f"/turns/{turn['id']}/artifact-decision"
+        ),
+        json={"decision": "reject", "artifact_kind": "dashboard"},
+        headers=headers,
+    )
+    assert rejected.status_code == 200, rejected.text
+    assert rejected.json()["turn"]["artifact_proposal"]["status"] == "rejected"

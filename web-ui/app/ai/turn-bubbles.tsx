@@ -4,14 +4,28 @@ import { IconSparkles } from "@tabler/icons-react";
 import { cn } from "@/lib/cn";
 import type { ConversationTurn } from "@/lib/api/conversational-analytics";
 import { MatchedInsightBlock } from "@/components/tablescope/conversation/matched-insight-block";
+import { ChatArtifactConfirmationCard } from "@/components/tablescope/conversation/chat-artifact-confirmation-card";
 import { MessageTimestamp } from "./message-timestamp";
 import { TurnResult } from "./turn-result";
 import { UserBubble } from "./user-bubble";
 
 /** One conversational-analytics turn: the user's message + the AI answer. */
-export function TurnBubbles({ turn }: { turn: ConversationTurn }) {
+export function TurnBubbles({
+  turn,
+  conversationId,
+  projectId,
+  onReviewDashboard,
+  onArtifactDecision,
+}: {
+  turn: ConversationTurn;
+  conversationId?: number;
+  projectId?: string;
+  onReviewDashboard?: (turnId: number, prompt: string) => void;
+  onArtifactDecision?: () => void;
+}) {
   const result = turn.result;
   const hasData = (result?.rows?.length ?? 0) > 0;
+  const hasArtifact = Boolean(turn.artifact_proposal);
   const matched = turn.matched_insight;
   const assistantTimestamp =
     turn.status === "pending" ? null : turn.updated_at;
@@ -26,7 +40,7 @@ export function TurnBubbles({ turn }: { turn: ConversationTurn }) {
         <div
           className={cn(
             "flex flex-col",
-            hasData || matched ? "w-full" : "max-w-[75%]",
+            hasData || matched || hasArtifact ? "w-full" : "max-w-[75%]",
           )}
         >
           <div
@@ -47,6 +61,15 @@ export function TurnBubbles({ turn }: { turn: ConversationTurn }) {
           />
           {hasData && result && <TurnResult turn={turn} />}
           {matched && <MatchedInsightBlock match={matched} />}
+          {hasArtifact && conversationId != null && projectId && (
+            <ChatArtifactConfirmationCard
+              conversationId={conversationId}
+              projectId={projectId}
+              turn={turn}
+              onReviewDashboard={onReviewDashboard}
+              onDecision={onArtifactDecision}
+            />
+          )}
         </div>
       </div>
     </>
