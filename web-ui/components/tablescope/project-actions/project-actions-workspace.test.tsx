@@ -76,6 +76,7 @@ function boardHookReturn() {
     archiveAction: mutation(),
     restoreAction: mutation(),
     deleteAction: mutation(),
+    reviewAction: mutation(),
     createSubtask: mutation(),
     updateSubtask: mutation(),
     archiveSubtask: mutation(),

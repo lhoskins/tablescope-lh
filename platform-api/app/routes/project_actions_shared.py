@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.auth.context import RequestContext
+from app.auth.rbac import Role, has_role
 from app.models.audit_event import AuditEvent
 from app.models.project import Project, ProjectMember
 from app.models.project_action import ProjectAction, ProjectActionSubtask
@@ -342,6 +343,25 @@ async def _validate_owner(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Owner must be an active project member",
         )
+
+
+def _require_can_assign_reviewer(project: Project, context: RequestContext) -> None:
+    """Only the project owner or an administrator may name a proposal's reviewer.
+
+    ``review_action_proposal`` treats ``context.user_id in {action.reviewer_user_id,
+    project.owner_id}`` as sufficient authorization to accept/reject/defer a
+    pending AI proposal. Without this guard, any project member (``Role.EDITOR``
+    and ``Role.MEMBER`` share the same rank, so create/update actions are not
+    restricted to genuine editors) could set ``reviewer_user_id`` to themselves
+    on create or update and self-approve/self-reject a proposal that was
+    supposed to require independent human sign-off.
+    """
+    if context.user_id == project.owner_id or has_role(context.role, Role.ADMIN):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Only the project owner or an administrator can assign a proposal reviewer",
+    )
 
 
 async def _validate_goal_metric_scope(

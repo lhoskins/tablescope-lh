@@ -33,6 +33,7 @@ from app.routes.project_actions_shared import (
     _group_sort_key,
     _insight_fingerprint,
     _recalculate_action_progress,
+    _require_can_assign_reviewer,
     _require_project_access,
     _risk_impact_from_snapshot,
     _status_percent,
@@ -258,6 +259,8 @@ async def create_action(
         _validate_priority_value(body.priority)
 
     await _validate_owner(project_id, body.owner_user_id, session)
+    if body.reviewer_user_id is not None:
+        _require_can_assign_reviewer(project, context)
     proposed_reviewer = body.reviewer_user_id or (project.owner_id if body.status == "pending_review" else None)
     if proposed_reviewer is not None and proposed_reviewer != project.owner_id:
         await _validate_owner(project_id, proposed_reviewer, session)
@@ -357,6 +360,7 @@ async def create_action(
         },
     )
     await session.commit()
+    await session.refresh(action)
     await session.refresh(action, ["subtasks"])
     await _after_mutation(session, context, project_id)
 
@@ -838,6 +842,7 @@ async def update_action(
             session=session,
         )
     if body.reviewer_user_id is not None:
+        _require_can_assign_reviewer(project, context)
         if body.reviewer_user_id != project.owner_id:
             await _validate_owner(project_id, body.reviewer_user_id, session)
         action.reviewer_user_id = body.reviewer_user_id
@@ -869,6 +874,7 @@ async def update_action(
         },
     )
     await session.commit()
+    await session.refresh(action)
     await session.refresh(action, ["subtasks"])
     await _after_mutation(session, context, project_id)
 

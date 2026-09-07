@@ -123,6 +123,7 @@ async def review_action_proposal(
         payload={"decision": body.decision, "note": body.note},
     )
     await session.commit()
+    await session.refresh(action)
     await session.refresh(action, ["subtasks"])
     await _after_mutation(session, context, project_id)
     return ProjectActionOut.model_validate(action)
@@ -463,6 +464,7 @@ async def restore_action(
         payload={"subtasks_restored": [s.id for s in action.subtasks]},
     )
     await session.commit()
+    await session.refresh(action)
     await session.refresh(action, ["subtasks"])
     await _after_mutation(session, context, project_id)
     return ProjectActionOut.model_validate(action)

@@ -95,12 +95,21 @@ export function ProjectActionDetail({
       }),
     onSuccess: async (updated) => {
       if (searchParams.get("review") === "1" && updated.status === "pending_review") {
-        await projectActionsApi.review(projectId, actionId, {
-          decision: "accept",
-          expected_version: updated.lock_version,
-        });
-        pushToast("AI proposal edited and accepted", "success");
-        router.push(`/projects/${projectId}/actions`);
+        try {
+          await projectActionsApi.review(projectId, actionId, {
+            decision: "accept",
+            expected_version: updated.lock_version,
+          });
+          pushToast("AI proposal edited and accepted", "success");
+          router.push(`/projects/${projectId}/actions`);
+        } catch (err) {
+          // The edit itself succeeded -- only the accept step failed (e.g. a
+          // stale version, or the caller isn't the designated reviewer).
+          // Without this, the failure was a silent unhandled rejection: no
+          // toast, no navigation, the user left staring at a page that
+          // looked like it did nothing.
+          pushToast((err as Error).message, "error");
+        }
       } else {
         pushToast("Action updated", "success");
       }

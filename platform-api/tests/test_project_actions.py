@@ -101,6 +101,110 @@ async def _create_action(
     return r.json()
 
 
+async def _add_member(client, service_headers, tenant_id, project_id, owner_headers, slug, role="editor"):
+    """Create a second user in the tenant and add them as a project member."""
+    r = await client.post(
+        f"/api/tenants/{tenant_id}/users",
+        json={
+            "email": f"{slug}@test.com",
+            "display_name": "Second User",
+            "role": "editor",
+            "external_id": f"ext-{slug}",
+        },
+        headers=service_headers,
+    )
+    assert r.status_code == 201, r.text
+    member = r.json()
+
+    r = await client.post(
+        f"/api/projects/{project_id}/members",
+        json={"user_id": member["id"], "role": role},
+        headers=owner_headers,
+    )
+    assert r.status_code == 201, r.text
+    return member, _headers(tenant_id, member["id"], "editor")
+
+
+async def test_non_owner_cannot_self_assign_reviewer_on_create(client, service_headers):
+    """TS: only the project owner/admin may name a proposal reviewer.
+
+    A regular project member/editor must not be able to appoint themselves
+    (or anyone) as reviewer on creation -- doing so would let them
+    self-approve/self-reject their own "AI proposal" via /review, bypassing
+    the intended project-owner/designated-reviewer gate entirely.
+    """
+    tenant, _owner, project, owner_headers = await _setup(client, service_headers, "reviewer-escalation-create")
+    pid = project["id"]
+    member, member_headers = await _add_member(
+        client, service_headers, tenant["id"], pid, owner_headers, "reviewer-escalation-create-member"
+    )
+
+    r = await client.post(
+        f"/api/projects/{pid}/actions",
+        headers=member_headers,
+        json={
+            "title": "Self-approved proposal",
+            "status": "pending_review",
+            "priority": "high",
+            "source_type": "ai_proposal",
+            "reviewer_user_id": member["id"],
+        },
+    )
+    assert r.status_code == 403, r.text
+
+
+async def test_non_owner_cannot_self_assign_reviewer_on_update(client, service_headers):
+    tenant, owner, project, owner_headers = await _setup(client, service_headers, "reviewer-escalation-update")
+    pid = project["id"]
+    member, member_headers = await _add_member(
+        client, service_headers, tenant["id"], pid, owner_headers, "reviewer-escalation-update-member"
+    )
+
+    r = await client.post(
+        f"/api/projects/{pid}/actions",
+        headers=owner_headers,
+        json={
+            "title": "Owner-reviewed proposal",
+            "status": "pending_review",
+            "priority": "high",
+            "source_type": "ai_proposal",
+        },
+    )
+    assert r.status_code == 201, r.text
+    action = r.json()
+    assert action["reviewer_user_id"] == owner["id"]
+
+    r = await client.patch(
+        f"/api/projects/{pid}/actions/{action['id']}",
+        headers=member_headers,
+        json={"reviewer_user_id": member["id"], "expected_version": action["lock_version"]},
+    )
+    assert r.status_code == 403, r.text
+
+
+async def test_owner_can_assign_reviewer(client, service_headers):
+    """The fix must not break the legitimate owner/admin path."""
+    tenant, owner, project, owner_headers = await _setup(client, service_headers, "reviewer-assignment-owner")
+    pid = project["id"]
+    member, _member_headers = await _add_member(
+        client, service_headers, tenant["id"], pid, owner_headers, "reviewer-assignment-owner-member"
+    )
+
+    r = await client.post(
+        f"/api/projects/{pid}/actions",
+        headers=owner_headers,
+        json={
+            "title": "Owner-assigned reviewer",
+            "status": "pending_review",
+            "priority": "high",
+            "source_type": "ai_proposal",
+            "reviewer_user_id": member["id"],
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["reviewer_user_id"] == member["id"]
+
+
 async def test_ai_proposal_requires_human_review_and_is_not_active(client, service_headers):
     _, user, project, headers = await _setup(client, service_headers, "proposal-review")
     pid = project["id"]

@@ -15,7 +15,7 @@ const proposal = {
   source_insight_id: "risk-17",
   source_insight_title: "Supplier lead time exceeds SLA",
   proposal_metadata: {
-    successCriteria: [{ name: "On-time delivery", target_value: 95, unit: "%", cadence: "weekly" }],
+    successCriteria: [{ name: "On-time delivery", metric: "On-time delivery rate", target_value: 95, unit: "%", cadence: "weekly" }],
     duplicateCheck: "No matching open or completed action",
   },
   lock_version: 2,
