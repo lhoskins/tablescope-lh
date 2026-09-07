@@ -16,12 +16,16 @@ from app.config import Settings
 
 def _production_settings(**overrides: object) -> Settings:
     defaults: dict[str, object] = {
-        "environment": "production",
+        "ENVIRONMENT": "production",
         "tablescope_ai_signing_secret": "test-signing-secret",
         "cors_allow_origins": "https://app.example.com",
         "tablescope_secret_key": "test-fernet-key",
     }
     defaults.update(overrides)
+    # Pydantic Settings uses ENVIRONMENT as the validation alias for the
+    # environment field, so make sure kwarg-based overrides use it.
+    if "environment" in defaults:
+        defaults["ENVIRONMENT"] = defaults.pop("environment")
     return Settings(**defaults)
 
 
