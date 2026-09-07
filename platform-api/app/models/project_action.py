@@ -56,6 +56,32 @@ class ProjectAction(TimestampMixin, Base):
     source_insight_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     source_insight_title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     source_insight_snapshot: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    source_surface: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    reviewer_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    reviewed_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    review_due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    goal_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project_goals.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    primary_metric_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project_metrics.id", ondelete="SET NULL"), nullable=True
+    )
+    proposal_metadata: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    outcome_snapshot: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    outcome_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    outcome_refreshed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_by_user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

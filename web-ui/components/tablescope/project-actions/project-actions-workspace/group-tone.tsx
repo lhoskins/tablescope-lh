@@ -43,8 +43,8 @@ import {
 
 export function groupTone(group: string): "brand" | "warning" | "danger" | "success" | "neutral" {
   const v = group.toLowerCase();
-  if (v === "in_progress" || v === "high") return "warning";
-  if (v === "blocked" || v === "critical" || v === "overdue") return "danger";
+  if (v === "pending_review" || v === "in_progress" || v === "high") return "warning";
+  if (v === "blocked" || v === "rejected" || v === "critical" || v === "overdue") return "danger";
   if (v === "completed" || v === "low") return "success";
   if (v === "not_started" || v === "medium") return "brand";
   return "neutral";

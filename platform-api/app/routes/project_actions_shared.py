@@ -22,17 +22,22 @@ from app.auth.context import RequestContext
 from app.models.audit_event import AuditEvent
 from app.models.project import Project, ProjectMember
 from app.models.project_action import ProjectAction, ProjectActionSubtask
+from app.models.project_context.goals import ProjectGoal
+from app.models.project_context.metrics import ProjectMetric
 from app.services.project_ai_context import invalidate_project_ai_context
+from app.services.business_insight_cache import mark_results_stale
 from app.services.project_insight_service import mark_project_insight_stale
 
 logger = logging.getLogger(__name__)
 
 _STATUS_ORDER: dict[str, int] = {
-    "not_started": 0,
-    "blocked": 1,
-    "in_progress": 2,
-    "completed": 3,
-    "cancelled": 4,
+    "pending_review": 0,
+    "not_started": 1,
+    "blocked": 2,
+    "in_progress": 3,
+    "completed": 4,
+    "cancelled": 5,
+    "rejected": 6,
 }
 
 _PRIORITY_ORDER: dict[str, int] = {
@@ -43,19 +48,23 @@ _PRIORITY_ORDER: dict[str, int] = {
 }
 
 _BOARD_GROUP_ORDER: dict[str, int] = {
-    "blocked": 0,
-    "in_progress": 1,
-    "not_started": 2,
-    "completed": 3,
-    "cancelled": 4,
+    "pending_review": 0,
+    "blocked": 1,
+    "in_progress": 2,
+    "not_started": 3,
+    "completed": 4,
+    "cancelled": 5,
+    "rejected": 6,
 }
 
 _GROUP_LABELS: dict[str, str] = {
+    "pending_review": "Pending review",
     "blocked": "Blocked",
     "in_progress": "In progress",
     "not_started": "Not started",
     "completed": "Completed",
     "cancelled": "Cancelled",
+    "rejected": "Rejected",
 }
 
 _DUE_STATE_ORDER: dict[str, int] = {
@@ -113,13 +122,16 @@ def _insight_fingerprint(
 def _status_percent(status: str) -> int:
     if status == "completed":
         return 100
-    if status in ("not_started", "cancelled"):
+    if status in ("pending_review", "not_started", "cancelled", "rejected"):
         return 0
     return -1  # preserve explicit percent for in_progress/blocked
 
 
 def _validate_status_value(value: str) -> None:
-    allowed = {"not_started", "in_progress", "blocked", "completed", "cancelled"}
+    allowed = {
+        "pending_review", "not_started", "in_progress", "blocked",
+        "completed", "cancelled", "rejected",
+    }
     if value not in allowed:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -133,6 +145,15 @@ def _validate_priority_value(value: str) -> None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Invalid priority '{value}'; allowed: {allowed}",
+        )
+
+
+def _validate_subtask_status_value(value: str) -> None:
+    allowed = {"not_started", "in_progress", "blocked", "completed", "cancelled"}
+    if value not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid subtask status '{value}'; allowed: {allowed}",
         )
 
 
@@ -238,6 +259,9 @@ def _active_required_subtasks(action: ProjectAction) -> list[ProjectActionSubtas
 
 def _recalculate_action_progress(action: ProjectAction) -> None:
     """Recompute parent percent and consistency from active required subtasks."""
+    if action.status in ("pending_review", "rejected"):
+        action.percent_complete = 0
+        return
     active = _active_required_subtasks(action)
     if not active:
         if action.status == "completed":
@@ -258,11 +282,13 @@ def _recalculate_action_progress(action: ProjectAction) -> None:
         action.status = "completed"
         action.completed_at = datetime.now(UTC)
         action.percent_complete = 100
+        action.outcome_status = "awaiting_refresh"
     elif action.status == "completed" and not all(
         s.status == "completed" for s in active
     ):
         action.status = "in_progress"
         action.completed_at = None
+        action.outcome_status = "pending_execution"
 
     if action.status == "completed" and action.percent_complete != 100:
         action.percent_complete = 100
@@ -289,6 +315,7 @@ def _apply_status_transition(action: ProjectAction, new_status: str) -> None:
         action.status = "completed"
         action.completed_at = now
         action.percent_complete = 100
+        action.outcome_status = "awaiting_refresh"
     else:
         if action.status == "completed":
             action.completed_at = None
@@ -298,6 +325,8 @@ def _apply_status_transition(action: ProjectAction, new_status: str) -> None:
         if new_status == "not_started":
             action.started_at = None
             action.percent_complete = 0
+        if new_status not in ("pending_review", "rejected"):
+            action.outcome_status = "pending_execution"
         _recalculate_action_progress(action)
 
 
@@ -313,6 +342,31 @@ async def _validate_owner(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Owner must be an active project member",
         )
+
+
+async def _validate_goal_metric_scope(
+    *,
+    tenant_id: int,
+    project_id: int,
+    goal_id: int | None,
+    metric_id: int | None,
+    session: AsyncSession,
+) -> None:
+    """Reject cross-project goal/KPI links before they reach the database."""
+    if goal_id is not None:
+        goal = await session.get(ProjectGoal, goal_id)
+        if goal is None or goal.tenant_id != tenant_id or goal.project_id != project_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Goal must belong to this project",
+            )
+    if metric_id is not None:
+        metric = await session.get(ProjectMetric, metric_id)
+        if metric is None or metric.tenant_id != tenant_id or metric.project_id != project_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="KPI must belong to this project",
+            )
 
 
 async def _audit(
@@ -358,8 +412,15 @@ async def _after_mutation(
             tenant_id=context.tenant_id,
             project_id=project_id,
         )
+        await mark_results_stale(
+            session,
+            tenant_id=context.tenant_id,
+            project_id=project_id,
+        )
+        await session.commit()
     except Exception:
         logger.exception("mark_project_insight_stale failed for project %s", project_id)
+        await session.rollback()
 
 
 def _due_state(due_date: datetime | None, now: datetime) -> str:
@@ -414,4 +475,3 @@ def _subtask_payload(subtask: ProjectActionSubtask) -> dict[str, Any]:
         "percent_complete": subtask.percent_complete,
         "is_required": subtask.is_required,
     }
-

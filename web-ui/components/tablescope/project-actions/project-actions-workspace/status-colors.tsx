@@ -42,9 +42,11 @@ import {
 
 
 export const STATUS_COLORS: Record<ProjectActionStatus, string> = {
+  pending_review: "bg-brand-50 text-brand-700",
   not_started: "bg-bg-tertiary text-ink-secondary",
   in_progress: "bg-warning-bg text-warning",
   blocked: "bg-danger-bg text-danger",
   completed: "bg-success-bg text-success",
   cancelled: "bg-bg-tertiary text-ink-tertiary",
+  rejected: "bg-danger-bg text-danger",
 };

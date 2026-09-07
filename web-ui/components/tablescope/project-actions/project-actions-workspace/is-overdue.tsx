@@ -47,6 +47,6 @@ export function isOverdue(item: {
   archived_at?: string | null;
 }): boolean {
   if (!item.due_date || item.archived_at) return false;
-  if (["completed", "cancelled"].includes(item.status)) return false;
+  if (["pending_review", "completed", "cancelled", "rejected"].includes(item.status)) return false;
   return new Date(item.due_date) < new Date();
 }

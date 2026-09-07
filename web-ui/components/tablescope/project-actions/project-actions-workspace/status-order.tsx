@@ -42,9 +42,11 @@ import {
 
 
 export const STATUS_ORDER: ProjectActionStatus[] = [
+  "pending_review",
   "blocked",
   "in_progress",
   "not_started",
   "completed",
   "cancelled",
+  "rejected",
 ];

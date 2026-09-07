@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/cn";
 import { initials } from "@/lib/ui/format";
@@ -34,6 +34,7 @@ import { inputToDate } from "./project-action-detail/input-to-date";
 import { LabeledSelect } from "./project-action-detail/labeled-select";
 import { LabeledDate } from "./project-action-detail/labeled-date";
 import { SubtaskRow } from "./project-action-detail/subtask-row";
+import { ActionOutcomePanel } from "./project-actions-workspace/action-outcome-panel";
 
 
 
@@ -45,6 +46,7 @@ export function ProjectActionDetail({
   actionId: number;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const { push: pushToast } = useToasts();
   const { data: identity } = useCurrentUser();
@@ -88,11 +90,20 @@ export function ProjectActionDetail({
         due_date: inputToDate(dueDate),
         expected_version: action?.lock_version,
       }),
-    onSuccess: () => {
+    onSuccess: async (updated) => {
+      if (searchParams.get("review") === "1" && updated.status === "pending_review") {
+        await projectActionsApi.review(projectId, actionId, {
+          decision: "accept",
+          expected_version: updated.lock_version,
+        });
+        pushToast("AI proposal edited and accepted", "success");
+        router.push(`/projects/${projectId}/actions`);
+      } else {
+        pushToast("Action updated", "success");
+      }
       queryClient.invalidateQueries({
         queryKey: ["project", projectId, "actions"],
       });
-      pushToast("Action updated", "success");
     },
     onError: (err: Error) => pushToast(err.message, "error"),
   });
@@ -159,7 +170,7 @@ export function ProjectActionDetail({
         )
       }
     >
-      <div className="mx-auto max-w-4xl space-y-6 p-4">
+      <div className="w-full max-w-none space-y-6 p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Badge tone={action.priority === "critical" ? "danger" : action.priority === "high" ? "warning" : "brand"} size="md">
@@ -205,8 +216,8 @@ export function ProjectActionDetail({
             label="Status"
             value={status}
             onChange={(v) => setStatus(v as ProjectActionStatus)}
-            disabled={!canEdit}
-            options={Object.entries(STATUS_BADGE_LABELS).map(([k, label]) => ({ value: k, label }))}
+            disabled={!canEdit || ["pending_review", "rejected"].includes(action.status)}
+            options={Object.entries(STATUS_BADGE_LABELS).filter(([k]) => !["pending_review", "rejected"].includes(k)).map(([k, label]) => ({ value: k, label }))}
           />
           <LabeledSelect
             label="Owner"
@@ -225,7 +236,7 @@ export function ProjectActionDetail({
 
         {canEdit && (
           <Button onClick={() => updateAction.mutate()} disabled={updateAction.isPending}>
-            {updateAction.isPending ? "Saving…" : "Save action"}
+            {updateAction.isPending ? "Saving…" : searchParams.get("review") === "1" ? "Save & accept proposal" : "Save action"}
           </Button>
         )}
 
@@ -233,8 +244,10 @@ export function ProjectActionDetail({
           <div className="rounded-lg border border-line-tertiary bg-bg-secondary/50 p-4">
             <h3 className="text-[12px] font-semibold text-ink-secondary">Source insight</h3>
             <Link
-              href={
-                action.source_insight_id
+            href={
+                action.source_surface === "project_insight"
+                  ? `/projects/${projectId}/insight`
+                  : action.source_insight_id
                   ? `/business-insight/analysis/${encodeURIComponent(action.source_insight_id)}`
                   : "#"
               }
@@ -244,6 +257,10 @@ export function ProjectActionDetail({
               {action.source_insight_title}
             </Link>
           </div>
+        )}
+
+        {action.status === "completed" && action.outcome_status && (
+          <ActionOutcomePanel projectId={projectId} action={action} />
         )}
 
         <div className="rounded-lg border border-line-tertiary bg-bg-primary p-4 shadow-sm">

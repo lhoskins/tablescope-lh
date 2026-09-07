@@ -44,5 +44,6 @@ import {
 export const SOURCE_TYPE_LABELS: Record<string, string> = {
   insight: "Insight",
   manual: "Manual",
+  ai_proposal: "AI proposal",
   risk: "Risk",
 };

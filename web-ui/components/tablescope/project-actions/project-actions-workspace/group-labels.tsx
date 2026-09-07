@@ -42,11 +42,13 @@ import {
 
 
 export const GROUP_LABELS: Record<string, string> = {
+  pending_review: "Pending review",
   blocked: "Blocked",
   in_progress: "In progress",
   not_started: "Not started",
   completed: "Completed",
   cancelled: "Cancelled",
+  rejected: "Rejected",
   critical: "Critical",
   high: "High",
   medium: "Medium",
@@ -58,6 +60,7 @@ export const GROUP_LABELS: Record<string, string> = {
   no_due: "No due date",
   insight: "Insight",
   manual: "Manual",
+  ai_proposal: "AI proposal",
   risk: "Risk",
   unassigned: "Unassigned",
   none: "None",

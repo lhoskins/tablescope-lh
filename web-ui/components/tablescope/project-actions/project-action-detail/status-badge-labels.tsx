@@ -32,9 +32,11 @@ import {
 
 
 export const STATUS_BADGE_LABELS: Record<ProjectActionStatus, string> = {
+  pending_review: "Pending review",
   not_started: "Not started",
   in_progress: "Working on it",
   blocked: "Blocked",
   completed: "Done",
   cancelled: "Cancelled",
+  rejected: "Rejected",
 };

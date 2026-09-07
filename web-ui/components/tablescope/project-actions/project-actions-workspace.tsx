@@ -22,6 +22,7 @@ import {
   type ProjectActionView,
   type ProjectAction,
   type ProjectActionFilters,
+  type ReviewProjectActionPayload,
 } from "@/lib/api/project-actions";
 import {
   IconPlus,
@@ -72,6 +73,7 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
     updateAction,
     archiveAction,
     restoreAction,
+    reviewAction,
     createSubtask,
     updateSubtask,
     archiveSubtask,
@@ -89,6 +91,7 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
   const summary = useMemo(
     () =>
       boardQuery.data?.summary ?? {
+        pending_review: 0,
         active: 0,
         overdue: 0,
         avg_progress: 0,
@@ -122,15 +125,18 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
   }, [items, prefs.view, currentUserId]);
 
   const viewSummary = useMemo(() => {
+    const pending_review = viewItems.filter(
+      (i) => !i.archived_at && i.status === "pending_review",
+    ).length;
     const active = viewItems.filter(
-      (i) => !i.archived_at && !["completed", "cancelled"].includes(i.status),
+      (i) => !i.archived_at && !["pending_review", "completed", "cancelled", "rejected"].includes(i.status),
     ).length;
     const overdue = viewItems.filter(
       (i) =>
-        !i.archived_at && !["completed", "cancelled"].includes(i.status) && isOverdue(i),
+        !i.archived_at && !["pending_review", "completed", "cancelled", "rejected"].includes(i.status) && isOverdue(i),
     ).length;
     const avgItems = viewItems.filter(
-      (i) => !i.archived_at && !["completed", "cancelled"].includes(i.status),
+      (i) => !i.archived_at && !["pending_review", "completed", "cancelled", "rejected"].includes(i.status),
     );
     const avg_progress = avgItems.length
       ? Math.round(avgItems.reduce((s, i) => s + i.percent_complete, 0) / avgItems.length)
@@ -142,7 +148,7 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
         ((i.source_insight_type || "").toLowerCase() === "risk" ||
           (i.source_insight_snapshot?.insight_type as string) === "risk"),
     ).length;
-    return { active, overdue, avg_progress, risk_mitigations_completed };
+    return { pending_review, active, overdue, avg_progress, risk_mitigations_completed };
   }, [viewItems]);
 
   const groupByForView = prefs.groupBy;
@@ -195,10 +201,10 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
     return order.map((key) => {
       const groupItems = grouped[key] ?? [];
       const overdue_count = groupItems.filter(
-        (i) => !i.archived_at && !["completed", "cancelled"].includes(i.status) && isOverdue(i),
+        (i) => !i.archived_at && !["pending_review", "completed", "cancelled", "rejected"].includes(i.status) && isOverdue(i),
       ).length;
       const activeItems = groupItems.filter(
-        (i) => !i.archived_at && !["completed", "cancelled"].includes(i.status),
+        (i) => !i.archived_at && !["pending_review", "completed", "cancelled", "rejected"].includes(i.status),
       );
       const avg_progress = activeItems.length
         ? Math.round(activeItems.reduce((s, i) => s + i.percent_complete, 0) / activeItems.length)
@@ -254,6 +260,22 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
   };
 
   const handleRestore = (id: number) => restoreAction.mutate(id);
+
+  const handleReview = (id: number, payload: ReviewProjectActionPayload) => {
+    reviewAction.mutate(
+      { actionId: id, payload },
+      {
+        onSuccess: (action) => {
+          setDetailMap((current) => ({ ...current, [id]: action }));
+          pushToast(
+            payload.decision === "accept" ? "AI proposal accepted" : payload.decision === "reject" ? "AI proposal rejected" : "AI proposal deferred",
+            "success",
+          );
+        },
+        onError: (error: Error) => pushToast(error.message, "error"),
+      },
+    );
+  };
 
   const handleSubtaskStatusChange = (
     actionId: number,
@@ -354,7 +376,9 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
 
   const submitNewAction = (group: string, title: string) => {
     if (!title.trim()) return;
-    const isStatusGroup = groupByForView === "status" && STATUS_ORDER.includes(group as ProjectActionStatus);
+    const isStatusGroup = groupByForView === "status"
+      && STATUS_ORDER.includes(group as ProjectActionStatus)
+      && !["pending_review", "rejected"].includes(group);
     createAction.mutate(
       {
         title: title.trim(),
@@ -396,12 +420,8 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
       activeNav="project-actions"
       breadcrumbLabel="Project Actions"
     >
-      {/* Same wrapper as Project Insights (`business-intelligence-workspace`):
-          capped at the shared content width and centred, so both screens sit
-          the same distance from the sidebar instead of this one running the
-          full width. Its own `p-4` is gone -- the shell already pads. */}
       <div
-        className="mx-auto flex w-full max-w-content flex-col gap-5"
+        className="flex w-full max-w-none flex-col gap-5"
         aria-label="Project actions board"
       >
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -411,7 +431,8 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
               Manage actions created from insights and track mitigation progress.
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+            <SummaryCard value={viewSummary.pending_review} label="Pending review" icon={IconSparkles} tone="warning" />
             <SummaryCard value={viewSummary.active} label="Active" icon={IconClipboardList} tone="brand" />
             <SummaryCard value={viewSummary.overdue} label="Overdue" icon={IconClock} tone="danger" />
             <SummaryCard value={`${viewSummary.avg_progress}%`} label="Avg progress" icon={IconTrendingUp} tone="brand" />
@@ -466,7 +487,7 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
               className="rounded border border-line-tertiary bg-bg-primary px-2 py-1 text-[12px] text-ink-primary"
             >
               <option value="">Change status</option>
-              {Object.entries(STATUS_BADGE_LABELS).map(([k, label]) => (
+              {Object.entries(STATUS_BADGE_LABELS).filter(([k]) => !["pending_review", "rejected"].includes(k)).map(([k, label]) => (
                 <option key={k} value={k}>
                   {label}
                 </option>
@@ -513,6 +534,8 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
             onSubtaskFieldChange={handleSubtaskFieldChange}
             onSubtaskArchive={handleSubtaskArchive}
             onAddSubtask={submitSubtask}
+            onReview={handleReview}
+            reviewing={reviewAction.isPending}
             members={members}
           />
         ) : (
@@ -541,6 +564,8 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
                 onSubtaskFieldChange={handleSubtaskFieldChange}
                 onSubtaskArchive={handleSubtaskArchive}
                 onAddSubtask={submitSubtask}
+                onReview={handleReview}
+                reviewing={reviewAction.isPending}
                 members={members}
                 adding={addingGroup === group.group}
                 newActionTitle={newActionTitle}

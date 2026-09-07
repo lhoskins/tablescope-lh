@@ -1,11 +1,13 @@
 import { apiClient } from "@/lib/api-client";
 
 export type ProjectActionStatus =
+  | "pending_review"
   | "not_started"
   | "in_progress"
   | "blocked"
   | "completed"
-  | "cancelled";
+  | "cancelled"
+  | "rejected";
 
 export type ProjectActionPriority = "low" | "medium" | "high" | "critical";
 
@@ -69,6 +71,18 @@ export interface ProjectAction {
   source_insight_type: string | null;
   source_insight_title: string | null;
   source_insight_snapshot: Record<string, unknown> | null;
+  source_surface: "business_insight" | "project_insight" | null;
+  reviewer_user_id: number | null;
+  reviewed_by_user_id: number | null;
+  reviewed_at: string | null;
+  review_note: string | null;
+  review_due_at: string | null;
+  goal_id: number | null;
+  primary_metric_id: number | null;
+  proposal_metadata: Record<string, unknown> | null;
+  outcome_snapshot: Record<string, unknown> | null;
+  outcome_status: string | null;
+  outcome_refreshed_at: string | null;
   created_by_user_id: number | null;
   updated_by_user_id: number | null;
   created_at: string;
@@ -79,6 +93,7 @@ export interface ProjectAction {
 }
 
 export interface ProjectActionSummary {
+  pending_review: number;
   active: number;
   overdue: number;
   avg_progress: number;
@@ -113,6 +128,19 @@ export interface ProjectActionListItem {
   source_insight_type: string | null;
   source_insight_title: string | null;
   source_insight_snapshot: Record<string, unknown> | null;
+  source_surface: "business_insight" | "project_insight" | null;
+  reviewer_user_id: number | null;
+  reviewer_name: string | null;
+  reviewed_by_user_id: number | null;
+  reviewed_at: string | null;
+  review_note: string | null;
+  review_due_at: string | null;
+  goal_id: number | null;
+  primary_metric_id: number | null;
+  proposal_metadata: Record<string, unknown> | null;
+  outcome_snapshot: Record<string, unknown> | null;
+  outcome_status: string | null;
+  outcome_refreshed_at: string | null;
   risk_impact: string | null;
   active_subtasks: number;
   total_subtasks: number;
@@ -166,6 +194,12 @@ export interface CreateProjectActionPayload {
   source_insight_type?: string | null;
   source_insight_title?: string | null;
   source_insight_snapshot?: Record<string, unknown> | null;
+  source_surface?: "business_insight" | "project_insight" | null;
+  reviewer_user_id?: number | null;
+  review_due_at?: string | null;
+  goal_id?: number | null;
+  primary_metric_id?: number | null;
+  proposal_metadata?: Record<string, unknown> | null;
   initial_subtasks?: CreateProjectActionSubtaskPayload[];
   idempotency_key?: string | null;
 }
@@ -189,6 +223,13 @@ export interface UpdateProjectActionPayload {
   owner_user_id?: number | null;
   due_date?: string | null;
   archived_at?: string | null;
+  expected_version?: number;
+}
+
+export interface ReviewProjectActionPayload {
+  decision: "accept" | "reject" | "defer";
+  note?: string | null;
+  review_due_at?: string | null;
   expected_version?: number;
 }
 
@@ -348,6 +389,13 @@ export const projectActionsApi = {
     payload: UpdateProjectActionPayload,
   ): Promise<ProjectAction> =>
     apiClient.patch(`/api/projects/${projectId}/actions/${actionId}`, payload),
+
+  review: (
+    projectId: string,
+    actionId: number,
+    payload: ReviewProjectActionPayload,
+  ): Promise<ProjectAction> =>
+    apiClient.post(`/api/projects/${projectId}/actions/${actionId}/review`, payload),
 
   archive: (
     projectId: string,

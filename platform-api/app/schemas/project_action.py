@@ -7,6 +7,17 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+ACTION_STATUSES = {
+    "pending_review",
+    "not_started",
+    "in_progress",
+    "blocked",
+    "completed",
+    "cancelled",
+    "rejected",
+}
+SUBTASK_STATUSES = {"not_started", "in_progress", "blocked", "completed", "cancelled"}
+
 
 class ProjectActionSubtaskBase(BaseModel):
     title: str = Field(..., min_length=1, max_length=500)
@@ -22,7 +33,7 @@ class ProjectActionSubtaskBase(BaseModel):
     @field_validator("status")
     @classmethod
     def _validate_status(cls, v: str) -> str:
-        allowed = {"not_started", "in_progress", "blocked", "completed", "cancelled"}
+        allowed = SUBTASK_STATUSES
         if v not in allowed:
             raise ValueError(f"status must be one of {allowed}")
         return v
@@ -50,7 +61,7 @@ class ProjectActionSubtaskUpdate(BaseModel):
     def _validate_status(cls, v: str | None) -> str | None:
         if v is None:
             return v
-        allowed = {"not_started", "in_progress", "blocked", "completed", "cancelled"}
+        allowed = SUBTASK_STATUSES
         if v not in allowed:
             raise ValueError(f"status must be one of {allowed}")
         return v
@@ -93,11 +104,17 @@ class ProjectActionBase(BaseModel):
     source_insight_type: str | None = None
     source_insight_title: str | None = None
     source_insight_snapshot: dict[str, Any] | None = None
+    source_surface: str | None = None
+    reviewer_user_id: int | None = None
+    review_due_at: datetime | None = None
+    goal_id: int | None = None
+    primary_metric_id: int | None = None
+    proposal_metadata: dict[str, Any] | None = None
 
     @field_validator("status")
     @classmethod
     def _validate_status(cls, v: str) -> str:
-        allowed = {"not_started", "in_progress", "blocked", "completed", "cancelled"}
+        allowed = ACTION_STATUSES
         if v not in allowed:
             raise ValueError(f"status must be one of {allowed}")
         return v
@@ -125,6 +142,11 @@ class ProjectActionUpdate(BaseModel):
     due_date: datetime | None = None
     percent_complete: int | None = Field(default=None, ge=0, le=100)
     archived_at: datetime | None = None
+    reviewer_user_id: int | None = None
+    review_due_at: datetime | None = None
+    goal_id: int | None = None
+    primary_metric_id: int | None = None
+    proposal_metadata: dict[str, Any] | None = None
     expected_version: int | None = None
 
     @field_validator("status")
@@ -132,7 +154,7 @@ class ProjectActionUpdate(BaseModel):
     def _validate_status(cls, v: str | None) -> str | None:
         if v is None:
             return v
-        allowed = {"not_started", "in_progress", "blocked", "completed", "cancelled"}
+        allowed = ACTION_STATUSES
         if v not in allowed:
             raise ValueError(f"status must be one of {allowed}")
         return v
@@ -160,6 +182,12 @@ class ProjectActionOut(ProjectActionBase):
     completed_at: datetime | None = None
     created_by_user_id: int | None = None
     updated_by_user_id: int | None = None
+    reviewed_by_user_id: int | None = None
+    reviewed_at: datetime | None = None
+    review_note: str | None = None
+    outcome_snapshot: dict[str, Any] | None = None
+    outcome_status: str | None = None
+    outcome_refreshed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None = None
@@ -190,6 +218,19 @@ class ProjectActionListItem(BaseModel):
     source_insight_type: str | None = None
     source_insight_title: str | None = None
     source_insight_snapshot: dict[str, Any] | None = None
+    source_surface: str | None = None
+    reviewer_user_id: int | None = None
+    reviewer_name: str | None = None
+    reviewed_by_user_id: int | None = None
+    reviewed_at: datetime | None = None
+    review_note: str | None = None
+    review_due_at: datetime | None = None
+    goal_id: int | None = None
+    primary_metric_id: int | None = None
+    proposal_metadata: dict[str, Any] | None = None
+    outcome_snapshot: dict[str, Any] | None = None
+    outcome_status: str | None = None
+    outcome_refreshed_at: datetime | None = None
     risk_impact: str | None = None
     active_subtasks: int = 0
     total_subtasks: int = 0
@@ -213,6 +254,7 @@ class ProjectActionGroupSummary(BaseModel):
 
 
 class ProjectActionBoardSummary(BaseModel):
+    pending_review: int = 0
     active: int = 0
     overdue: int = 0
     avg_progress: int = 0
@@ -258,7 +300,7 @@ class ProjectActionBulkUpdate(BaseModel):
     def _validate_status(cls, v: str | None) -> str | None:
         if v is None:
             return v
-        allowed = {"not_started", "in_progress", "blocked", "completed", "cancelled"}
+        allowed = ACTION_STATUSES
         if v not in allowed:
             raise ValueError(f"status must be one of {allowed}")
         return v
@@ -283,6 +325,21 @@ class ProjectActionBulkResultItem(BaseModel):
 
 class ProjectActionBulkResponse(BaseModel):
     results: list[ProjectActionBulkResultItem]
+
+
+class ProjectActionReviewRequest(BaseModel):
+    decision: str
+    note: str | None = Field(default=None, max_length=5000)
+    review_due_at: datetime | None = None
+    expected_version: int | None = None
+
+    @field_validator("decision")
+    @classmethod
+    def _validate_decision(cls, value: str) -> str:
+        allowed = {"accept", "reject", "defer"}
+        if value not in allowed:
+            raise ValueError(f"decision must be one of {allowed}")
+        return value
 
 
 class ProjectActionCommentCreate(BaseModel):

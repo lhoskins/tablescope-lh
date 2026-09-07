@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
-from app.auth.rbac import Role, require_role
+from app.auth.rbac import Role, has_role, require_role
 from app.database import get_db
 from app.models.project_action import ProjectAction, ProjectActionSubtask
 from app.routes.project_actions_shared import (
@@ -30,12 +30,14 @@ from app.routes.project_actions_shared import (
     _validate_owner,
     _validate_priority_value,
     _validate_status_value,
+    _validate_subtask_status_value,
 )
 from app.schemas.project_action import (
     ProjectActionBulkResponse,
     ProjectActionBulkResultItem,
     ProjectActionBulkUpdate,
     ProjectActionOut,
+    ProjectActionReviewRequest,
     ProjectActionSubtaskCreate,
     ProjectActionSubtaskOut,
     ProjectActionSubtaskUpdate,
@@ -43,6 +45,87 @@ from app.schemas.project_action import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects", tags=["project-actions"])
+
+
+@router.post(
+    "/{project_id}/actions/{action_id}/review",
+    response_model=ProjectActionOut,
+)
+async def review_action_proposal(
+    project_id: int,
+    action_id: int,
+    body: ProjectActionReviewRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> ProjectActionOut:
+    """Accept, reject, or defer an AI proposal with human accountability."""
+    project = await _require_project_access(project_id, session, context)
+    action = await _get_action(session, context, project_id, action_id)
+    if context.is_service:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Service identities cannot review AI action proposals",
+        )
+    if action.status != "pending_review":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only pending proposals can be reviewed",
+        )
+    if body.expected_version is not None and action.lock_version != body.expected_version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "This proposal changed while you were reviewing it",
+                "expected_version": body.expected_version,
+                "current_version": action.lock_version,
+            },
+        )
+    is_designated = context.user_id in {action.reviewer_user_id, project.owner_id}
+    if not is_designated and not has_role(context.role, Role.ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the designated reviewer, project owner, or administrator can review this proposal",
+        )
+
+    now = datetime.now(UTC)
+    if body.decision == "defer":
+        if body.review_due_at is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="A follow-up date is required when deferring a proposal",
+            )
+        action.review_due_at = body.review_due_at
+        action.review_note = body.note
+    else:
+        action.reviewed_by_user_id = context.user_id
+        action.reviewed_at = now
+        action.review_note = body.note
+        action.review_due_at = None
+        if body.decision == "accept":
+            action.status = "not_started"
+            action.outcome_status = "pending_execution"
+        else:
+            action.status = "rejected"
+            action.outcome_status = "rejected"
+    action.updated_by_user_id = context.user_id
+    action.lock_version += 1
+    await _audit(
+        session,
+        context=context,
+        event_type={
+            "accept": "project_action_proposal_accepted",
+            "reject": "project_action_proposal_rejected",
+            "defer": "project_action_proposal_deferred",
+        }[body.decision],
+        project_id=project_id,
+        action_id=action.id,
+        title=action.title,
+        payload={"decision": body.decision, "note": body.note},
+    )
+    await session.commit()
+    await session.refresh(action, ["subtasks"])
+    await _after_mutation(session, context, project_id)
+    return ProjectActionOut.model_validate(action)
 
 @router.delete("/{project_id}/actions/{action_id}")
 async def archive_action(
@@ -236,7 +319,7 @@ async def update_subtask(
     if body.description is not None:
         sub.description = body.description.strip() if body.description else None
     if body.status is not None:
-        _validate_status_value(body.status)
+        _validate_subtask_status_value(body.status)
         sub.status = body.status
         if sub.status == "completed":
             sub.percent_complete = 100
@@ -440,6 +523,11 @@ async def bulk_update_actions(
 
         try:
             if body.status is not None:
+                if action.status in ("pending_review", "rejected"):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Use the proposal review action to accept or reject this item",
+                    )
                 _validate_status_value(body.status)
                 _apply_status_transition(action, body.status)
             if body.priority is not None:
@@ -487,4 +575,3 @@ async def bulk_update_actions(
                 await session.refresh(action, ["subtasks"])
     await _after_mutation(session, context, project_id)
     return ProjectActionBulkResponse(results=results)
-

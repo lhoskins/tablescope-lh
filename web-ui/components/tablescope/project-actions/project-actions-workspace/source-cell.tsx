@@ -42,16 +42,18 @@ import {
 
 
 
-export function SourceCell({ item }: { item: ProjectActionListItem }) {
+export function SourceCell({ item, projectId }: { item: ProjectActionListItem; projectId: string }) {
   const title = item.source_insight_title;
   if (!title) {
     return (
       <span className="text-[12px] text-ink-tertiary">{SOURCE_TYPE_LABELS[item.source_type] ?? item.source_type}</span>
     );
   }
-  const href = item.source_insight_id
-    ? `/business-insight/analysis/${encodeURIComponent(item.source_insight_id)}`
-    : undefined;
+  const href = item.source_surface === "project_insight"
+    ? `/projects/${projectId}/insight`
+    : item.source_insight_id
+      ? `/business-insight/analysis/${encodeURIComponent(item.source_insight_id)}`
+      : undefined;
   const content = (
     <span className="inline-flex items-center gap-1 truncate text-[12px]">
       <IconSparkles size={12} className="shrink-0 text-brand-500" />

@@ -50,10 +50,10 @@ export function SummaryCard({
   value: string | number;
   label: string;
   icon: React.ComponentType<{ size?: number; className?: string; stroke?: number }>;
-  tone: "brand" | "danger" | "success";
+  tone: "brand" | "danger" | "success" | "warning";
 }) {
   const toneClass =
-    tone === "brand" ? "text-brand-600" : tone === "danger" ? "text-danger" : "text-success";
+    tone === "brand" ? "text-brand-600" : tone === "danger" ? "text-danger" : tone === "warning" ? "text-warning" : "text-success";
   return (
     <div className="flex flex-col rounded-lg border border-line-tertiary bg-bg-primary p-4">
       <Icon size={20} className={cn("mb-2", toneClass)} stroke={1.5} />

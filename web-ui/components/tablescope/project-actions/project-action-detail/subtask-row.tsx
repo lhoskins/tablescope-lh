@@ -140,7 +140,7 @@ export function SubtaskRow({
             STATUS_COLORS[subtask.status],
           )}
         >
-          {Object.entries(STATUS_BADGE_LABELS).map(([k, label]) => (
+          {Object.entries(STATUS_BADGE_LABELS).filter(([k]) => !["pending_review", "rejected"].includes(k)).map(([k, label]) => (
             <option key={k} value={k}>
               {label}
             </option>
