@@ -21,11 +21,14 @@ import {
 } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { ToastViewport, useToasts } from "@/components/ui/toast";
 import { AskAnythingComposer } from "@/components/ai/ask-anything-composer";
+import { AIDashboardDesigner } from "@/components/tablescope/project/ai-dashboard-designer";
 import { getUserMeta } from "@/lib/auth";
 import { useCurrentUser, useProjectSummaries } from "@/lib/ui/use-shell-data";
 import {
   createConversation,
+  decideArtifactProposal,
   listConversations,
   getConversation,
   submitTurn,
@@ -116,6 +119,7 @@ function AiAssistantPageInner() {
   // AbortController for the in-flight turn so the user can cancel a long-running
   // AI request from the composer.
   const abortControllerRef = useRef<AbortController | null>(null);
+  const { toasts, push, dismiss } = useToasts();
 
   // Read-only: which project the current conversation resolved to. This lets
   // users see (and debug) what the backend chose when a question wasn't
@@ -223,6 +227,10 @@ function AiAssistantPageInner() {
   });
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [dashboardProposal, setDashboardProposal] = useState<{
+    turnId: number;
+    prompt: string;
+  } | null>(null);
 
   const busy = sendMutation.isPending;
 
@@ -395,7 +403,23 @@ function AiAssistantPageInner() {
               <div className="mx-auto max-w-3xl space-y-5">
                 {turns.map((t) => (
                   <div key={t.id} id={`turn-${t.id}`}>
-                    <TurnBubbles turn={t} />
+                    <TurnBubbles
+                      turn={t}
+                      conversationId={activeId ?? undefined}
+                      projectId={
+                        active?.project_id != null
+                          ? String(active.project_id)
+                          : projectId != null
+                            ? String(projectId)
+                            : undefined
+                      }
+                      onReviewDashboard={(turnId, prompt) =>
+                        setDashboardProposal({ turnId, prompt })
+                      }
+                      onArtifactDecision={() => {
+                        if (activeId != null) void invalidateActive(activeId);
+                      }}
+                    />
                   </div>
                 ))}
                 {pendingQuestion && (
@@ -494,6 +518,43 @@ function AiAssistantPageInner() {
         }}
         onCancel={() => setConfirmDeleteId(null)}
       />
+      {(active?.project_id != null || projectId != null) && (
+        <AIDashboardDesigner
+          open={dashboardProposal != null}
+          projectId={String(active?.project_id ?? projectId)}
+          mode="create"
+          initialPrompt={dashboardProposal?.prompt ?? ""}
+          onClose={() => setDashboardProposal(null)}
+          onApplied={(dashboardId) => {
+            const proposal = dashboardProposal;
+            const artifactProjectId = active?.project_id ?? projectId;
+            setDashboardProposal(null);
+            if (artifactProjectId != null) {
+              void queryClient.invalidateQueries({
+                queryKey: ["project", String(artifactProjectId), "dashboards"],
+              });
+            }
+            if (proposal && activeId != null) {
+              void decideArtifactProposal(activeId, proposal.turnId, {
+                decision: "accept",
+                artifact_kind: "dashboard",
+                asset_id: dashboardId,
+              })
+                .then(() => invalidateActive(activeId))
+                .catch((error: unknown) =>
+                  push(
+                    error instanceof Error
+                      ? `Dashboard created, but chat status could not be updated: ${error.message}`
+                      : "Dashboard created, but chat status could not be updated.",
+                    "error",
+                  ),
+                );
+            }
+          }}
+          notify={push}
+        />
+      )}
+      <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </AppShell>
   );
 }

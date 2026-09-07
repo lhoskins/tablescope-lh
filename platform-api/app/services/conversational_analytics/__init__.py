@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -47,6 +48,7 @@ from .intent_classification import _is_document_question as _is_document_questio
 from .intent_classification import _is_investigative_question as _is_investigative_question
 from .intent_classification import _normalize_question as _normalize_question
 from .intent_classification import _prior_turn_state as _prior_turn_state
+from .intent_classification import is_save_existing_query_request
 from .result_profiling import _answer_text, _bound_result, _profile_result, _sql_fingerprint
 from .result_profiling import _column_data_profile as _column_data_profile
 from .result_profiling import _is_period_values as _is_period_values
@@ -59,12 +61,12 @@ generation/execution to the existing ask-and-run core, applies chart-only
 changes as validated structured patches, and persists the conversation state
 so follow-ups can reuse prior successful results.
 
-Intent and chart-format decisions are made by the AI server
-(``/ai/intelligence/conversation-turn``) from the grounded conversation state
-— nothing about the user's phrasing is hardcoded here. This module only
-*validates* what the model returns (renderer-supported chart types, columns
-that actually exist in the result) and provides a minimal degraded-mode
-fallback for when the AI server is disabled or unreachable.
+Analytical and chart-format decisions are made by the AI server
+(``/ai/intelligence/conversation-turn``) from the grounded conversation state.
+Explicit durable-artifact commands are recognized by a small deterministic
+grammar so query/dashboard creation always reaches a confirmation gate, even
+when the AI server is disabled. The platform validates everything the model
+returns and provides a minimal degraded-mode fallback for outages.
 """
 
 
@@ -84,6 +86,58 @@ def _build_explanation(
     if governance:
         exp["governance"] = governance
     return exp
+
+
+def _artifact_title(kind: str, prompt: str) -> str:
+    """Create a concise editable name for a proposed chat artifact."""
+    noun = "dashboard" if kind == "dashboard" else "query"
+    cleaned = re.sub(
+        rf"^\s*(?:(?:please|kindly)\s+)?"
+        rf"(?:(?:can|could|would|will)\s+you\s+|i\s+(?:want|need)\s+you\s+to\s+)?"
+        rf"(?:create|build|generate|make|design|prepare)\s+(?:me\s+)?"
+        rf"(?:a\s+|an\s+|new\s+)?(?:saved\s+)?{noun}\b\s*",
+        "",
+        prompt,
+        count=1,
+        flags=re.IGNORECASE,
+    ).strip(" :-?.")
+    cleaned = re.sub(
+        r"^(?:(?:that|which)\s+)?(?:shows?|showing|returns?|returning|lists?|listing)\s+",
+        "",
+        cleaned,
+        flags=re.I,
+    )
+    cleaned = re.sub(r"^(?:for|of)\s+", "", cleaned, flags=re.I)
+    if not cleaned or re.match(r"^(?:this|that|the\s+(?:result|analysis|answer|sql))\b", cleaned, re.I):
+        return "AI Dashboard" if kind == "dashboard" else "AI Query"
+    title = cleaned[0].upper() + cleaned[1:]
+    return title[:120]
+
+
+def _artifact_proposal(
+    kind: str,
+    prompt: str,
+    *,
+    sql: str | None = None,
+    data_sources: list[str] | None = None,
+) -> dict[str, Any]:
+    """Build the persisted, non-destructive proposal rendered by Chats."""
+    return {
+        "kind": kind,
+        "status": "pending",
+        "title": _artifact_title(kind, prompt),
+        "prompt": prompt,
+        "description": (
+            "Validated against the project data shown above. Saving creates a governed project query."
+            if kind == "query"
+            else "Tablescope will profile project data and show the complete dashboard design before creation."
+        ),
+        "sql": sql if kind == "query" else None,
+        "dataSources": data_sources or [],
+        "createdAt": datetime.now(UTC).isoformat(),
+        "assetId": None,
+        "assetUrl": None,
+    }
 
 
 def _format_context_prompt(project_context: dict[str, Any] | None) -> str:
@@ -428,6 +482,7 @@ async def execute_turn(
     if conversation.last_successful_turn_id is not None:
         prior_turn = await session.get(AnalyticsConversationTurn, conversation.last_successful_turn_id)
     question = turn.user_message
+    raw_question = question
 
     try:
         attachment_context = await build_attachment_context(
@@ -612,6 +667,63 @@ async def execute_turn(
         turn.assistant_message = pre_decision.user_message
         return
 
+    # Dashboard commands create only a durable proposal at this stage.  The
+    # confirmation card opens the existing dashboard designer, where every
+    # query is generated, executed and previewed before the user can apply it.
+    # Nothing is persisted as a dashboard from the chat turn itself.
+    if intent == ConversationalIntent.CREATE_DASHBOARD:
+        turn.explanation = {
+            "generatedAt": datetime.now(UTC).isoformat(),
+            "governance": pre_decision.to_explanation_dict(),
+            "artifactProposal": _artifact_proposal(
+                "dashboard", raw_question
+            ),
+        }
+        turn.result_metadata = {"artifactKind": "dashboard"}
+        turn.assistant_message = (
+            "I prepared a dashboard request. Review the proposed design and "
+            "its validated charts before creating anything."
+        )
+        turn.status = "success"
+        if resolved_project_id is not None:
+            conversation.project_id = resolved_project_id
+        return
+
+    # "Save this result as a query" reuses the preceding executed SQL/result;
+    # it must not ask the model to regenerate a potentially different query.
+    if (
+        intent == ConversationalIntent.CREATE_QUERY
+        and prior_turn is not None
+        and prior_turn.result_cache is not None
+        and prior_turn.sql
+        and is_save_existing_query_request(raw_question)
+    ):
+        turn.sql = prior_turn.sql
+        turn.sql_fingerprint = prior_turn.sql_fingerprint
+        turn.result_cache = prior_turn.result_cache
+        turn.result_metadata = prior_turn.result_metadata
+        turn.chart_config = prior_turn.chart_config
+        turn.datasource_context = prior_turn.datasource_context
+        turn.explanation = _build_explanation(
+            turn.sql,
+            turn.result_cache,
+            turn.chart_config,
+            governance=pre_decision.to_explanation_dict(),
+        )
+        turn.explanation["artifactProposal"] = _artifact_proposal(
+            "query",
+            raw_question,
+            sql=turn.sql,
+            data_sources=list((turn.datasource_context or {}).get("dataSourcesUsed") or []),
+        )
+        turn.assistant_message = (
+            "The previous validated result is ready to save as a governed project query."
+        )
+        turn.status = "success"
+        if resolved_project_id is not None:
+            conversation.project_id = resolved_project_id
+        return
+
     # Phase D: Reference Library / document Q&A bypasses SQL generation.
     # These questions are answered directly from grounded documents and KG context.
     if _is_document_question(question):
@@ -793,6 +905,13 @@ async def execute_turn(
         turn.sql, result_cache, chart_config, governance=post_decision.to_explanation_dict()
     )
     turn.datasource_context = {"dataSourcesUsed": run.get("dataSourcesUsed", [])}
+    if intent == ConversationalIntent.CREATE_QUERY:
+        turn.explanation["artifactProposal"] = _artifact_proposal(
+            "query",
+            raw_question,
+            sql=turn.sql,
+            data_sources=list(run.get("dataSourcesUsed") or []),
+        )
     turn.status = "success"
     if resolved_project_id is not None:
         conversation.project_id = resolved_project_id
