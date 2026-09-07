@@ -462,6 +462,142 @@ async def test_project_workspace_grounds_on_multiple_active_resources(
     assert "Exec Overview" in captured["question"]
 
 
+async def test_project_workspace_names_the_focused_resource_without_dropping_the_rest(
+    client, db_session, service_headers, monkeypatch
+):
+    """The workspace pane the user is reading from is additive context.
+
+    Sending only the focused card would hide the rest of the workspace from the
+    model, and sending only the list leaves it unable to tell which item a
+    question like "what should I fix first?" is about. Both must reach the
+    prompt.
+    """
+    tenant, _, project, headers = await _setup(client, service_headers, "pw-focus")
+
+    from app.models import Dashboard, SavedQuery
+
+    query = SavedQuery(
+        project_id=project["id"],
+        name="Monthly Revenue",
+        description="Revenue by month",
+        sql_text='SELECT * FROM "sales"',
+    )
+    dashboard = Dashboard(
+        project_id=project["id"],
+        tenant_id=tenant["id"],
+        name="Exec Overview",
+        config={"widgets": []},
+    )
+    db_session.add_all([query, dashboard])
+    await db_session.commit()
+    await db_session.refresh(query)
+    await db_session.refresh(dashboard)
+
+    captured: dict = {}
+
+    async def _fake_capture(*args, **kwargs):
+        captured["question"] = kwargs.get("question", "")
+        return {
+            "question": kwargs.get("question", ""),
+            "sql": "SELECT 1",
+            "columns": ["x"],
+            "rows": [{"x": 1}],
+            "suggestedVisualization": {"type": "bar", "title": "x"},
+            "explanation": "ok",
+            "dataSourcesUsed": [],
+            "status": "success",
+            "error": None,
+        }
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core", _fake_capture
+    )
+
+    r = await client.post(
+        "/api/conversational-analytics/canonical-turns",
+        json={
+            "surface": "project_workspace",
+            "project_id": project["id"],
+            # Deliberately the same phrasing as the sibling test above: the
+            # intent classifier routes other wordings (an investigative "what
+            # should I fix first?") down a path that never reaches
+            # _ask_and_run_core, so the capture hook below would see nothing
+            # and the assertions would pass vacuously.
+            "message": "Summarize my workspace",
+            "client_request_id": "req-focus",
+            "active_resources": [
+                {"resource_type": "table", "resource_id": query.id},
+                {"resource_type": "dashboard", "resource_id": dashboard.id},
+            ],
+            "focused_resource": {"resource_type": "dashboard", "resource_id": dashboard.id},
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    question = captured["question"]
+    # The whole workspace is still listed...
+    assert "Monthly Revenue" in question
+    assert "Exec Overview" in question
+    # ...and the model is told which one the user is actually reading.
+    assert "the user is currently looking at Exec Overview" in question
+
+
+async def test_project_workspace_focus_outside_the_active_set_is_ignored(
+    client, db_session, service_headers, monkeypatch
+):
+    """A focus that isn't among the resolved cards must not invent a claim.
+
+    The focus line names an item the model was given; pointing it at something
+    unresolved (deleted, or from another project) would assert the user is
+    reading something the prompt never described.
+    """
+    tenant, _, project, headers = await _setup(client, service_headers, "pw-focus-bad")
+
+    from app.models import SavedQuery
+
+    query = SavedQuery(project_id=project["id"], name="Monthly Revenue", sql_text="SELECT 1")
+    db_session.add(query)
+    await db_session.commit()
+    await db_session.refresh(query)
+
+    captured: dict = {}
+
+    async def _fake_capture(*args, **kwargs):
+        captured["question"] = kwargs.get("question", "")
+        return {
+            "question": kwargs.get("question", ""),
+            "sql": "SELECT 1",
+            "columns": ["x"],
+            "rows": [{"x": 1}],
+            "suggestedVisualization": {"type": "bar", "title": "x"},
+            "explanation": "ok",
+            "dataSourcesUsed": [],
+            "status": "success",
+            "error": None,
+        }
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core", _fake_capture
+    )
+
+    r = await client.post(
+        "/api/conversational-analytics/canonical-turns",
+        json={
+            "surface": "project_workspace",
+            "project_id": project["id"],
+            "message": "Summarize my workspace",
+            "client_request_id": "req-focus-bad",
+            "active_resources": [{"resource_type": "table", "resource_id": query.id}],
+            "focused_resource": {"resource_type": "dashboard", "resource_id": 999999},
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    # Guard against a vacuous pass: the hook must actually have run.
+    assert "Monthly Revenue" in captured["question"]
+    assert "currently looking at" not in captured["question"]
+
+
 async def test_project_workspace_active_resource_from_another_project_is_ignored(
     client, db_session, service_headers, monkeypatch
 ):

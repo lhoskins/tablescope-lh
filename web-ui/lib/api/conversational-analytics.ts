@@ -129,6 +129,14 @@ export interface SubmitCanonicalTurnRequest {
     resource_type: WorkspaceResourceType;
     resource_id: number;
   }[];
+  /** Which of `active_resources` the user is reading right now -- the card open
+   *  in the workspace's Preview pane. Additive to the list, not a replacement:
+   *  the assistant answers about this item by default while still seeing the
+   *  rest of the workspace for context. */
+  focused_resource?: {
+    resource_type: WorkspaceResourceType;
+    resource_id: number;
+  };
 }
 
 export interface SubmitCanonicalTurnResponse {

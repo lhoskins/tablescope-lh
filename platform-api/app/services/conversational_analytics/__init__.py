@@ -123,12 +123,21 @@ def _format_context_prompt(project_context: dict[str, Any] | None) -> str:
 
 def _format_active_resource_prompt(
     active_resources: list[ActiveResourceContext] | None,
+    focused_resource: ActiveResourceContext | None = None,
 ) -> str:
     """Return a short grounding block for the workspace's active items.
 
     A named workspace pins several cards at once, so every resolved card is
     listed. The assistant keeps full project access; this only narrows its
-    default focus."""
+    default focus.
+
+    ``focused_resource`` is the one the user is actually reading -- a document
+    open in the workspace's preview pane, say. Without it the model gets the
+    whole set as undifferentiated peers, so a question like "what should I fix
+    first?" is as likely to be answered about a table the user isn't looking
+    at. Naming the focus keeps the rest of the workspace available for
+    cross-referencing while pointing the default interpretation at the item in
+    front of them."""
     if not active_resources:
         return ""
     if len(active_resources) == 1:
@@ -142,6 +151,14 @@ def _format_active_resource_prompt(
             "The user currently has these items open in this project workspace:\n"
             f"{lines}\n"
         )
+    if focused_resource is not None and len(active_resources) > 1:
+        # Descriptive, not imperative. An earlier version added "Answer about
+        # that item unless the question says otherwise" -- and because this
+        # block is prepended to the question the classifier sees, those
+        # instructions changed the detected intent and routed turns away from
+        # the SQL path entirely. State the fact and let the model weigh it, the
+        # way the rest of this block does.
+        body += f"Of those, the user is currently looking at {focused_resource.label}.\n"
     return f"--- Active workspace items ---\n{body}--- End active workspace items ---"
 
 
@@ -417,6 +434,7 @@ async def execute_turn(
     datasource_id: int | None = None,
     attachment_ids: list[int] | None = None,
     active_resources: list[ActiveResourceContext] | None = None,
+    focused_resource: ActiveResourceContext | None = None,
 ) -> None:
     """Execute a single turn and mutate its persisted fields in place.
 
@@ -473,7 +491,7 @@ async def execute_turn(
         question = f"{attachment_context}\n\n{question}"
         sql_question = f"{attachment_context}\n\n{sql_question}"
 
-    active_resource_prompt = _format_active_resource_prompt(active_resources)
+    active_resource_prompt = _format_active_resource_prompt(active_resources, focused_resource)
     if active_resource_prompt:
         # Same pattern as attachment_context above: the active workspace items
         # ground the model's prompts only, never the persisted user message.

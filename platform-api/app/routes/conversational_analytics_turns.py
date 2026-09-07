@@ -132,6 +132,11 @@ class SubmitCanonicalTurnRequest(BaseModel):
     # A named workspace pins several cards at once. When present this list
     # supersedes the single pair above, which stays for existing callers.
     active_resources: list[ActiveResourceRef] | None = Field(default=None)
+    # Which of the active_resources the user is actually reading -- the card
+    # open in the workspace's preview pane. Additive to the list rather than a
+    # replacement for it: the assistant answers about this item by default and
+    # still sees the others for context.
+    focused_resource: ActiveResourceRef | None = Field(default=None)
 
 
 class SubmitCanonicalTurnResponse(BaseModel):
@@ -175,6 +180,11 @@ async def submit_canonical_turn(
             active_resources=(
                 [(r.resource_type, r.resource_id) for r in req.active_resources]
                 if req.active_resources
+                else None
+            ),
+            focused_resource=(
+                (req.focused_resource.resource_type, req.focused_resource.resource_id)
+                if req.focused_resource
                 else None
             ),
         )

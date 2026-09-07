@@ -142,6 +142,7 @@ async def append_canonical_turn(
     active_resource_type: str | None = None,
     active_resource_id: int | None = None,
     active_resources: list[tuple[str | None, int | None]] | None = None,
+    focused_resource: tuple[str | None, int | None] | None = None,
 ) -> CanonicalTurnResult:
     """Append one turn to the canonical Insight thread for this scope.
 
@@ -237,12 +238,26 @@ async def append_canonical_turn(
     # active_resource_type/id pair is the one-card case of that list.
     requested_resources = active_resources or [(active_resource_type, active_resource_id)]
     resolved_resources: list[ActiveResourceContext] = []
+    resolved_focus: ActiveResourceContext | None = None
     if surface == CanonicalConversationSurface.PROJECT_WORKSPACE and project_id is not None:
         resolved_resources = await resolve_active_resource_contexts(
             session,
             project_id=project_id,
             resources=requested_resources,
         )
+        # The focus is which of those the user is reading right now, not a
+        # replacement for the set -- both reach the prompt so the assistant can
+        # answer about the open item while still seeing the rest.
+        if focused_resource is not None:
+            focus_type, focus_id = focused_resource
+            resolved_focus = next(
+                (
+                    r
+                    for r in resolved_resources
+                    if r.resource_type == focus_type and r.resource_id == focus_id
+                ),
+                None,
+            )
 
     await execute_turn(
         session,
@@ -252,6 +267,7 @@ async def append_canonical_turn(
         datasource_id=data_source_id,
         attachment_ids=attachment_ids or [],
         active_resources=resolved_resources,
+        focused_resource=resolved_focus,
     )
 
     if turn.status == "success":
