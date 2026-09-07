@@ -1161,6 +1161,34 @@ async def rebuild_project_insights_cards(
         snap.payload = payload
         snap.is_stale = False
         await session.commit()
+
+        try:
+            from app.models import KnowledgeGraph
+            from app.services.ai_action_proposals import sync_ai_action_proposals
+
+            graph = await session.scalar(
+                select(KnowledgeGraph).where(
+                    KnowledgeGraph.tenant_id == tenant_id,
+                    KnowledgeGraph.project_id == project_id,
+                )
+            )
+            await sync_ai_action_proposals(
+                session,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                user_id=user_id,
+                cards=cards,
+                source_surface="project_insight",
+                kg_version_id=graph.active_version_id if graph else None,
+            )
+        except Exception:
+            logger.exception(
+                "AI action proposal sync failed for project %s user %s",
+                project_id,
+                user_id,
+            )
+            await session.rollback()
+
         return {"status": "ok", "project_id": project_id}
 
 

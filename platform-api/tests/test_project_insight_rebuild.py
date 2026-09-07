@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.auth.jwt import create_access_token
 from app.config import get_settings
 from app.models import AIProjectGraphNode, Project, Tenant, User
+from app.models.project_action import ProjectActionSubtask
 from app.models.project_asset import ProjectAsset
 from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
 from app.schemas.project_insight import ProjectInsightProject, ProjectInsightResponse
@@ -752,3 +753,92 @@ async def test_rebuild_project_insights_cards_success_clears_stale(
     await db_session.refresh(snap)
     assert snap.is_stale is False
     assert snap.payload["insights"][0]["title"] == "new"
+
+
+async def test_rebuild_project_insights_cards_syncs_ai_action_proposals(
+    db_engine, db_session, monkeypatch
+):
+    """The ``insights`` suite rebuild is what actually produces the
+    risk/trend/opportunity cards shown on the Project Insight page (the
+    ``project_insight`` suite only backs header metadata) -- so this is the
+    job that must ground AI action proposals against those cards, the same
+    way ``rebuild_project_insight`` and ``business_insight_cache.store_result``
+    already do for their own suites."""
+    import app.routes.home_intelligence_suite as hir_suite
+    import app.tasks.workflows as workflows
+    from app.models.project_action import ProjectAction
+
+    _bind_sessions(monkeypatch, db_engine)
+    tenant, user = await _tenant_user(db_session, "cards-proposal-sync")
+    project = await _project(db_session, tenant.id, user.id, "cards-proposal-sync")
+
+    snap = ProjectIntelligenceSnapshot(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        project_id=project.id,
+        suite="insights",
+        payload={"insights": []},
+        is_stale=True,
+    )
+    db_session.add(snap)
+    await db_session.commit()
+
+    async def spy_run_for_project(*args, **kwargs):
+        return [
+            {
+                "insightId": "risk-capex",
+                "insightType": "risk",
+                "title": "Unapproved capex totals >$7.2M vs $2.7M approved",
+                "summary": "Capex commitments have outpaced approvals.",
+                "callout": {
+                    "type": "risk",
+                    "text": "Unapproved capex totals >$7.2M vs $2.7M approved",
+                },
+                "severity": "critical",
+            }
+        ]
+
+    monkeypatch.setattr(hir_suite, "_run_for_project", spy_run_for_project)
+
+    async def fake_draft(**_kwargs):
+        return {
+            "title": "Bring unapproved capex back within budget",
+            "description": "Review and remediate the capex overage.",
+            "priority": "high",
+            "subtasks": [
+                {"title": "Audit unapproved capex commitments"},
+                {"title": "Escalate for retroactive approval or reversal"},
+            ],
+        }
+
+    monkeypatch.setattr(
+        "app.services.ai_action_proposals.generate_action_draft", fake_draft
+    )
+
+    result = await workflows.rebuild_project_insights_cards(
+        {"job_try": 1},
+        tenant_id=tenant.id,
+        user_id=user.id,
+        project_id=project.id,
+        granularity=3,
+    )
+    assert result == {"status": "ok", "project_id": project.id}
+
+    proposals = (
+        await db_session.scalars(
+            select(ProjectAction).where(ProjectAction.project_id == project.id)
+        )
+    ).all()
+    assert len(proposals) == 1
+    proposal = proposals[0]
+    assert proposal.status == "pending_review"
+    assert proposal.source_surface == "project_insight"
+    assert proposal.source_insight_id == "risk-capex"
+    subtasks = (
+        await db_session.scalars(
+            select(ProjectActionSubtask).where(
+                ProjectActionSubtask.action_id == proposal.id
+            )
+        )
+    ).all()
+    assert len(subtasks) == 2
