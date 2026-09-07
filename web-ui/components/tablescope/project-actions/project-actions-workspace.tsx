@@ -487,7 +487,7 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
             <IconLoader2 className="mr-2 animate-spin" size={20} />
             Loading actions…
           </div>
-        ) : viewItems.length === 0 ? (
+        ) : viewItems.length === 0 && (prefs.view === "timeline" || !addingGroup) ? (
           <div className="flex h-48 flex-col items-center justify-center rounded-lg border border-dashed border-line-tertiary text-ink-secondary">
             <IconClipboardList size={32} stroke={1.2} />
             <p className="mt-2 text-[13px]">No actions match the current filters.</p>
