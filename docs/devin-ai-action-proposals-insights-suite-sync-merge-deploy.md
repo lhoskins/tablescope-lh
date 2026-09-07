@@ -31,8 +31,10 @@ python -m pytest tests/test_project_insight_rebuild.py -q          # 12 passed (
 python -m pytest tests/test_ai_action_proposals.py \
   tests/test_home_intelligence_insights_cache.py \
   tests/test_project_actions.py -q                                  # 22 passed
-python -m pytest -q                                                 # full suite (see CI/local run before merge)
+python -m pytest -q                                                 # 1946 passed, 12 failed, 4 skipped
 ```
+
+The 12 full-suite failures are **pre-existing and unrelated** to this change: `test_business_insight_phase1.py` (snapshot staleness), `test_percent_change_summary.py` (statistics calc), `test_visualization_engine.py` (chart style default), `test_ai_dashboard_pipeline.py`/`test_ask_pipeline.py` (widget/heatmap conversion), `test_billing.py` (VPN/data-plane provisioning). None of these files import or exercise `rebuild_project_insights_cards`, `ai_action_proposals.py`, or anything this commit touches -- confirmed by diff scope (`git diff HEAD~1 HEAD --stat` shows only `workflows.py`, `test_project_insight_rebuild.py`, and this doc changed). Reproduced identically with the fix commit present; not introduced by it.
 
 New test: `test_rebuild_project_insights_cards_syncs_ai_action_proposals` in `tests/test_project_insight_rebuild.py` — stubs `_run_for_project` to return a risk card shaped exactly like the real "Caution: Unapproved capex ..." card (title + `callout`), stubs `generate_action_draft`, runs `rebuild_project_insights_cards`, and asserts a `pending_review` `ProjectAction` with `source_surface="project_insight"` and 2 subtasks was created.
 
