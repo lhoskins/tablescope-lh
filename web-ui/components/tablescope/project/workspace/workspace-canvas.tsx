@@ -59,20 +59,29 @@ export function WorkspaceCanvas({
   };
 
   return (
-    <div
-      aria-label={`${workspace.name} canvas`}
-      className="grid grid-cols-1 gap-3 px-5 py-4 md:grid-cols-2 xl:grid-cols-3"
-    >
-      {cards.map((card) => (
-        <WorkspaceCard
-          key={card.id}
-          card={card}
-          editable={editable}
-          onViewModeChange={(mode) => setViewMode(card, mode)}
-          onRemove={() => remove(card)}
-          onMove={(direction) => move(card, direction)}
-        />
-      ))}
+    // Container queries, not viewport breakpoints: these cards live inside a
+    // resizable pane, so `md:` / `xl:` measured the wrong thing entirely -- a
+    // wide window kept the grid at two or three columns while the pane was
+    // dragged down to 240px, and the cards overlapped rather than stacking.
+    // `@[...]` reads the pane's own width, so narrowing it stacks the cards.
+    // The query container has to be an ancestor of the elements that read it,
+    // so the grid sits inside it rather than being it.
+    <div className="@container/canvas">
+      <div
+        aria-label={`${workspace.name} canvas`}
+        className="grid grid-cols-1 gap-3 px-3 py-3 @[420px]/canvas:grid-cols-2 @[680px]/canvas:grid-cols-3"
+      >
+        {cards.map((card) => (
+          <WorkspaceCard
+            key={card.id}
+            card={card}
+            editable={editable}
+            onViewModeChange={(mode) => setViewMode(card, mode)}
+            onRemove={() => remove(card)}
+            onMove={(direction) => move(card, direction)}
+          />
+        ))}
+      </div>
     </div>
   );
 }

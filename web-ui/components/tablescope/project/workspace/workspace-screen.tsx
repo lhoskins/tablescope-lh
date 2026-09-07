@@ -14,9 +14,34 @@ import {
   type Workspace,
   type WorkspaceCard,
 } from "@/lib/api/workspaces";
+import { WorkspaceActionsPane } from "./workspace-actions-pane";
+import { WorkspaceFilesPane } from "./workspace-files-pane";
 import { WorkspaceAddCard, type AddableResource } from "./workspace-add-card";
-import { WorkspaceCanvas, toCardPatch } from "./workspace-canvas";
+import { toCardPatch } from "./workspace-canvas";
+import { PaneViewsToggle, WorkspacePanes, type PaneSpec } from "./workspace-panes";
+import { usePaneLayout } from "./use-pane-layout";
 import { WorkspaceTabBar } from "./workspace-tab-bar";
+
+/** A dead network request surfaces as the browser's own wording -- "Load
+ *  failed" in Safari, "Failed to fetch" in Chrome -- which tells the user
+ *  nothing about what failed. Swap those for something actionable and keep any
+ *  message the API itself bothered to send. */
+function friendlyError(err: unknown, fallback: string): string {
+  const message = err instanceof Error ? err.message.trim() : "";
+  if (!message || /^(load failed|failed to fetch|networkerror.*)$/i.test(message)) {
+    return fallback;
+  }
+  return message;
+}
+
+/** Stand-in for drawer content until the metadata and chat panes land. */
+function DrawerPlaceholder({ text }: { text: string }) {
+  return (
+    <p className="px-3 py-4 text-center text-[12px] leading-relaxed text-ink-tertiary">
+      {text}
+    </p>
+  );
+}
 
 export function WorkspaceScreen({ projectId }: { projectId: string }) {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -25,6 +50,9 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
   const currentUserId = getUserMeta()?.user_id ?? null;
+  // Owned here rather than inside WorkspacePanes: the Pane Views swatches sit
+  // up in the workspace tab bar and toggle the same layout the panes read.
+  const paneLayout = usePaneLayout(projectId);
 
   useEffect(() => {
     let cancelled = false;
@@ -35,7 +63,11 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
         setWorkspaces(list);
         setActiveId((current) => current ?? list[0]?.id ?? null);
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load workspaces.");
+        if (!cancelled) {
+          setError(
+            friendlyError(err, "Couldn't load workspaces. Is the API running?"),
+          );
+        }
       }
     }
     void load();
@@ -57,7 +89,7 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
       setWorkspaces((prev) => [...prev, created]);
       setActiveId(created.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create the workspace.");
+      setError(friendlyError(err, "Could not create the workspace."));
     } finally {
       setCreating(false);
     }
@@ -75,7 +107,7 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
         setWorkspaces((prev) => prev.map((w) => (w.id === saved.id ? saved : w)));
       } catch (err) {
         setWorkspaces((prev) => prev.map((w) => (w.id === previous.id ? previous : w)));
-        setError(err instanceof Error ? err.message : "Could not save the workspace.");
+        setError(friendlyError(err, "Could not save the workspace."));
       }
     },
     [active, projectId],
@@ -84,6 +116,14 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
   const onAdd = useCallback(
     (resource: AddableResource) => {
       if (!active) return;
+      // Dropping the same resource twice is easy to do by accident, and the
+      // second card would be an exact duplicate of the first.
+      const alreadyPinned = active.cards.some(
+        (card) =>
+          card.resource_type === resource.resource_type &&
+          card.resource_id === resource.resource_id,
+      );
+      if (alreadyPinned) return;
       const next: WorkspaceCard[] = [
         ...active.cards,
         {
@@ -110,7 +150,7 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
         setWorkspaces((prev) => prev.map((w) => (w.id === saved.id ? saved : w)));
       } catch (err) {
         setWorkspaces((prev) => prev.map((w) => (w.id === previous.id ? previous : w)));
-        setError(err instanceof Error ? err.message : "Could not rename the workspace.");
+        setError(friendlyError(err, "Could not rename the workspace."));
       }
     },
     [projectId, workspaces],
@@ -122,7 +162,7 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
         const saved = await publishWorkspace(projectId, workspaceId);
         setWorkspaces((prev) => prev.map((w) => (w.id === saved.id ? saved : w)));
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Could not publish the workspace.");
+        setError(friendlyError(err, "Could not publish the workspace."));
       }
     },
     [projectId],
@@ -134,7 +174,7 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
         const saved = await unpublishWorkspace(projectId, workspaceId);
         setWorkspaces((prev) => prev.map((w) => (w.id === saved.id ? saved : w)));
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Could not unpublish the workspace.");
+        setError(friendlyError(err, "Could not unpublish the workspace."));
       }
     },
     [projectId],
@@ -156,19 +196,94 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
         return next;
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not delete the workspace.");
+      setError(friendlyError(err, "Could not delete the workspace."));
     }
   }, [pendingDeleteId, projectId]);
+
+  const panes: PaneSpec[] = [
+    {
+      id: "files",
+      title: "Documents",
+      // "+ Add card" belongs in the pane's menu bar, not above the cards where
+      // it pushed the list down.
+      actions:
+        active && isOwner ? (
+          <WorkspaceAddCard projectId={projectId} cards={active.cards} onAdd={onAdd} />
+        ) : undefined,
+      body: (
+        <WorkspaceFilesPane
+          workspace={active}
+          editable={isOwner}
+          // Errors live inside the pane: as a block above the row they shoved
+          // all the panes down the screen.
+          error={error}
+          onAdd={onAdd}
+          onCardsChange={(cards) => void onCardsChange(cards)}
+        />
+      ),
+      info: <DrawerPlaceholder text="Metadata for the selected document appears here." />,
+      chat: <DrawerPlaceholder text="Ask about the documents in this workspace." />,
+      onSendChatToPane: () => undefined,
+    },
+    {
+      id: "preview",
+      title: "Preview",
+      body: (
+        <p className="flex flex-1 items-center justify-center px-5 text-center text-[12px] leading-relaxed text-ink-tertiary">
+          Select a document or table in Documents
+          <br />
+          to preview it here.
+        </p>
+      ),
+      info: <DrawerPlaceholder text="Metadata for the previewed item appears here." />,
+      chat: <DrawerPlaceholder text="Ask about the item shown in Preview." />,
+      onSendChatToPane: () => undefined,
+    },
+    {
+      id: "chat",
+      title: "Chat",
+      body: (
+        <p className="flex flex-1 items-center justify-center px-5 text-center text-[12px] leading-relaxed text-ink-tertiary">
+          Ask about the documents
+          <br />
+          loaded into this workspace.
+        </p>
+      ),
+    },
+    {
+      id: "notes",
+      title: "Notes",
+      body: (
+        <p className="flex flex-1 items-center justify-center px-5 text-center text-[12px] leading-relaxed text-ink-tertiary">
+          Select text in any pane
+          <br />
+          and choose <strong className="font-semibold">→ Notes</strong>.
+        </p>
+      ),
+    },
+    {
+      id: "actions",
+      title: "Actions",
+      body: <WorkspaceActionsPane projectId={projectId} workspaceId={activeId} />,
+      chat: <DrawerPlaceholder text="Ask the assistant about these actions." />,
+      onSendChatToPane: () => undefined,
+    },
+  ];
 
   return (
     <ProjectShell
       projectId={projectId}
       activeNav="workspace"
       showResourceTabs={false}
-      assistantDefaultOpen
-      assistantWorkspaceCards={active?.cards ?? null}
+      // The panes own the full height, and the Chat pane carries the chat that
+      // used to live in the docked assistant.
+      scrollable={false}
+      showAssistant={false}
     >
-      <div className="-mx-5 flex flex-col">
+      {/* The shell pads content by 20px on every side. The tab strip is chrome
+          rather than content, so it wants to sit closer to the nav above it:
+          cancel the horizontal padding entirely and most of the top. */}
+      <div className="-mx-5 -mt-3 flex h-full min-h-0 flex-col">
         <WorkspaceTabBar
           workspaces={workspaces}
           activeWorkspaceId={activeId}
@@ -180,6 +295,7 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
           onPublish={(id) => void onPublish(id)}
           onUnpublish={(id) => void onUnpublish(id)}
           onDelete={requestDelete}
+          trailing={<PaneViewsToggle layout={paneLayout} panes={panes} />}
         />
         <ConfirmDialog
           open={pendingDeleteId != null}
@@ -189,19 +305,9 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
           onConfirm={() => void confirmDelete()}
           onCancel={() => setPendingDeleteId(null)}
         />
-        {error && (
-          <p className="px-5 pt-3 text-[13px] text-red-700" role="alert">
-            {error}
-          </p>
-        )}
-        {active && isOwner && (
-          <WorkspaceAddCard projectId={projectId} cards={active.cards} onAdd={onAdd} />
-        )}
-        <WorkspaceCanvas
-          workspace={active}
-          editable={isOwner}
-          onCardsChange={(cards) => void onCardsChange(cards)}
-        />
+        <div className="flex min-h-0 flex-1 flex-col px-3 py-3">
+          <WorkspacePanes layout={paneLayout} panes={panes} />
+        </div>
       </div>
     </ProjectShell>
   );

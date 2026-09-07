@@ -244,10 +244,18 @@ describe("DataSourcesScreen", () => {
     await waitFor(() =>
       expect(preflightDelete).toHaveBeenCalledWith(archivedFile),
     );
-    const dialog = screen.getByRole("heading", {
-      name: 'Delete "sales.csv"?',
-    }).parentElement as HTMLElement;
-    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    // The confirm button is `disabled={busy || !safe}`, and `safe` only turns
+    // true once the preflight *response* lands -- being called isn't enough.
+    // Wait for it to go live instead of clicking into that disabled window.
+    const confirm = await waitFor(() => {
+      const dialog = screen.getByRole("heading", {
+        name: 'Delete "sales.csv"?',
+      }).parentElement as HTMLElement;
+      const button = within(dialog).getByRole("button", { name: "Delete" });
+      expect(button).toBeEnabled();
+      return button;
+    });
+    fireEvent.click(confirm);
     await waitFor(() => expect(deleteSource).toHaveBeenCalledWith(archivedFile));
   });
 

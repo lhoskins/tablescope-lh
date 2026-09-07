@@ -60,9 +60,12 @@ describe("WorkspaceCanvas", () => {
   });
 });
 
+/** Find a control by its accessible name. The view-mode buttons render as
+ *  single letters (C/R/F) so they fit a narrow pane, but each still announces
+ *  its full name -- which is what a user (and a screen reader) goes by. */
 function within(container: HTMLElement, label: string): HTMLElement {
   const match = Array.from(container.querySelectorAll("button")).find(
-    (button) => button.textContent === label,
+    (button) => button.getAttribute("aria-label") === label,
   );
   if (!match) throw new Error(`No button labelled ${label}`);
   return match;

@@ -21,6 +21,8 @@ import {
   useProjectQueries,
 } from "@/lib/ui/use-project-data";
 import { loadWorkspaceTabs } from "@/components/tablescope/project/workspace/workspace-tabs-storage";
+import { setResourceDragData } from "@/components/tablescope/project/workspace/workspace-drag";
+import type { AddableResource } from "@/components/tablescope/project/workspace/workspace-add-card";
 import type { ProjectSummary } from "@/lib/ui/types";
 
 /**
@@ -179,6 +181,11 @@ function ProjectAssetTree({ projectId }: { projectId: string }) {
     key: `table:${q.id}`,
     label: q.name,
     href: `/projects/${projectId}/queries?q=${q.id}`,
+    drag: {
+      resource_type: "table" as const,
+      resource_id: String(q.id),
+      label: q.name,
+    },
   });
   const tables = queries ?? [];
   const manualTables = tables.filter((q) => !q.ai_generated);
@@ -215,6 +222,11 @@ function ProjectAssetTree({ projectId }: { projectId: string }) {
           key: `document:${d.id}`,
           label: d.title,
           href: `/projects/${projectId}/documents?doc=${d.id}`,
+          drag: {
+            resource_type: "document" as const,
+            resource_id: String(d.id),
+            label: d.title,
+          },
         }))}
         openTabKeys={openTabKeys}
       />
@@ -226,6 +238,18 @@ function ProjectAssetTree({ projectId }: { projectId: string }) {
           key: `data_source:${typeof d.id === "number" ? d.id : d.lifecycleId}`,
           label: d.fileName,
           href: `/projects/${projectId}/data-sources?ds=${encodeURIComponent(d.lifecycleId)}`,
+          // Only numeric-id sources resolve as a workspace card -- the backend
+          // looks the id up as a DatabaseDataSource, so a file source's
+          // lifecycle id would pin a card that can never load. Same rule the
+          // "+ Add card" list applies.
+          drag:
+            typeof d.id === "number"
+              ? {
+                  resource_type: "data_source" as const,
+                  resource_id: String(d.id),
+                  label: d.fileName,
+                }
+              : undefined,
         }))}
         openTabKeys={openTabKeys}
       />
@@ -233,7 +257,15 @@ function ProjectAssetTree({ projectId }: { projectId: string }) {
   );
 }
 
-type AssetItem = { key: string; label: string; href: string };
+type AssetItem = {
+  key: string;
+  label: string;
+  href: string;
+  /** Present when this row can be dragged into a workspace pane. Omitted for
+   *  resources a workspace card can't resolve -- see the data-source note in
+   *  `ProjectAssetTree`. */
+  drag?: AddableResource;
+};
 
 function AssetGroup({
   label,
@@ -307,8 +339,21 @@ function AssetLink({
   return (
     <Link
       href={item.href}
+      // Draggable straight into the Workspace's Documents pane. Links are
+      // natively draggable as URLs, so rows without a resource payload are
+      // explicitly opted out -- otherwise dragging one would look like it
+      // should work and then quietly do nothing.
+      draggable={item.drag != null}
+      onDragStart={(event) => {
+        if (!item.drag) {
+          event.preventDefault();
+          return;
+        }
+        setResourceDragData(event.dataTransfer, item.drag);
+      }}
       className={cn(
         "block truncate rounded px-1.5 py-1 text-[12px]",
+        item.drag && "cursor-grab active:cursor-grabbing",
         openTabKeys.has(item.key)
           ? "font-medium text-brand-500"
           : "text-ink-secondary hover:bg-bg-secondary hover:text-ink-primary",

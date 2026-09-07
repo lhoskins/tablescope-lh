@@ -60,6 +60,192 @@ const createdProjects: Array<Record<string, unknown>> = [];
 let nextUploadId = 5000;
 let nextDataSourceId = 200;
 
+// ── Workspaces ───────────────────────────────────────────────────────────
+// The Workspace screen is unusable without these: listWorkspaces() throwing
+// leaves the tab strip empty and every pane with nothing to render. Kept as a
+// mutable in-memory list so create/rename/publish/delete/pin all behave for a
+// whole session, rather than snapping back to a canned response.
+// Shapes: lib/api/workspaces.ts (Workspace, WorkspaceCard).
+const MOCK_USER_ID = 1;
+let nextWorkspaceId = 10;
+let nextWorkspaceCardId = 100;
+
+function mockWorkspaceCard(
+  resource_type: string,
+  resource_id: string,
+  label: string,
+  position: number,
+): Record<string, unknown> {
+  return {
+    id: nextWorkspaceCardId++,
+    resource_type,
+    resource_id,
+    view_mode: "card",
+    position,
+    added_at: new Date().toISOString(),
+    label,
+  };
+}
+
+const mockWorkspaces: Array<Record<string, unknown>> = [
+  {
+    id: 1,
+    tenant_id: 1,
+    project_id: 1,
+    owner_user_id: MOCK_USER_ID,
+    name: "Cost review",
+    visibility: "private",
+    published_at: null,
+    created_at: new Date(Date.now() - 864e5 * 3).toISOString(),
+    updated_at: new Date().toISOString(),
+    // Workspaces start empty on purpose: cards arrive by dragging a resource
+    // in from the sidebar or via "+ Add card". Pre-seeding them made the
+    // preview misrepresent the flow.
+    cards: [],
+  },
+  {
+    id: 2,
+    tenant_id: 1,
+    project_id: 1,
+    owner_user_id: MOCK_USER_ID,
+    name: "Vendor spend",
+    visibility: "shared_project",
+    published_at: new Date(Date.now() - 864e5).toISOString(),
+    created_at: new Date(Date.now() - 864e5 * 6).toISOString(),
+    updated_at: new Date().toISOString(),
+    cards: [],
+  },
+];
+
+function findMockWorkspace(url: string): Record<string, unknown> | undefined {
+  const id = Number(/\/workspaces\/(\d+)/.exec(url)?.[1]);
+  return mockWorkspaces.find((w) => w.id === id);
+}
+
+// ── Project tables + documents ───────────────────────────────────────────
+// Backs the sidebar asset tree, the workspace "+ Add Files" catalog and the
+// preview pane. Shapes: lib/ui/use-project-data/{saved-query,project-asset}.ts
+function mockSavedQuery(
+  id: number,
+  name: string,
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id,
+    project_id: 1,
+    owner_id: MOCK_USER_ID,
+    name,
+    description: null,
+    left_datasource: null,
+    right_datasource: null,
+    join_type: null,
+    left_column: null,
+    right_column: null,
+    sql_text: `SELECT * FROM ${name} LIMIT 100`,
+    ai_generated: false,
+    is_shared: false,
+    run_count: 3,
+    last_run_at: new Date().toISOString(),
+    avg_runtime_ms: 240,
+    is_archived: false,
+    archived_at: null,
+    created_at: new Date(Date.now() - 864e5 * 4).toISOString(),
+    updated_at: new Date().toISOString(),
+    owner_name: "Design Preview",
+    origin: "manual",
+    origin_label: "Manual",
+    source_name: "OpenAI_CSV",
+    has_outgoing_scope: false,
+    outgoing_scope_count: 0,
+    has_incoming_scope: false,
+    incoming_scope_count: 0,
+    has_active_scope: false,
+    active_scope_count: 0,
+    ...overrides,
+  };
+}
+
+const projectQueries: Array<Record<string, unknown>> = [
+  mockSavedQuery(3001, "openai_export_invoice"),
+  mockSavedQuery(3002, "google_cloud_gemini"),
+  mockSavedQuery(3003, "AI - Spend by Category", {
+    ai_generated: true,
+    origin: "ai",
+    origin_label: "AI-generated",
+  }),
+];
+
+const projectAssets: Array<Record<string, unknown>> = [
+  {
+    id: 9001,
+    project_id: 1,
+    asset_type: "document",
+    source_type: "upload",
+    title: "It 003 Cybersecurity Incident Report",
+    description:
+      "A cybersecurity incident report summarizing security findings and remediation for Simplicit Demo Company.",
+    filename: "it_003_cybersecurity_incident_report.md",
+    original_filename: "It 003 Cybersecurity Incident Report.md",
+    content_type: "text/markdown",
+    file_extension: "md",
+    file_size_bytes: 462,
+    visibility: "project",
+    status: "ready",
+    ai_status: "profiled",
+    ai_summary:
+      "This is a cybersecurity incident report that summarizes security findings and remediation for Simplicit Demo Company.",
+    ai_metadata: {
+      document_type: "report",
+      business_domain: "IT Operations",
+      tags: [{ name: "Cybersecurity", confidence: 0.95 }],
+      entities: [{ type: "company", value: "Simplicit Demo Company" }],
+      suggested_questions: [
+        "What are the security findings and remediation steps for Simplicit Demo Company?",
+      ],
+    },
+    created_by: MOCK_USER_ID,
+    created_at: new Date(Date.now() - 864e5 * 10).toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: 9002,
+    project_id: 1,
+    asset_type: "document",
+    source_type: "upload",
+    title: "It 002 Q2 2026 Helpdesk Metrics Report",
+    description:
+      "Overview of incident volumes and resolution times for Q2, highlighting elevated access-category incidents.",
+    filename: "it_002_q2_2026_helpdesk_metrics.md",
+    original_filename: "It 002 Q2 2026 Helpdesk Metrics Report.md",
+    content_type: "text/markdown",
+    file_extension: "md",
+    file_size_bytes: 488,
+    visibility: "project",
+    status: "ready",
+    ai_status: "profiled",
+    ai_summary:
+      "Incident volumes and resolution times for Q2, recommending automation of onboarding access provisioning.",
+    ai_metadata: {
+      document_type: "report",
+      business_domain: "IT Operations",
+      tags: [{ name: "Helpdesk", confidence: 0.91 }],
+      entities: [],
+      suggested_questions: ["Which incident category grew fastest in Q2?"],
+    },
+    created_by: MOCK_USER_ID,
+    created_at: new Date(Date.now() - 864e5 * 12).toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+];
+
+// ── Chat ─────────────────────────────────────────────────────────────────
+// Canned assistant replies so the chat pane is demonstrable offline. It echoes
+// the grounding it was given, which also makes it obvious at a glance whether
+// active_resources actually reached the request.
+let nextConversationId = 700;
+let nextTurnId = 7000;
+let mockConversationId: number | null = null;
+
 // Fake catalog for the project "Data Sources" area (All Data Sources tab +
 // Connected Sources tab). See components/tablescope/project/data-sources-screen.tsx
 // and .../data-source-builder/connected-sources-section.tsx for the real shapes.
@@ -464,6 +650,179 @@ const routes: MockRoute[] = [
     respond: (_url, body) => {
       const items = ((body ?? {}) as { items?: unknown[] }).items ?? [];
       return { status: "ok", added: items.length };
+    },
+  },
+
+  // ── Workspaces ─────────────────────────────────────────────────────────
+  {
+    method: "GET",
+    test: /\/api\/projects\/\d+\/workspaces$/,
+    respond: () => mockWorkspaces,
+  },
+  {
+    method: "GET",
+    test: /\/api\/projects\/\d+\/workspaces\/\d+$/,
+    respond: (url) => findMockWorkspace(url) ?? mockWorkspaces[0],
+  },
+  {
+    method: "POST",
+    test: /\/api\/projects\/\d+\/workspaces$/,
+    respond: (_url, body) => {
+      const payload = (body ?? {}) as {
+        name?: string;
+        cards?: { resource_type: string; resource_id: string }[];
+      };
+      const created = {
+        id: nextWorkspaceId++,
+        tenant_id: 1,
+        project_id: 1,
+        owner_user_id: MOCK_USER_ID,
+        name: payload.name ?? "Untitled workspace",
+        visibility: "private",
+        published_at: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        cards: (payload.cards ?? []).map((c, i) =>
+          mockWorkspaceCard(c.resource_type, c.resource_id, c.resource_id, i),
+        ),
+      };
+      mockWorkspaces.push(created);
+      return created;
+    },
+  },
+  {
+    // Rename and the full card-list replacement share one PATCH.
+    method: "PATCH",
+    test: /\/api\/projects\/\d+\/workspaces\/\d+$/,
+    respond: (url, body) => {
+      const workspace = findMockWorkspace(url);
+      if (!workspace) return mockWorkspaces[0];
+      const payload = (body ?? {}) as {
+        name?: string;
+        cards?: { resource_type: string; resource_id: string; view_mode?: string }[];
+      };
+      if (payload.name != null) workspace.name = payload.name;
+      if (payload.cards) {
+        // Reuse the existing card id where the resource is unchanged, so the
+        // server-authoritative ids the screen swaps in stay stable across a
+        // reorder -- matching how the real endpoint behaves.
+        const existing = workspace.cards as Array<Record<string, unknown>>;
+        workspace.cards = payload.cards.map((card, position) => {
+          const prior = existing.find(
+            (e) =>
+              e.resource_type === card.resource_type &&
+              e.resource_id === card.resource_id,
+          );
+          return {
+            id: prior?.id ?? nextWorkspaceCardId++,
+            resource_type: card.resource_type,
+            resource_id: card.resource_id,
+            view_mode: card.view_mode ?? "card",
+            position,
+            added_at: prior?.added_at ?? new Date().toISOString(),
+            label: prior?.label ?? card.resource_id,
+          };
+        });
+      }
+      workspace.updated_at = new Date().toISOString();
+      return workspace;
+    },
+  },
+  {
+    method: "POST",
+    test: /\/api\/projects\/\d+\/workspaces\/\d+\/publish$/,
+    respond: (url) => {
+      const workspace = findMockWorkspace(url);
+      if (!workspace) return mockWorkspaces[0];
+      workspace.visibility = "shared_project";
+      workspace.published_at = new Date().toISOString();
+      return workspace;
+    },
+  },
+  {
+    method: "POST",
+    test: /\/api\/projects\/\d+\/workspaces\/\d+\/unpublish$/,
+    respond: (url) => {
+      const workspace = findMockWorkspace(url);
+      if (!workspace) return mockWorkspaces[0];
+      workspace.visibility = "private";
+      workspace.published_at = null;
+      return workspace;
+    },
+  },
+  {
+    method: "DELETE",
+    test: /\/api\/projects\/\d+\/workspaces\/\d+$/,
+    respond: (url) => {
+      const workspace = findMockWorkspace(url);
+      if (workspace) mockWorkspaces.splice(mockWorkspaces.indexOf(workspace), 1);
+      return { status: "deleted" };
+    },
+  },
+
+  // ── Project tables + documents ─────────────────────────────────────────
+  {
+    method: "GET",
+    test: /\/api\/projects\/\d+\/queries(\?|$)/,
+    respond: (url) =>
+      /include_archived=true/.test(url)
+        ? projectQueries
+        : projectQueries.filter((q) => !q.is_archived),
+  },
+  {
+    method: "GET",
+    test: /\/api\/projects\/\d+\/assets(\?|$)/,
+    respond: () => projectAssets,
+  },
+  {
+    method: "GET",
+    test: /\/api\/projects\/\d+\/dashboards(\?|$)/,
+    respond: () => [],
+  },
+
+  // ── Chat (canonical turns) ─────────────────────────────────────────────
+  {
+    method: "GET",
+    test: /\/api\/conversational-analytics\/conversations(\?|$)/,
+    respond: () => [],
+  },
+  {
+    method: "POST",
+    test: /\/api\/conversational-analytics\/canonical-turns$/,
+    respond: (_url, body) => {
+      const payload = (body ?? {}) as {
+        surface?: string;
+        project_id?: number;
+        message?: string;
+        active_resources?: { resource_type: string; resource_id: number }[];
+      };
+      const grounded = payload.active_resources ?? [];
+      const created = mockConversationId == null;
+      if (created) mockConversationId = nextConversationId++;
+      return {
+        conversation_id: mockConversationId,
+        conversation_created: created,
+        surface: payload.surface ?? "project_workspace",
+        project_id: payload.project_id ?? 1,
+        turn: {
+          id: nextTurnId++,
+          sequence: nextTurnId,
+          user_message: payload.message ?? "",
+          intent_type: "analysis",
+          status: "complete",
+          assistant_message: grounded.length
+            ? `Mock reply. Grounded on ${grounded.length} workspace item(s): ` +
+              `${grounded.map((r) => `${r.resource_type}#${r.resource_id}`).join(", ")}.`
+            : "Mock reply. No workspace items are pinned, so this answer isn't grounded on anything.",
+          sql: null,
+          result: null,
+          chart_config: null,
+          explanation: null,
+          error_code: null,
+          matched_insight: null,
+          attachments: [],
+        },
+      };
     },
   },
 ];
