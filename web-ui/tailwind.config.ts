@@ -43,6 +43,7 @@ const config: Config = {
         },
         success: {
           DEFAULT: "var(--color-success)",
+          strong: "var(--color-success-strong)",
           bg: "var(--color-success-bg)",
         },
         warning: {
@@ -51,6 +52,7 @@ const config: Config = {
         },
         danger: {
           DEFAULT: "var(--color-danger)",
+          strong: "var(--color-danger-strong)",
           bg: "var(--color-danger-bg)",
         },
       },

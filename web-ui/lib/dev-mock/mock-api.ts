@@ -780,6 +780,169 @@ const routes: MockRoute[] = [
     respond: () => [],
   },
 
+  // ── Business Insights: Change summary ──────────────────────────────────
+  {
+    // Period-over-period percent change grid. Shapes per
+    // lib/api/home-intelligence/percent-change-summary-*.ts
+    method: "POST",
+    test: /\/api\/ai\/insights\/percent-change-summary/,
+    respond: (_url, body) => {
+      const req = (body ?? {}) as { interval?: string; range?: string; page_size?: number };
+      const interval = req.interval ?? "month";
+      const periodCount = interval === "week" ? 12 : interval === "day" ? 14 : 13;
+      const now = new Date(Date.UTC(2026, 8, 1));
+
+      const periods = Array.from({ length: periodCount }, (_, i) => {
+        const offset = periodCount - 1 - i;
+        const start = new Date(now);
+        if (interval === "day") start.setUTCDate(start.getUTCDate() - offset);
+        else if (interval === "week") start.setUTCDate(start.getUTCDate() - offset * 7);
+        else if (interval === "year") start.setUTCFullYear(start.getUTCFullYear() - offset);
+        else start.setUTCMonth(start.getUTCMonth() - offset);
+        const label =
+          interval === "day" || interval === "week"
+            ? start.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+            : interval === "year"
+              ? String(start.getUTCFullYear())
+              : start.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+        return {
+          key: start.toISOString().slice(0, 10),
+          label,
+          start: start.toISOString(),
+          end: start.toISOString(),
+          is_latest: i === periodCount - 1,
+        };
+      });
+
+      // Fixed shapes rather than random values, so a styling change can be
+      // compared between reloads: a steady climber, a volatile measure, one
+      // with a spike big enough to test number formatting, one mostly flat,
+      // and one with gaps where no prior period exists.
+      const shapes: { title: string; project: string; series: (number | null)[] }[] = [
+        {
+          title: "Manufacturing overhead vs direct labor variance",
+          project: "Finance",
+          series: [null, 0.021, 0.043, -0.018, 0.096, 0.112, -0.034, 0.267, -0.081, 0.043, 0.158, -0.012, 0.037],
+        },
+        {
+          title: "Backlog coverage collapses to zero in 2026 H1",
+          project: "Sales Improvement Plan",
+          series: [null, -0.285, -0.6, -0.5, -1, 0, 0, 0.124, 0.061, -0.019, 0.043, 0.087, 0.012],
+        },
+        {
+          title: "Scrap cost and scrap rate trending upward",
+          project: "Manufacturing",
+          series: [0.172, -0.166, -0.023, 0.365, -0.333, 0.284, 0.083, -0.159, 0.14, 0.151, -0.296, 0.018, 0.062],
+        },
+        {
+          title: "Resolution hours: period-over-period change",
+          project: "IT",
+          series: [0, 0, 0, 0.004, 0, 0, 0, 19.066, -0.634, 0, 0, 0, 0],
+        },
+        {
+          title: "Days late: rate of change",
+          project: "Procurement",
+          series: [null, null, 0, 0, 0, 1.469, -0.578, 0, 0, 0.031, -0.024, 0, 0],
+        },
+        {
+          title: "Unusual quantity observations",
+          project: "Quality",
+          series: [null, 0.226, -0.12, -0.387, 1.71, -0.436, 2.129, -0.989, 0.043, 0.017, -0.008, 0.052, 0.004],
+        },
+        {
+          title: "Vendor concentration risk in top three suppliers",
+          project: "Procurement",
+          series: [0.011, 0.008, -0.004, 0.019, 0.022, -0.007, 0.014, 0.031, -0.012, 0.006, 0.009, -0.003, 0.015],
+        },
+        {
+          title: "On-time delivery slipping against commitments",
+          project: "Logistics",
+          series: [-0.032, -0.048, -0.021, -0.067, -0.019, -0.084, -0.041, -0.038, -0.056, -0.029, -0.073, -0.045, -0.062],
+        },
+      ];
+
+      const rows = shapes.map((shape, index) => {
+        const cells: Record<string, unknown> = {};
+        const valid: number[] = [];
+        periods.forEach((period, i) => {
+          const ratio = shape.series[i] ?? null;
+          if (ratio !== null) valid.push(ratio);
+          cells[period.key] = {
+            current_value: ratio === null ? null : 1000 + i * 37,
+            previous_value: ratio === null ? null : 1000 + (i - 1) * 37,
+            percent_change_ratio: ratio,
+            status:
+              ratio === null
+                ? "unavailable"
+                : ratio > 0
+                  ? "positive"
+                  : ratio < 0
+                    ? "negative"
+                    : "zero",
+            comparison_status: ratio === null ? "no_prior_period" : "comparable",
+            partial: false,
+            warnings: [],
+          };
+        });
+        const sorted = [...valid].sort((a, b) => a - b);
+        const sum = valid.reduce((acc, v) => acc + v, 0);
+        const average = valid.length ? sum / valid.length : null;
+        return {
+          insight_id: `mock-insight-${index + 1}`,
+          title: shape.title,
+          project_id: 1,
+          project_name: shape.project,
+          project_color: null,
+          priority_score: 90 - index * 4,
+          source_grain: "month",
+          supported_intervals: ["month", "quarter", "year"],
+          data_through: now.toISOString(),
+          cells,
+          statistics: {
+            latest: valid.length ? valid[valid.length - 1] : null,
+            min: sorted.length ? sorted[0] : null,
+            max: sorted.length ? sorted[sorted.length - 1] : null,
+            median: sorted.length ? sorted[Math.floor(sorted.length / 2)] : null,
+            average,
+            standard_deviation:
+              average != null && valid.length > 1
+                ? Math.sqrt(
+                    valid.reduce((acc, v) => acc + (v - average) ** 2, 0) / (valid.length - 1),
+                  )
+                : null,
+            cumulative_change: valid.reduce((acc, v) => acc * (1 + v), 1) - 1,
+            valid_count: valid.length,
+          },
+        };
+      });
+
+      return {
+        schema_version: 1,
+        interval,
+        range: req.range ?? "1y",
+        as_of: now.toISOString(),
+        comparison_label: `Compared with the previous ${interval}`,
+        periods,
+        rows,
+        interval_support_counts: { day: 3, week: 5, month: rows.length, quarter: 6, year: 4 },
+        page: {
+          page_size: req.page_size ?? 25,
+          total_in_scope: 84,
+          total_eligible: rows.length,
+          total_excluded: 23,
+          next_cursor: null,
+        },
+        excluded_by_reason: {
+          not_time_series: 11,
+          no_numeric_measure: 6,
+          insufficient_periods: 4,
+          duplicate_card: 2,
+        },
+        warnings: [],
+      };
+    },
+  },
+
   // ── Shell chrome ───────────────────────────────────────────────────────
   // Unmocked, these fell through to a real backend and filled the console with
   // connection/CORS errors on every project page.

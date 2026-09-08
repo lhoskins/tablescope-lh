@@ -120,11 +120,13 @@ export function PercentChangeSummaryTable({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-3 text-[11px] text-ink-tertiary">
+        {/* The legend samples the same treatment the cells use, so it has to
+            show text colour rather than a filled swatch. */}
         <span className="inline-flex items-center gap-1.5">
           <span
             className={cn(
               "inline-block h-3 w-3 rounded",
-              presentation === "executive" ? "bg-[#74C990]" : "bg-success-bg text-success",
+              presentation === "executive" ? "bg-success-strong" : "bg-success-bg text-success",
             )}
             aria-hidden
           />
@@ -134,7 +136,7 @@ export function PercentChangeSummaryTable({
           <span
             className={cn(
               "inline-block h-3 w-3 rounded",
-              presentation === "executive" ? "bg-[#EA7975]" : "bg-danger-bg text-danger",
+              presentation === "executive" ? "bg-danger-strong" : "bg-danger-bg text-danger",
             )}
             aria-hidden
           />
@@ -145,7 +147,7 @@ export function PercentChangeSummaryTable({
             className={cn(
               "inline-flex h-3 w-3 items-center justify-center rounded text-[9px]",
               presentation === "executive"
-                ? "bg-[#626365] text-white"
+                ? "border border-line-tertiary bg-bg-primary text-ink-tertiary"
                 : "border border-line-tertiary bg-bg-primary text-ink-secondary",
             )}
             aria-hidden

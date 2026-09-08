@@ -35,6 +35,13 @@
   --color-warning-bg: #faeeda;
   --color-danger: #7d1f1a;
   --color-danger-bg: #fdecea;
+  /* Brighter siblings for figures printed straight onto a white surface, where
+     the tinted-chip colours above land almost black and green/red become hard
+     to tell apart at a glance. Used by the Change summary grid; the +/- sign is
+     always present too, so colour is reinforcing the reading rather than
+     carrying it alone. */
+  --color-success-strong: #0a8f5f;
+  --color-danger-strong: #d33a2f;
 
   /* Radius */
   --radius-sm: 6px;
