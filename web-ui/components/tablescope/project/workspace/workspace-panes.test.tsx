@@ -54,9 +54,9 @@ describe("WorkspacePanes", () => {
     window.localStorage.clear();
   });
 
-  it("renders the four panes in the default order", () => {
+  it("renders the default panes in order (Chat and Actions ship hidden)", () => {
     renderPanes();
-    expect(paneOrder()).toEqual(["files", "preview", "chat", "notes"]);
+    expect(paneOrder()).toEqual(["files", "preview", "notes"]);
   });
 
   it("follows a persisted order, appending panes that postdate it", () => {
@@ -78,7 +78,7 @@ describe("WorkspacePanes", () => {
     expect(expand.textContent).toBe("N");
     // The body is gone, but the pane keeps its place in the row.
     expect(screen.queryByText("notes body")).toBeNull();
-    expect(paneOrder()).toEqual(["files", "preview", "chat", "notes"]);
+    expect(paneOrder()).toEqual(["files", "preview", "notes"]);
 
     fireEvent.click(expand);
     expect(screen.getByText("notes body")).toBeTruthy();
@@ -134,7 +134,7 @@ describe("WorkspacePanes", () => {
     // The split is a viewport concern: every pane the user chose is still
     // mounted, just narrower, with the overflow reachable by scrolling.
     expect(paneOrder()).toEqual(before);
-    expect(loadPaneLayout("7").hidden).toEqual(["actions"]);
+    expect(loadPaneLayout("7").hidden).toEqual(["chat", "actions"]);
     expect(loadPaneLayout("7").columns).toBe(2);
   });
 
@@ -151,13 +151,13 @@ describe("WorkspacePanes", () => {
     fireEvent.click(screen.getByLabelText("Maximize Preview"));
 
     const preview = document.querySelector<HTMLElement>('[data-pane="preview"]');
-    const chat = document.querySelector<HTMLElement>('[data-pane="chat"]');
+    const notes = document.querySelector<HTMLElement>('[data-pane="notes"]');
     expect(preview?.style.display).not.toBe("none");
-    expect(chat?.style.display).toBe("none");
+    expect(notes?.style.display).toBe("none");
 
     fireEvent.click(screen.getByLabelText("Restore Preview"));
     expect(
-      document.querySelector<HTMLElement>('[data-pane="chat"]')?.style.display,
+      document.querySelector<HTMLElement>('[data-pane="notes"]')?.style.display,
     ).not.toBe("none");
   });
 });

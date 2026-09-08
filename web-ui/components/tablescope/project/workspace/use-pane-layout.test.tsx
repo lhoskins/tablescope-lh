@@ -77,15 +77,15 @@ describe("usePaneLayout", () => {
 
   it("collapsing one pane only disables the dividers touching it", () => {
     const { result } = renderHook(() => usePaneLayout("7"));
-    // Visible by default: files, preview, chat, notes.
-    act(() => result.current.toggleCollapsed("chat"));
+    // Visible by default: files, preview, notes (chat and actions ship hidden).
+    act(() => result.current.toggleCollapsed("preview"));
 
     // The dividers either side of the collapsed strip have nothing to trade...
+    expect(result.current.isDividerDisabled("files")).toBe(true);
     expect(result.current.isDividerDisabled("preview")).toBe(true);
-    expect(result.current.isDividerDisabled("chat")).toBe(true);
     // ...but the rest of the row must still be resizable. Disabling every
     // divider the moment anything collapsed made the workspace feel frozen.
-    expect(result.current.isDividerDisabled("files")).toBe(false);
+    expect(result.current.isDividerDisabled("notes")).toBe(false);
 
     // Maximize is different: there's only one pane on screen to resize.
     act(() => result.current.toggleMaximized("files"));
@@ -94,14 +94,17 @@ describe("usePaneLayout", () => {
 
   it("keeps a collapsed strip out of the split's width division", () => {
     const { result } = renderHook(() => usePaneLayout("7"));
+    // Show Actions alongside the three defaults, so collapsing one pane
+    // still leaves the row overflowing at two columns.
+    act(() => result.current.togglePaneVisible("actions"));
     act(() => result.current.setColumns(2));
     expect(result.current.paneStyle("files").flexBasis).toBe(
       "calc((100% - 12px) / 2)",
     );
 
-    // Collapsing Chat leaves three expanded panes over two columns, and the
+    // Collapsing Notes leaves three expanded panes over two columns, and the
     // 36px strip plus its gap is reserved rather than divided.
-    act(() => result.current.toggleCollapsed("chat"));
+    act(() => result.current.toggleCollapsed("notes"));
     expect(result.current.paneStyle("files").flexBasis).toBe(
       "calc((100% - 60px) / 2)",
     );
@@ -109,8 +112,9 @@ describe("usePaneLayout", () => {
 
   it("splits the viewport without changing which panes are shown", () => {
     const { result } = renderHook(() => usePaneLayout("7"));
-    // Four panes visible by default (Actions ships hidden), split four ways --
-    // they all fit, so each shares the row by its natural weighting.
+    // Three panes visible by default (Chat and Actions ship hidden), split
+    // three ways -- they all fit, so each shares the row by its natural
+    // weighting.
     expect(result.current.paneStyle("files")).toEqual({
       flexGrow: 1,
       flexShrink: 1,
@@ -119,15 +123,15 @@ describe("usePaneLayout", () => {
 
     act(() => result.current.setColumns(2));
 
-    // Split two-up with four panes loaded: each takes half the visible width
-    // minus the gap, so the row overflows and the other two are a scroll away.
+    // Split two-up with three panes loaded: each takes half the visible width
+    // minus the gap, so the row overflows and the third is a scroll away.
     expect(result.current.paneStyle("files")).toEqual({
       flexGrow: 0,
       flexShrink: 0,
       flexBasis: "calc((100% - 12px) / 2)",
     });
     // Crucially, the pane set is untouched -- splitting is not hiding.
-    expect(result.current.isVisible("chat")).toBe(true);
+    expect(result.current.isVisible("preview")).toBe(true);
     expect(result.current.isVisible("notes")).toBe(true);
     expect(loadPaneLayout("7").columns).toBe(2);
   });
@@ -135,7 +139,9 @@ describe("usePaneLayout", () => {
   it("hides and shows panes, and refuses to hide the last one", () => {
     const { result } = renderHook(() => usePaneLayout("7"));
 
-    // Actions ships hidden: five panes at once leaves none of them usable.
+    // Chat and Actions ship hidden: five panes at once leaves each one too
+    // narrow, so a fresh workspace opens on the reading path instead.
+    expect(result.current.isVisible("chat")).toBe(false);
     expect(result.current.isVisible("actions")).toBe(false);
     act(() => result.current.togglePaneVisible("actions"));
     expect(result.current.isVisible("actions")).toBe(true);
@@ -147,7 +153,6 @@ describe("usePaneLayout", () => {
     // Hide everything except Documents...
     act(() => {
       result.current.togglePaneVisible("preview");
-      result.current.togglePaneVisible("chat");
       result.current.togglePaneVisible("actions");
     });
     expect(result.current.isVisible("files")).toBe(true);

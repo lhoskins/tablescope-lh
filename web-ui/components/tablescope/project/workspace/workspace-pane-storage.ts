@@ -35,14 +35,15 @@ export const PANE_DEFAULT_RATIO: Record<PaneId, number> = {
 
 /**
  * Which panes a fresh workspace shows. Five panes at once leaves each one too
- * narrow to be useful on a laptop, so Actions starts hidden and the Pane Views
- * bar brings it in when wanted.
+ * narrow to be useful on a laptop, so a new workspace opens on the reading
+ * path -- Documents, Preview, Notes -- and the Pane Views bar brings Chat and
+ * Actions in when wanted.
  */
-export const DEFAULT_HIDDEN_PANES: PaneId[] = ["actions"];
+export const DEFAULT_HIDDEN_PANES: PaneId[] = ["chat", "actions"];
 
 /** Selectable split presets. 1 is what maximize is for; 5 is unreadable. */
 export const PANE_COLUMN_CHOICES = [2, 3, 4];
-export const DEFAULT_PANE_COLUMNS = 4;
+export const DEFAULT_PANE_COLUMNS = 3;
 /** Must match the `gap-3` between panes, since the split maths subtracts it. */
 export const PANE_GAP_PX = 12;
 
