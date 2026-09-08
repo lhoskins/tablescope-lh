@@ -712,16 +712,18 @@ async def review_dashboard_design(
         ),
         session=session,
         context=context,
-        stop_after_first_valid=True,
+        stop_after_fully_supported=True,
     )
-    suggestion = next(
-        (
-            item
-            for item in result.get("suggestions", [])
-            if isinstance(item, dict) and _valid_suggestion_widgets(item)
-        ),
-        None,
-    )
+    suggestion = None
+    candidate_suggestions = result.get("suggestions", []) or []
+    if candidate_suggestions:
+        best = max(
+            candidate_suggestions,
+            key=lambda s: len(_valid_suggestion_widgets(s)),
+            default=None,
+        )
+        if best and _valid_suggestion_widgets(best):
+            suggestion = best
     if suggestion is not None:
         _apply_chart_overrides(suggestion, req.chart_overrides)
     missing = _missing_concepts(req.prompt, columns, domain)

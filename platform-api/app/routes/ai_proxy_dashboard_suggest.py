@@ -39,6 +39,7 @@ async def ai_suggest_dashboards(
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
     stop_after_first_valid: bool = False,
+    stop_after_fully_supported: bool = False,
 ) -> dict[str, Any]:
     """Return >= 3 dashboard plan suggestions for a project (insight-first).
 
@@ -178,6 +179,11 @@ async def ai_suggest_dashboards(
         )
 
         if stop_after_first_valid and any(
+            isinstance(w, dict) and str(w.get("status") or "") == "valid" and str(w.get("sql") or "").strip()
+            for w in widgets
+        ):
+            break
+        if stop_after_fully_supported and widgets and all(
             isinstance(w, dict) and str(w.get("status") or "") == "valid" and str(w.get("sql") or "").strip()
             for w in widgets
         ):
