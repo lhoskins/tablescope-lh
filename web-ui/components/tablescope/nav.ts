@@ -45,6 +45,12 @@ export function homeNavGroups(user?: CurrentUser): NavGroup[] {
       items: [
         { key: "home", label: "Home", href: "/", icon: IconHome },
         {
+          key: "dashboards",
+          label: "Dashboards",
+          href: "/dashboards",
+          icon: IconLayoutDashboard,
+        },
+        {
           key: "business-insight",
           label: "Business Insight",
           href: "/business-insight",
