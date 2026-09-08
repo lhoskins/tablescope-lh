@@ -145,10 +145,21 @@ export function TanStackDataGrid({
   const [targetFields, setTargetFields] = useState<string[]>([]);
   const [targetFieldsLoading, setTargetFieldsLoading] = useState(false);
 
+  // `clearTargetFields` keeps the existing array when it is already empty.
+  // Assigning a fresh `[]` counted as a state change on every run, and this
+  // effect re-runs whenever `availableQueries` changes identity -- which it
+  // does each render for any caller that builds the list inline. The two
+  // together spun into "Maximum update depth exceeded" as soon as a grid was
+  // rendered, before the scope dialog was ever opened.
+  const clearTargetFields = useCallback(
+    () => setTargetFields((prev) => (prev.length === 0 ? prev : [])),
+    [],
+  );
+
   useEffect(() => {
-    if (targetQueryId === "") { setTargetFields([]); return; }
+    if (targetQueryId === "") { clearTargetFields(); return; }
     const tq = availableQueries.find((q) => q.id === targetQueryId);
-    if (!tq) { setTargetFields([]); return; }
+    if (!tq) { clearTargetFields(); return; }
     let cancelled = false;
     setTargetFieldsLoading(true);
     apiClient
@@ -159,10 +170,10 @@ export function TanStackDataGrid({
         sql: tq.sql ?? undefined,
       })
       .then((r) => { if (!cancelled) setTargetFields(r.columns ?? []); })
-      .catch(() => { if (!cancelled) setTargetFields([]); })
+      .catch(() => { if (!cancelled) clearTargetFields(); })
       .finally(() => { if (!cancelled) setTargetFieldsLoading(false); });
     return () => { cancelled = true; };
-  }, [targetQueryId, availableQueries, projectId]);
+  }, [targetQueryId, availableQueries, projectId, clearTargetFields]);
 
   const openScopeDialog = useCallback((field: string) => {
     const existing = scopesByField[normalizeField(field)];

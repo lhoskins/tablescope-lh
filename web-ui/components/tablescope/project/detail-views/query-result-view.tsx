@@ -1,7 +1,7 @@
 "use client";
 
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   IconArrowLeft,
@@ -64,12 +64,18 @@ export function QueryResultView({
   });
 
   const { data: allQueries } = useProjectQueries(projectId);
-  const availableQueries = (allQueries ?? []).map((q) => ({
-    id: q.id,
-    name: q.name,
-    sql: q.sql_text,
-    leftDatasource: q.left_datasource,
-  }));
+  // Memoized because the grid uses this as an effect dependency: rebuilt every
+  // render, it re-ran that effect every render.
+  const availableQueries = useMemo(
+    () =>
+      (allQueries ?? []).map((q) => ({
+        id: q.id,
+        name: q.name,
+        sql: q.sql_text,
+        leftDatasource: q.left_datasource,
+      })),
+    [allQueries],
+  );
 
   return (
     <div className="space-y-4">
