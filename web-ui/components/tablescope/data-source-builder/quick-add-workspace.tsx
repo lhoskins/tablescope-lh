@@ -193,9 +193,23 @@ function ProjectsOptionsPanel({ onClose }: { onClose: () => void }) {
 export function QuickAddDataSourceWorkspace({
   tenantName,
   projectId,
+  initialSourceTab,
+  footer,
 }: {
   tenantName: string;
-  projectId: string;
+  /** Omitted when opened from Home, where no project has been chosen yet.
+   *  Everything below tolerates that: uploads, URL import, database and
+   *  network panels all send project_id only when they have one. The one
+   *  exception is a document (PDF/DOCX) upload, which the dropzone refuses
+   *  with an explanatory message because its route is project-scoped. */
+  projectId?: string;
+  /** Which method card starts selected. Home's "Data Sources" tile deep-links
+   *  to "database" the way the old ?intent=database shim did. */
+  initialSourceTab?: SourceTab;
+  /** Replaces the default "Add to Project" button. Home passes its own pair
+   *  ("Assign to Projects" / "Start New Project") since there is no single
+   *  project to add to. */
+  footer?: React.ReactNode;
 }) {
   const ensureTenant = useBuilderStore((s) => s.ensureTenant);
   const syncExisting = useBuilderStore((s) => s.syncExisting);
@@ -206,7 +220,7 @@ export function QuickAddDataSourceWorkspace({
   const toggleProject = useBuilderStore((s) => s.toggleProject);
   const getPendingChanges = useBuilderStore((s) => s.getPendingChanges);
 
-  const [sourceTab, setSourceTab] = useState<SourceTab>("upload");
+  const [sourceTab, setSourceTab] = useState<SourceTab>(initialSourceTab ?? "upload");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
 
@@ -252,7 +266,7 @@ export function QuickAddDataSourceWorkspace({
   // entering the builder from inside a project instead of standalone.
   const autoToggled = useRef(false);
   useEffect(() => {
-    if (autoToggled.current) return;
+    if (autoToggled.current || !projectId) return;
     const row = projects.find((p) => p.projectId === projectId);
     if (row && !row.isToggled) {
       autoToggled.current = true;
@@ -271,7 +285,7 @@ export function QuickAddDataSourceWorkspace({
   );
   const canAdd = createdKeys.length > 0 && pending.adding.length > 0;
 
-  const numericProjectId = Number(projectId);
+  const numericProjectId = projectId ? Number(projectId) : undefined;
 
   return (
     <div className="flex h-[calc(100vh-7rem)] flex-col">
@@ -300,14 +314,16 @@ export function QuickAddDataSourceWorkspace({
         <StagedSourcesGrid />
       </div>
 
-      <div className="flex shrink-0 items-center justify-end border-t border-line-tertiary pt-3">
-        <Button
-          variant="primary"
-          disabled={!canAdd}
-          onClick={() => setConfirmOpen(true)}
-        >
-          Add to Project
-        </Button>
+      <div className="flex shrink-0 items-center justify-end gap-2 border-t border-line-tertiary pt-3">
+        {footer ?? (
+          <Button
+            variant="primary"
+            disabled={!canAdd}
+            onClick={() => setConfirmOpen(true)}
+          >
+            Add to Project
+          </Button>
+        )}
       </div>
 
       <ConfirmationModal

@@ -151,7 +151,7 @@ export default function HomePage() {
         "Import a CSV, Excel, or PDF — AI indexes it and connects it to a project automatically.",
       icon: IconUpload,
       chip: "bg-violet-50 text-violet-700",
-      href: "/data-source-builder?intent=upload",
+      href: "/data-builder",
     },
     {
       key: "data-sources",
@@ -160,7 +160,7 @@ export default function HomePage() {
         "Connect a database, SaaS API, or live data feed using the Source Builder.",
       icon: IconDatabase,
       chip: "bg-amber-50 text-amber-700",
-      href: "/data-source-builder?intent=database",
+      href: "/data-builder?method=database",
     },
   ];
 
