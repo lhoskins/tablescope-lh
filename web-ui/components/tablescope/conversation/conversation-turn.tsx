@@ -10,6 +10,7 @@ import { MessageTimestamp } from "@/app/ai/message-timestamp";
 import { ResponsePresenter } from "@/components/ai/ResponsePresenter";
 import type { ResponseEnvelope, SuggestedVisualization } from "@/lib/api/ai-actions";
 import type { ConversationTurn } from "@/lib/api/conversational-analytics";
+import { ChatArtifactConfirmationCard } from "./chat-artifact-confirmation-card";
 import { MatchedInsightBlock } from "./matched-insight-block";
 
 const CHART_FOLLOW_UPS = [
@@ -58,13 +59,22 @@ export function TurnBubble({
   turn,
   onFollowUp,
   isLast,
+  conversationId,
+  projectId,
+  onReviewDashboard,
+  onArtifactDecision,
 }: {
   turn: ConversationTurn;
   onFollowUp?: (text: string) => void;
   isLast?: boolean;
+  conversationId?: number;
+  projectId?: string;
+  onReviewDashboard?: (turnId: number, prompt: string) => void;
+  onArtifactDecision?: () => void;
 }) {
   const envelope = useMemo<ResponseEnvelope | null>(() => buildEnvelope(turn), [turn]);
   const assistantTimestamp = turn.status === "pending" ? null : turn.updated_at;
+  const hasArtifact = Boolean(turn.artifact_proposal);
   return (
     <div className="space-y-2">
       <div className="group flex flex-col items-end">
@@ -90,6 +100,15 @@ export function TurnBubble({
                 )}
                 {turn.matched_insight && (
                   <MatchedInsightBlock match={turn.matched_insight} />
+                )}
+                {hasArtifact && conversationId != null && projectId && (
+                  <ChatArtifactConfirmationCard
+                    conversationId={conversationId}
+                    projectId={projectId}
+                    turn={turn}
+                    onReviewDashboard={onReviewDashboard}
+                    onDecision={onArtifactDecision}
+                  />
                 )}
               </>
             )}

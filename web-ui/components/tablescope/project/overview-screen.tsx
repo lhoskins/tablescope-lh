@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { AskAnythingComposer } from "@/components/ai/ask-anything-composer";
 import { TurnBubble } from "@/components/tablescope/conversation/conversation-turn";
+import { useChatDashboardReview } from "@/components/tablescope/conversation/use-chat-dashboard-review";
 import { recentConversationsKey } from "@/components/tablescope/project/ai-conversations-card";
 import {
   createConversation,
@@ -116,6 +117,22 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
     [chatConversationId, notePersistedTurns, projectId],
   );
 
+  const refreshChatConversation = useCallback(async () => {
+    if (chatConversationId == null) return;
+    try {
+      setChatTurns((await getConversation(chatConversationId)).turns);
+    } catch {
+      // Best-effort resync; the confirmation card already reflects its own
+      // mutation result locally.
+    }
+  }, [chatConversationId]);
+
+  const { reviewDashboard, reviewerNode } = useChatDashboardReview({
+    projectId,
+    conversationId: chatConversationId,
+    onSettled: refreshChatConversation,
+  });
+
   // ── Derived counts (used to decide whether Project Insight is meaningful)
   const queryRows = useMemo(() => queries ?? [], [queries]);
   const sourceRows = useMemo(
@@ -205,6 +222,10 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
                   turn={t}
                   isLast={i === chatTurns.length - 1}
                   onFollowUp={handleAsk}
+                  conversationId={chatConversationId ?? undefined}
+                  projectId={projectId}
+                  onReviewDashboard={reviewDashboard}
+                  onArtifactDecision={() => void refreshChatConversation()}
                 />
               ))}
               {chatBusy && (
@@ -234,6 +255,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
           />
         </div>
       </div>
+      {reviewerNode}
     </ProjectShell>
   );
 }

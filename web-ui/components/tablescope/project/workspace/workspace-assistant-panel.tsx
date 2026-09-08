@@ -9,6 +9,7 @@ import {
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { TurnBubble } from "@/components/tablescope/conversation/conversation-turn";
+import { useChatDashboardReview } from "@/components/tablescope/conversation/use-chat-dashboard-review";
 import { AskAnythingComposer } from "@/components/ai/ask-anything-composer";
 import {
   getConversation,
@@ -216,6 +217,23 @@ export function WorkspaceAssistantPanel({
     abortControllerRef.current?.abort();
   }
 
+  async function refreshConversation() {
+    if (conversation == null) return;
+    try {
+      const full = await getConversation(conversation.id);
+      setConversation(full);
+    } catch {
+      // Best-effort: the confirmation card already reflects its own
+      // mutation result locally, this just resyncs the rest of the turn.
+    }
+  }
+
+  const { reviewDashboard, reviewerNode } = useChatDashboardReview({
+    projectId: hasProject ? projectId : null,
+    conversationId: conversation?.id,
+    onSettled: refreshConversation,
+  });
+
   function startNew() {
     setConversation(null);
     setInput("");
@@ -305,6 +323,10 @@ export function WorkspaceAssistantPanel({
             turn={t}
             isLast={i === conversation.turns.length - 1}
             onFollowUp={(text) => void send(text)}
+            conversationId={conversation.id}
+            projectId={hasProject ? projectId : undefined}
+            onReviewDashboard={reviewDashboard}
+            onArtifactDecision={() => void refreshConversation()}
           />
         ))}
         {pendingQuestion && (
@@ -346,6 +368,7 @@ export function WorkspaceAssistantPanel({
           projectId={hasProject ? projectIdNum : undefined}
         />
       </div>
+      {reviewerNode}
     </div>
   );
 }

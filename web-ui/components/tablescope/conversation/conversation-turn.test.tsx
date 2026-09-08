@@ -12,6 +12,14 @@ vi.mock("@/lib/insights/export-png", () => ({
   insightPngFilename: () => "insight.png",
 }));
 
+vi.mock("./chat-artifact-confirmation-card", () => ({
+  ChatArtifactConfirmationCard: ({
+    turn,
+  }: {
+    turn: { artifact_proposal?: { kind: string } | null };
+  }) => <div data-testid="artifact-card">{turn.artifact_proposal?.kind}</div>,
+}));
+
 function turn(overrides: Partial<ConversationTurn> = {}): ConversationTurn {
   return {
     id: 1,
@@ -84,5 +92,49 @@ describe("TurnBubble (Business/Project Insights shared conversation UI)", () => 
     const timestamps = await screen.findAllByTestId("message-timestamp");
     expect(timestamps).toHaveLength(1);
     expect(timestamps[0]).toHaveAccessibleName(/Sent .*2026/i);
+  });
+
+  it("renders the artifact confirmation card when the turn proposes a dashboard/query, given conversation and project context", () => {
+    render(
+      <TurnBubble
+        turn={turn({
+          intent_type: "create_dashboard",
+          result: null,
+          assistant_message:
+            "I prepared a dashboard request. Review the proposed design and its validated charts before creating anything.",
+          artifact_proposal: {
+            kind: "dashboard",
+            status: "pending",
+            title: "AI Dashboard",
+            prompt: "create a dashboard for IT Incident Overview",
+            description: "Tablescope will profile project data and show the complete dashboard design before creation.",
+          },
+        })}
+        conversationId={42}
+        projectId="7"
+      />,
+    );
+
+    expect(screen.getByTestId("artifact-card")).toHaveTextContent("dashboard");
+  });
+
+  it("does not render the artifact confirmation card without conversation/project context (matches a chat surface that hasn't been wired up)", () => {
+    render(
+      <TurnBubble
+        turn={turn({
+          intent_type: "create_dashboard",
+          assistant_message: "I prepared a dashboard request.",
+          artifact_proposal: {
+            kind: "dashboard",
+            status: "pending",
+            title: "AI Dashboard",
+            prompt: "create a dashboard",
+            description: "...",
+          },
+        })}
+      />,
+    );
+
+    expect(screen.queryByTestId("artifact-card")).not.toBeInTheDocument();
   });
 });
