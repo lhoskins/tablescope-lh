@@ -74,37 +74,48 @@ export function ProjectsTree({
   return (
     <div className="space-y-0.5">
       <div className="group flex items-center rounded-md pr-1 text-ink-secondary hover:bg-bg-secondary hover:text-ink-primary">
+        {/* Row order is icon, label, +, chevron. The chevron trails the row
+            rather than leading it: on the left it indented the folder icon
+            past every other nav row's glyph (NavRow uses the same gap-2.5
+            px-2.5 and size 15), which read as a stray misalignment rather
+            than a hierarchy. "New project" is a link, so it can't live inside
+            the toggle button -- which is why the chevron is its own button
+            here rather than the last child of the one on the left. */}
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
           className="flex flex-1 items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-[13px]"
         >
-          {/* The disclosure chevron sits after the label, not before it: on the
-              left it indented the folder icon out of line with every other
-              nav row's icon (NavRow uses the same gap-2.5 px-2.5 and size 15),
-              which read as a stray misalignment rather than a hierarchy. */}
           <IconFolders size={15} stroke={1.8} className="shrink-0" />
           <span className="flex-1 truncate">Projects</span>
-          {all.length > 0 && (
-            <span className="rounded-full bg-brand-50 px-1.5 text-[11px] font-medium text-brand-700">
-              {all.length}
-            </span>
-          )}
-          {open ? (
-            <IconChevronDown size={13} stroke={1.8} className="shrink-0 text-ink-tertiary" />
-          ) : (
-            <IconChevronRight size={13} stroke={1.8} className="shrink-0 text-ink-tertiary" />
-          )}
         </button>
         <Link
           href="/projects?new=1"
           title="New project"
           aria-label="New project"
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-tertiary opacity-0 hover:bg-bg-primary hover:text-ink-primary group-hover:opacity-100"
+          className="mr-2 flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-tertiary opacity-0 hover:bg-bg-primary hover:text-ink-primary group-hover:opacity-100"
         >
           <IconPlus size={13} />
         </Link>
+        {/* Hidden from the accessibility tree and the tab order: the labelled
+            button above already carries aria-expanded, so exposing a second
+            control for the same toggle would just be a duplicate to tab past.
+            This exists so a click on the chevron itself does what it looks
+            like it should. */}
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-hidden="true"
+          onClick={() => setOpen((v) => !v)}
+          className="flex h-6 w-5 shrink-0 items-center justify-center text-ink-tertiary"
+        >
+          {open ? (
+            <IconChevronDown size={13} stroke={1.8} />
+          ) : (
+            <IconChevronRight size={13} stroke={1.8} />
+          )}
+        </button>
       </div>
 
       {open && (
