@@ -36,11 +36,8 @@ vi.mock("./connected-sources-section", () => ({
 vi.mock("./all-data-sources-panel", () => ({
   AllDataSourcesPanel: () => <div>AllDataSourcesPanel</div>,
 }));
-vi.mock("./available-sources", () => ({
-  AvailableSources: () => <div>AvailableSources</div>,
-}));
-vi.mock("./projects-column", () => ({
-  ProjectsColumn: () => <div>ProjectsColumn</div>,
+vi.mock("./home-assign-panel", () => ({
+  HomeAssignPanel: () => <div>HomeAssignPanel</div>,
 }));
 vi.mock("./confirmation-modal", () => ({ ConfirmationModal: () => null }));
 vi.mock("@/components/tablescope/project/new-project-dialog", () => ({
@@ -92,12 +89,11 @@ describe("HomeDataBuilder", () => {
     useBuilderStore.getState().markCreated(["src-1"]);
     renderBuilder();
     fireEvent.click(screen.getByRole("button", { name: "Assign to Projects" }));
-    expect(screen.getByText("AvailableSources")).toBeTruthy();
-    expect(screen.getByText("ProjectsColumn")).toBeTruthy();
+    expect(screen.getByText("HomeAssignPanel")).toBeTruthy();
     // Back returns to staging rather than navigating, so the staged session
     // -- which lives in the store -- is never unmounted mid-flow.
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(screen.queryByText("AvailableSources")).toBeNull();
+    expect(screen.queryByText("HomeAssignPanel")).toBeNull();
   });
 
   it("renders the other two tabs from the same components a project uses", () => {

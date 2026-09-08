@@ -11,8 +11,7 @@ import { QuickAddDataSourceWorkspace } from "./quick-add-workspace";
 import type { SourceTab } from "./source-method-tabs";
 import { ConnectedSourcesSection } from "./connected-sources-section";
 import { AllDataSourcesPanel } from "./all-data-sources-panel";
-import { AvailableSources } from "./available-sources";
-import { ProjectsColumn } from "./projects-column";
+import { HomeAssignPanel } from "./home-assign-panel";
 import { ConfirmationModal } from "./confirmation-modal";
 
 export type HomeBuilderTab = "builder" | "connected" | "all";
@@ -174,22 +173,14 @@ export function HomeDataBuilder({
 
       {tab === "builder" && assigning && (
         <div className="flex h-[calc(100vh-11rem)] flex-col">
-          <div className="min-h-0 flex-1 overflow-hidden">
-            <div className="grid h-full grid-cols-1 gap-4 lg:grid-cols-2">
-              <AvailableSources />
-              <ProjectsColumn onNewProject={() => setNewProjectOpen(true)} />
-            </div>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <HomeAssignPanel onNewProject={() => setNewProjectOpen(true)} />
           </div>
           <div className="mt-3 flex shrink-0 items-center justify-between gap-3 border-t border-line-tertiary pt-3">
             <p className="text-caption text-ink-tertiary">
-              <span className="font-medium text-brand-700">
-                {sourcesAdding} data sources
-              </span>{" "}
-              adding to{" "}
-              <span className="font-medium text-brand-700">
-                {projectsAddingTo} projects
-              </span>
-              {tenantName ? ` · Tenant: ${tenantName}` : null}
+              {sourcesAdding === 0
+                ? "Choose data and a project to continue."
+                : `${sourcesAdding} ${sourcesAdding === 1 ? "source" : "sources"} → ${projectsAddingTo} ${projectsAddingTo === 1 ? "project" : "projects"}`}
             </p>
             <div className="flex items-center gap-2">
               <Button variant="secondary" onClick={() => setAssigning(false)}>
@@ -200,7 +191,7 @@ export function HomeDataBuilder({
                 disabled={!canApply}
                 onClick={() => setConfirmOpen(true)}
               >
-                Apply
+                Assign
               </Button>
             </div>
           </div>
