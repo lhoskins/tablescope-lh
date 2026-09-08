@@ -242,6 +242,39 @@ const projectAssets: Array<Record<string, unknown>> = [
 // Canned assistant replies so the chat pane is demonstrable offline. It echoes
 // the grounding it was given, which also makes it obvious at a glance whether
 // active_resources actually reached the request.
+/**
+ * Display name for a pinned workspace resource, mirroring the real backend's
+ * `_resolve_labels` (`platform-api/app/routes/workspaces.py`), which looks the
+ * name up per resource type rather than trusting the client.
+ *
+ * Without this the mock echoed the resource id back as the label, so every
+ * dragged-in card read "101" / "103" instead of "sales.csv" / "ServiceNow
+ * incidents" -- a sandbox-only artefact that looked exactly like a real bug.
+ */
+function mockResourceLabel(
+  resource_type: string,
+  resource_id: string,
+): string | null {
+  const matches = (row: Record<string, unknown>) =>
+    String(row.id) === String(resource_id);
+  switch (resource_type) {
+    case "data_source": {
+      const row = projectDataSources.find(matches);
+      return row ? String(row.fileName) : null;
+    }
+    case "table": {
+      const row = projectQueries.find(matches);
+      return row ? String(row.name) : null;
+    }
+    case "document": {
+      const row = projectAssets.find(matches);
+      return row ? String(row.title) : null;
+    }
+    default:
+      return null;
+  }
+}
+
 let nextConversationId = 700;
 let nextTurnId = 7000;
 let mockConversationId: number | null = null;
@@ -683,7 +716,12 @@ const routes: MockRoute[] = [
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         cards: (payload.cards ?? []).map((c, i) =>
-          mockWorkspaceCard(c.resource_type, c.resource_id, c.resource_id, i),
+          mockWorkspaceCard(
+            c.resource_type,
+            c.resource_id,
+            mockResourceLabel(c.resource_type, c.resource_id) ?? c.resource_id,
+            i,
+          ),
         ),
       };
       mockWorkspaces.push(created);
@@ -720,7 +758,10 @@ const routes: MockRoute[] = [
             view_mode: card.view_mode ?? "card",
             position,
             added_at: prior?.added_at ?? new Date().toISOString(),
-            label: prior?.label ?? card.resource_id,
+            label:
+              prior?.label ??
+              mockResourceLabel(card.resource_type, card.resource_id) ??
+              card.resource_id,
           };
         });
       }

@@ -143,7 +143,7 @@ export function WorkspaceCard({
         </div>
         <p className="text-[12px] text-ink-tertiary">
           {card.label
-            ? `Open in Preview`
+            ? `Click to Preview`
             : "This resource is no longer available in the project."}
         </p>
       </button>
