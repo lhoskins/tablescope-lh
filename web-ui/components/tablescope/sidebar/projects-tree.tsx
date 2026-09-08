@@ -80,17 +80,21 @@ export function ProjectsTree({
           aria-expanded={open}
           className="flex flex-1 items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-[13px]"
         >
-          {open ? (
-            <IconChevronDown size={13} stroke={1.8} className="shrink-0 text-ink-tertiary" />
-          ) : (
-            <IconChevronRight size={13} stroke={1.8} className="shrink-0 text-ink-tertiary" />
-          )}
+          {/* The disclosure chevron sits after the label, not before it: on the
+              left it indented the folder icon out of line with every other
+              nav row's icon (NavRow uses the same gap-2.5 px-2.5 and size 15),
+              which read as a stray misalignment rather than a hierarchy. */}
           <IconFolders size={15} stroke={1.8} className="shrink-0" />
           <span className="flex-1 truncate">Projects</span>
           {all.length > 0 && (
             <span className="rounded-full bg-brand-50 px-1.5 text-[11px] font-medium text-brand-700">
               {all.length}
             </span>
+          )}
+          {open ? (
+            <IconChevronDown size={13} stroke={1.8} className="shrink-0 text-ink-tertiary" />
+          ) : (
+            <IconChevronRight size={13} stroke={1.8} className="shrink-0 text-ink-tertiary" />
           )}
         </button>
         <Link
