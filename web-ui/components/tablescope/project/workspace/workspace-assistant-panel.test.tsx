@@ -17,15 +17,6 @@ vi.mock("@/components/tablescope/conversation/conversation-turn", () => ({
   ),
 }));
 
-// The chat-artifact dashboard review flow (dashboard designer modal +
-// artifact-decision call) is its own unit, covered by
-// use-chat-dashboard-review's/AIDashboardDesigner's own tests -- stub it
-// here so this file's tests exercise WorkspaceAssistantPanel's own logic
-// without needing a QueryClientProvider or a next/navigation mock.
-vi.mock("@/components/tablescope/conversation/use-chat-dashboard-review", () => ({
-  useChatDashboardReview: () => ({ reviewDashboard: vi.fn(), reviewerNode: null }),
-}));
-
 import { WorkspaceAssistantPanel } from "./workspace-assistant-panel";
 
 const ACTIVE_TABLE = {

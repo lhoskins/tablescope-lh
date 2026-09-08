@@ -61,7 +61,6 @@ export function TurnBubble({
   isLast,
   conversationId,
   projectId,
-  onReviewDashboard,
   onArtifactDecision,
 }: {
   turn: ConversationTurn;
@@ -69,7 +68,6 @@ export function TurnBubble({
   isLast?: boolean;
   conversationId?: number;
   projectId?: string;
-  onReviewDashboard?: (turnId: number, prompt: string) => void;
   onArtifactDecision?: () => void;
 }) {
   const envelope = useMemo<ResponseEnvelope | null>(() => buildEnvelope(turn), [turn]);
@@ -106,7 +104,6 @@ export function TurnBubble({
                     conversationId={conversationId}
                     projectId={projectId}
                     turn={turn}
-                    onReviewDashboard={onReviewDashboard}
                     onDecision={onArtifactDecision}
                   />
                 )}

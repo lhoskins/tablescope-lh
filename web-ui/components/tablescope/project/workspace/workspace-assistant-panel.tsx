@@ -9,7 +9,6 @@ import {
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { TurnBubble } from "@/components/tablescope/conversation/conversation-turn";
-import { useChatDashboardReview } from "@/components/tablescope/conversation/use-chat-dashboard-review";
 import { AskAnythingComposer } from "@/components/ai/ask-anything-composer";
 import {
   getConversation,
@@ -228,12 +227,6 @@ export function WorkspaceAssistantPanel({
     }
   }
 
-  const { reviewDashboard, reviewerNode } = useChatDashboardReview({
-    projectId: hasProject ? projectId : null,
-    conversationId: conversation?.id,
-    onSettled: refreshConversation,
-  });
-
   function startNew() {
     setConversation(null);
     setInput("");
@@ -325,7 +318,6 @@ export function WorkspaceAssistantPanel({
             onFollowUp={(text) => void send(text)}
             conversationId={conversation.id}
             projectId={hasProject ? projectId : undefined}
-            onReviewDashboard={reviewDashboard}
             onArtifactDecision={() => void refreshConversation()}
           />
         ))}
@@ -368,7 +360,6 @@ export function WorkspaceAssistantPanel({
           projectId={hasProject ? projectIdNum : undefined}
         />
       </div>
-      {reviewerNode}
     </div>
   );
 }

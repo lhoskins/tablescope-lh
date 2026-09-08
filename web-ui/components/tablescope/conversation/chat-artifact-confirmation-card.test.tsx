@@ -35,6 +35,16 @@ function turn(kind: "query" | "dashboard" = "query"): ConversationTurn {
       prompt: `Create a ${kind} for monthly sales`,
       description: "Review this grounded proposal before creating it.",
       dataSources: kind === "query" ? ["sales"] : [],
+      dashboardDesign:
+        kind === "dashboard"
+          ? {
+              supportStatus: "fully_supported",
+              widgets: [
+                { title: "Sales by month", chartType: "bar", businessQuestion: "How do monthly sales trend?" },
+                { title: "Top regions", chartType: "pie", businessQuestion: "" },
+              ],
+            }
+          : null,
     },
     error_code: null,
     matched_insight: null,
@@ -42,10 +52,7 @@ function turn(kind: "query" | "dashboard" = "query"): ConversationTurn {
   };
 }
 
-function renderCard(
-  artifactTurn: ConversationTurn,
-  onReviewDashboard = vi.fn(),
-) {
+function renderCard(artifactTurn: ConversationTurn) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -55,11 +62,9 @@ function renderCard(
         conversationId={3}
         projectId="42"
         turn={artifactTurn}
-        onReviewDashboard={onReviewDashboard}
       />
     </QueryClientProvider>,
   );
-  return { onReviewDashboard };
 }
 
 describe("ChatArtifactConfirmationCard", () => {
@@ -93,13 +98,42 @@ describe("ChatArtifactConfirmationCard", () => {
     );
   });
 
-  it("opens the governed dashboard designer instead of creating immediately", () => {
-    const { onReviewDashboard } = renderCard(turn("dashboard"));
-    fireEvent.click(screen.getByRole("button", { name: /review & create/i }));
-    expect(onReviewDashboard).toHaveBeenCalledWith(
-      8,
-      "Create a dashboard for monthly sales",
+  it("previews the proposed charts and creates the dashboard directly on Create -- no designer modal", async () => {
+    const accepted = turn("dashboard");
+    accepted.artifact_proposal = {
+      ...accepted.artifact_proposal!,
+      status: "accepted",
+      assetId: 91,
+      assetUrl: "/projects/42/dashboards/91",
+    };
+    decideArtifactProposal.mockResolvedValue({ conversation_id: 3, turn: accepted });
+
+    renderCard(turn("dashboard"));
+    expect(screen.getByText("Sales by month")).toBeInTheDocument();
+    expect(screen.getByText(/How do monthly sales trend\?/)).toBeInTheDocument();
+    expect(screen.getByText("Top regions")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+
+    await waitFor(() =>
+      expect(decideArtifactProposal).toHaveBeenCalledWith(3, 8, {
+        decision: "accept",
+        artifact_kind: "dashboard",
+      }),
     );
-    expect(decideArtifactProposal).not.toHaveBeenCalled();
+    expect(await screen.findByText("Created")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /open dashboard/i })).toHaveAttribute(
+      "href",
+      "/projects/42/dashboards/91",
+    );
+  });
+
+  it("shows a partial-support caveat when the design doesn't fully cover the request", () => {
+    const partial = turn("dashboard");
+    partial.artifact_proposal!.dashboardDesign!.supportStatus = "partially_supported";
+    renderCard(partial);
+    expect(
+      screen.getByText(/Some requested data isn't fully available yet/),
+    ).toBeInTheDocument();
   });
 });

@@ -10,11 +10,8 @@ import { ConversationListPanel } from "@/app/ai/conversation-list-panel";
 import { MobileConversationDrawer } from "@/app/ai/mobile-conversation-drawer";
 import { TurnBubbles } from "@/app/ai/turn-bubbles";
 import { UserBubble } from "@/app/ai/user-bubble";
-import { AIDashboardDesigner } from "@/components/tablescope/project/ai-dashboard-designer";
-import { ToastViewport, useToasts } from "@/components/ui/toast";
 import {
   createConversation,
-  decideArtifactProposal,
   deleteConversation,
   getConversation,
   listConversations,
@@ -45,14 +42,9 @@ export function ProjectChatsScreen({ projectId }: { projectId: string }) {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [input, setInput] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
-  const [dashboardProposal, setDashboardProposal] = useState<{
-    turnId: number;
-    prompt: string;
-  } | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const { toasts, push, dismiss } = useToasts();
 
   const { data: active } = useQuery({
     queryKey: ["conversational-analytics", "conversation", activeId],
@@ -201,11 +193,11 @@ export function ProjectChatsScreen({ projectId }: { projectId: string }) {
                       turn={t}
                       conversationId={activeId ?? undefined}
                       projectId={projectId}
-                      onReviewDashboard={(turnId, prompt) =>
-                        setDashboardProposal({ turnId, prompt })
-                      }
                       onArtifactDecision={() => {
                         if (activeId != null) void invalidateActive(activeId);
+                        void queryClient.invalidateQueries({
+                          queryKey: ["project", projectId, "dashboards"],
+                        });
                       }}
                     />
                   </div>
@@ -271,38 +263,6 @@ export function ProjectChatsScreen({ projectId }: { projectId: string }) {
         }}
         onCancel={() => setConfirmDeleteId(null)}
       />
-      <AIDashboardDesigner
-        open={dashboardProposal != null}
-        projectId={projectId}
-        mode="create"
-        initialPrompt={dashboardProposal?.prompt ?? ""}
-        onClose={() => setDashboardProposal(null)}
-        onApplied={(dashboardId) => {
-          const proposal = dashboardProposal;
-          setDashboardProposal(null);
-          void queryClient.invalidateQueries({
-            queryKey: ["project", projectId, "dashboards"],
-          });
-          if (proposal && activeId != null) {
-            void decideArtifactProposal(activeId, proposal.turnId, {
-              decision: "accept",
-              artifact_kind: "dashboard",
-              asset_id: dashboardId,
-            })
-              .then(() => invalidateActive(activeId))
-              .catch((error: unknown) =>
-                push(
-                  error instanceof Error
-                    ? `Dashboard created, but chat status could not be updated: ${error.message}`
-                    : "Dashboard created, but chat status could not be updated.",
-                  "error",
-                ),
-              );
-          }
-        }}
-        notify={push}
-      />
-      <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </ProjectShell>
   );
 }
