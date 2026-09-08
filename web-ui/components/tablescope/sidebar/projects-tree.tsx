@@ -74,13 +74,12 @@ export function ProjectsTree({
   return (
     <div className="space-y-0.5">
       <div className="group flex items-center rounded-md pr-1 text-ink-secondary hover:bg-bg-secondary hover:text-ink-primary">
-        {/* Row order is icon, label, +, chevron. The chevron trails the row
-            rather than leading it: on the left it indented the folder icon
-            past every other nav row's glyph (NavRow uses the same gap-2.5
-            px-2.5 and size 15), which read as a stray misalignment rather
-            than a hierarchy. "New project" is a link, so it can't live inside
-            the toggle button -- which is why the chevron is its own button
-            here rather than the last child of the one on the left. */}
+        {/* The chevron trails the row rather than leading it: on the left it
+            indented the folder icon past every other nav row's glyph (NavRow
+            uses the same gap-2.5 px-2.5 and size 15), which read as a stray
+            misalignment rather than a hierarchy. Creating a project happens
+            on the PRIVATE / SHARED headers below, where the choice of
+            visibility is already on screen -- and on Home's New Project tile. */}
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
@@ -90,14 +89,6 @@ export function ProjectsTree({
           <IconFolders size={15} stroke={1.8} className="shrink-0" />
           <span className="flex-1 truncate">Projects</span>
         </button>
-        <Link
-          href="/projects?new=1"
-          title="New project"
-          aria-label="New project"
-          className="mr-2 flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-tertiary opacity-0 hover:bg-bg-primary hover:text-ink-primary group-hover:opacity-100"
-        >
-          <IconPlus size={13} />
-        </Link>
         {/* Hidden from the accessibility tree and the tab order: the labelled
             button above already carries aria-expanded, so exposing a second
             control for the same toggle would just be a duplicate to tab past.
@@ -124,11 +115,13 @@ export function ProjectsTree({
             label="PRIVATE"
             projects={privateProjects}
             currentProjectId={currentProjectId}
+            newProjectHref="/projects?new=1"
           />
           <ProjectVisibilityGroup
             label="SHARED"
             projects={sharedProjects}
             currentProjectId={currentProjectId}
+            newProjectHref="/projects?new=1&shared=1"
           />
         </div>
       )}
@@ -140,16 +133,31 @@ function ProjectVisibilityGroup({
   label,
   projects,
   currentProjectId,
+  newProjectHref,
 }: {
   label: string;
   projects: ProjectSummary[];
   currentProjectId?: string | null;
+  /** Opens the New project dialog pre-set to this group's visibility. */
+  newProjectHref: string;
 }) {
-  if (projects.length === 0) return null;
+  // Rendered even when empty, unlike before: the "+" that creates a project of
+  // this visibility lives on the header, so hiding the header would leave a
+  // user with no shared projects yet unable to create their first one here.
   return (
     <div className="space-y-0.5">
-      <div className="px-2 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wide text-ink-tertiary">
-        {label} ({projects.length})
+      <div className="group/header flex items-center px-2 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wide text-ink-tertiary">
+        <span className="flex-1">
+          {label} ({projects.length})
+        </span>
+        <Link
+          href={newProjectHref}
+          title={`New ${label.toLowerCase()} project`}
+          aria-label={`New ${label.toLowerCase()} project`}
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-tertiary opacity-0 hover:bg-bg-primary hover:text-ink-primary focus-visible:opacity-100 group-hover/header:opacity-100"
+        >
+          <IconPlus size={12} />
+        </Link>
       </div>
       {projects.map((p) => (
         <div key={p.id}>

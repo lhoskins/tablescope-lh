@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ export function NewProjectDialog({
   onClose,
   redirect = true,
   onCreated,
+  defaultShared = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -18,13 +19,23 @@ export function NewProjectDialog({
   redirect?: boolean;
   /** Called with the new project id after a successful create. */
   onCreated?: (id: number) => void;
+  /** Pre-tick "Shared with the team" -- set when the dialog was opened from
+   *  the sidebar's SHARED group, where the user already chose a visibility. */
+  defaultShared?: boolean;
 }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [isShared, setIsShared] = useState(false);
+  const [isShared, setIsShared] = useState(defaultShared);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Reopening from a different group has to re-apply that group's default:
+    // isShared is initialised once, so without this a SHARED "+" following a
+    // PRIVATE "+" would inherit the previous run's unticked box.
+    if (open) setIsShared(defaultShared);
+  }, [open, defaultShared]);
 
   const createMutation = useMutation({
     mutationFn: (payload: {
@@ -36,7 +47,7 @@ export function NewProjectDialog({
       queryClient.invalidateQueries({ queryKey: ["projects"] });
       setName("");
       setDescription("");
-      setIsShared(false);
+      setIsShared(defaultShared);
       setError(null);
       onClose();
       onCreated?.(created.id);
