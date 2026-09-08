@@ -42,8 +42,7 @@ export function WorkspaceCanvas({
   if (cards.length === 0) {
     return (
       <PaneEmptyState>
-        <p className="text-ink-secondary">This workspace is empty.</p>
-        <p className="mx-auto mt-3 max-w-md">
+        <p className="mx-auto max-w-md">
           To begin, drag tables, documents or data sources from the left-hand
           sidebar, or use the{" "}
           <span className="whitespace-nowrap">+ Add file</span> button in the
