@@ -542,6 +542,75 @@ async def test_project_workspace_names_the_focused_resource_without_dropping_the
     assert "the user is currently looking at Exec Overview" in question
 
 
+async def test_second_turn_sends_conversation_history_to_answer_synthesis(
+    client, db_session, service_headers, monkeypatch
+):
+    """The analytical path -- not just the document-Q&A bypass -- gets history.
+
+    execute_turn reaches the LLM's answer synthesis through two separate
+    calls: _forward_prose_answer inside the `_is_document_question` branch, and
+    _synthesize_answer at the end of the ordinary SQL flow. Only the latter
+    runs for a normal analytical question, so wiring history into the bypass
+    alone would leave ordinary chat memory-less while appearing fixed.
+    """
+    tenant, _, project, headers = await _setup(client, service_headers, "pw-history")
+
+    async def _fake_capture(*args, **kwargs):
+        return {
+            "question": kwargs.get("question", ""),
+            "sql": "SELECT 1",
+            "columns": ["x"],
+            "rows": [{"x": 1}],
+            "suggestedVisualization": {"type": "bar", "title": "x"},
+            "explanation": "ok",
+            "dataSourcesUsed": [],
+            "status": "success",
+            "error": None,
+        }
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core", _fake_capture
+    )
+
+    asked: list[dict] = []
+
+    async def _fake_ask(**kwargs):
+        asked.append(kwargs)
+        return {"answer": "synthesized answer"}
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics.ai_intelligence_client.ask", _fake_ask
+    )
+
+    async def _submit(message: str, request_id: str):
+        r = await client.post(
+            "/api/conversational-analytics/canonical-turns",
+            json={
+                "surface": "project_workspace",
+                "project_id": project["id"],
+                "message": message,
+                "client_request_id": request_id,
+            },
+            headers=headers,
+        )
+        assert r.status_code == 200, r.text
+        return r
+
+    await _submit("What did revenue do last quarter?", "req-h1")
+    await _submit("Why?", "req-h2")
+
+    assert asked, "answer synthesis was never reached"
+    # First turn has nothing to remember.
+    assert asked[0]["history"] == []
+    # Second turn carries the first exchange, oldest→newest, as role/content.
+    history = asked[-1]["history"]
+    assert [m["role"] for m in history] == ["user", "assistant"]
+    assert history[0]["content"] == "What did revenue do last quarter?"
+    assert history[1]["content"] == "synthesized answer"
+    # The in-flight question is not replayed back as history.
+    assert all(m["content"] != "Why?" for m in history)
+
+
 async def test_project_workspace_focus_outside_the_active_set_is_ignored(
     client, db_session, service_headers, monkeypatch
 ):

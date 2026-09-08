@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
@@ -389,6 +390,88 @@ def _matched_insight_dict(m: Any) -> dict[str, Any]:
     }
 
 
+# ── Conversation memory ────────────────────────────────────────────────────
+#
+# A fixed window of recent turns, sent with the answer-synthesis call so the
+# model can resolve follow-ups ("that", "explain more") instead of treating
+# every question as the first one. ai-server already formats and re-caps this
+# (_format_conversation_history in app/routers/ai_shared.py); these budgets
+# keep the request small enough that it never gets there oversized.
+#
+# Deliberately NOT sent to intent classification or SQL generation: a normal
+# analytical question is ~3 LLM calls and an investigation up to 8, so history
+# on every call would multiply prefill for no benefit. Classification already
+# receives prior_turn, and SQL generation already gets the previous SQL.
+#
+# Known limitation: this is a window, not memory. A thread longer than the
+# budget forgets its oldest turns -- no indexing or rolling summary yet. That
+# is the planned revamp, and this is the seam it attaches to.
+_HISTORY_MAX_TURNS = 8
+"""Turns, not messages -- each contributes up to two role messages below."""
+_HISTORY_MSG_CHARS = 600
+"""Per message, user and assistant alike: a pasted wall of text in a question
+crowds out the conversation just as effectively as a long answer."""
+_HISTORY_TOTAL_CHARS = 8000
+"""~2,300 tokens of a 20,480-token input window, measured across both roles."""
+
+
+async def _build_llm_history(
+    session: AsyncSession,
+    conversation: AnalyticsConversation,
+    current_turn: AnalyticsConversationTurn,
+) -> list[dict[str, str]]:
+    """Recent turns as ``{"role", "content"}`` dicts, oldest to newest.
+
+    Queried rather than read from ``conversation.turns``: that relationship is
+    lazily loaded and every caller of ``execute_turn`` hands us a conversation
+    without it (both ``load_canonical_conversation`` and the route helper
+    default to ``with_turns=False``, and the canonical path loads the row with
+    a bare ``SELECT ... FOR UPDATE``). Touching it here would raise
+    ``MissingGreenlet`` on an AsyncSession -- and would also pull an entire
+    long-lived thread into memory to use its last few turns.
+
+    Only successful turns: a failed turn's ``assistant_message`` is an error
+    string, and feeding that back would teach the model that the failure was
+    the answer.
+    """
+    rows = (
+        (
+            await session.execute(
+                select(AnalyticsConversationTurn)
+                .where(
+                    AnalyticsConversationTurn.conversation_id == conversation.id,
+                    AnalyticsConversationTurn.id != current_turn.id,
+                    AnalyticsConversationTurn.status == "success",
+                )
+                .order_by(AnalyticsConversationTurn.sequence.desc())
+                .limit(_HISTORY_MAX_TURNS)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    messages: list[dict[str, str]] = []
+    for prior in reversed(rows):  # newest-first query, oldest-first prompt
+        if prior.user_message:
+            messages.append(
+                {"role": "user", "content": prior.user_message[:_HISTORY_MSG_CHARS]}
+            )
+        if prior.assistant_message:
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": prior.assistant_message[:_HISTORY_MSG_CHARS],
+                }
+            )
+
+    # Drop oldest-first so the most recent exchange always survives; it is the
+    # one a follow-up actually refers to.
+    while messages and sum(len(m["content"]) for m in messages) > _HISTORY_TOTAL_CHARS:
+        messages.pop(0)
+    return messages
+
+
 async def _synthesize_answer(
     context: RequestContext,
     project_id: int,
@@ -398,6 +481,7 @@ async def _synthesize_answer(
     matched_insights: list[dict[str, Any]] | None = None,
     conversation_id: int | None = None,
     turn_id: int | None = None,
+    history: list[dict[str, str]] | None = None,
 ) -> str | None:
     """Ask the LLM to synthesize the final answer from data and/or insight cards.
 
@@ -415,6 +499,7 @@ async def _synthesize_answer(
             matched_insights=matched_insights,
             conversation_id=conversation_id,
             turn_id=turn_id,
+            history=history or [],
         )
         if response and response.get("answer"):
             return str(response["answer"]).strip()
@@ -445,6 +530,10 @@ async def execute_turn(
     prior_turn: AnalyticsConversationTurn | None = None
     if conversation.last_successful_turn_id is not None:
         prior_turn = await session.get(AnalyticsConversationTurn, conversation.last_successful_turn_id)
+    # Built once here and consumed by whichever answer path this turn takes --
+    # the document-Q&A bypass below or the analytical synthesis at the end.
+    # Same shape as prior_turn above: one query up front, local variable after.
+    history = await _build_llm_history(session, conversation, turn)
     question = turn.user_message
 
     try:
@@ -640,7 +729,7 @@ async def execute_turn(
             context,
             project_id=project_id,
             question=question,
-            history=[],
+            history=history,
             scope="project",
             include_query_history=False,
             include_dashboard_context=False,
@@ -878,6 +967,7 @@ async def execute_turn(
         matched_insights=matched_insights_for_synthesis,
         conversation_id=conversation.id,
         turn_id=turn.id,
+        history=history,
     )
     turn.assistant_message = (
         synthesized
