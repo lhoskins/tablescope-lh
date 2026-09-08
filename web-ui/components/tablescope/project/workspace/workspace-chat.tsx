@@ -6,6 +6,7 @@ import { TurnBubble } from "@/components/tablescope/conversation/conversation-tu
 import { AskAnythingComposer } from "@/components/ai/ask-anything-composer";
 import { useWorkspaceChat } from "./use-workspace-chat";
 import { WorkspaceSnippetList } from "./workspace-snippet-list";
+import { PaneEmptyState } from "./pane-empty-state";
 import type { WorkspaceSnippet } from "./workspace-snippet-storage";
 import type { ConversationTurn } from "@/lib/api/conversational-analytics";
 import type { WorkspaceCard } from "@/lib/api/workspaces";
@@ -84,9 +85,9 @@ export function WorkspaceChat({
 
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
         {turns.length === 0 && !pendingMessage && (
-          <div className="text-[12px] leading-relaxed text-ink-tertiary">
+          <PaneEmptyState className="-mt-3 px-0">
             {emptyHint ?? <GroundingHint cards={cards} focusedCard={focusedCard} />}
-          </div>
+          </PaneEmptyState>
         )}
         {turns.map((turn, index) => (
           <TurnBubble
@@ -158,9 +159,7 @@ function GroundingHint({
   if (cards.length === 0) {
     return (
       <>
-        Drag a document or table into this workspace,
-        <br />
-        then ask about it here.
+        Select text from other panes to give context to the Chat pane.
       </>
     );
   }

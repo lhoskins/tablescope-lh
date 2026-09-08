@@ -39,6 +39,7 @@ import { usePaneLayout } from "./use-pane-layout";
 import { WorkspaceTabBar } from "./workspace-tab-bar";
 import { nextUntitledName } from "./workspace-default-name";
 import { loadOrBootstrapWorkspaces } from "./workspace-bootstrap";
+import { PaneEmptyState } from "./pane-empty-state";
 
 /** A dead network request surfaces as the browser's own wording -- "Load
  *  failed" in Safari, "Failed to fetch" in Chrome -- which tells the user
@@ -453,11 +454,10 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
           storageKey="notes"
         />
       ) : (
-        <p className="flex flex-1 items-center justify-center px-5 text-center text-[12px] leading-relaxed text-ink-tertiary">
-          Select text in any pane
-          <br />
-          and choose <strong className="font-semibold">→ Notes</strong>.
-        </p>
+        <PaneEmptyState>
+          Select text in any pane and choose{" "}
+          <strong className="font-semibold">→ Notes</strong>.
+        </PaneEmptyState>
       ),
     },
     {

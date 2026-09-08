@@ -2,6 +2,7 @@
 
 import type { UpdateWorkspaceRequest, Workspace, WorkspaceCard as WorkspaceCardModel, WorkspaceCardViewMode } from "@/lib/api/workspaces";
 import { WorkspaceCard } from "./workspace-card";
+import { PaneEmptyState } from "./pane-empty-state";
 
 /** Rewrite the card list into the full-array shape the PATCH endpoint takes:
  *  adds, removals, reorders and view_mode changes are all the same request. */
@@ -40,14 +41,15 @@ export function WorkspaceCanvas({
 
   if (cards.length === 0) {
     return (
-      <div className="px-5 py-8 text-[13px] text-ink-tertiary">
+      <PaneEmptyState>
         <p className="text-ink-secondary">This workspace is empty.</p>
-        <p className="mt-3 max-w-md leading-relaxed">
+        <p className="mx-auto mt-3 max-w-md">
           To begin, drag tables, documents or data sources from the left-hand
-          sidebar, or use the <span className="whitespace-nowrap">+ Add file</span>{" "}
-          button in the menu pane.
+          sidebar, or use the{" "}
+          <span className="whitespace-nowrap">+ Add file</span> button in the
+          menu pane.
         </p>
-      </div>
+      </PaneEmptyState>
     );
   }
 

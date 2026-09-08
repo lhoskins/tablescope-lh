@@ -55,7 +55,7 @@ describe("WorkspacePreviewPane", () => {
 
   it("prompts when nothing is selected", () => {
     render(<WorkspacePreviewPane projectId="1" card={null} />);
-    expect(screen.getByText(/Select a document or table/)).toBeTruthy();
+    expect(screen.getByText(/Click on a file in the Documents pane/)).toBeTruthy();
   });
 
   it("renders each resource type with its own existing view", () => {

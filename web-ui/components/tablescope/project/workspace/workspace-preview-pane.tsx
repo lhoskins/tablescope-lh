@@ -9,6 +9,7 @@ import {
 import { DocumentPreview } from "@/components/documents/document-preview";
 import { QueryResultView } from "../detail-views/query-result-view";
 import { DataSourceResultView } from "../detail-views/data-source-result-view";
+import { PaneEmptyState } from "./pane-empty-state";
 import type { WorkspaceCard } from "@/lib/api/workspaces";
 
 /**
@@ -35,9 +36,7 @@ export function WorkspacePreviewPane({
   if (!card) {
     return (
       <Placeholder>
-        Select a document or table in Documents
-        <br />
-        to preview it here.
+        Click on a file in the Documents pane to preview it here.
       </Placeholder>
     );
   }
@@ -90,9 +89,7 @@ export function WorkspacePreviewPane({
 
 function Placeholder({ children }: { children: React.ReactNode }) {
   return (
-    <p className="flex flex-1 items-center justify-center px-5 text-center text-[12px] leading-relaxed text-ink-tertiary">
-      {children}
-    </p>
+    <PaneEmptyState>{children}</PaneEmptyState>
   );
 }
 

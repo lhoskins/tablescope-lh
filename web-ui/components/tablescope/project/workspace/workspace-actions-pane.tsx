@@ -11,6 +11,7 @@ import {
   saveDraftActions,
   type DraftAction,
 } from "./workspace-actions-storage";
+import { PaneEmptyState } from "./pane-empty-state";
 
 /**
  * Pull individual actions out of an assistant reply.
@@ -141,11 +142,9 @@ export function WorkspaceActionsPane({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-2">
         {actions.length === 0 && (
-          <p className="py-4 text-center text-[12px] leading-relaxed text-ink-tertiary">
-            No actions yet. Type what you want done,
-            <br />
-            or describe the situation and ask for suggestions.
-          </p>
+          <PaneEmptyState className="-mt-2 px-2">
+            Type in the actions you want to track, or ask for suggested actions.
+          </PaneEmptyState>
         )}
         {actions.map((action) => (
           <div
