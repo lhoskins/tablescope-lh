@@ -70,25 +70,25 @@ describe("HomeDataBuilder", () => {
 
   it("offers both endings instead of one 'Add to Project'", () => {
     renderBuilder();
-    expect(screen.getByRole("button", { name: "Assign to Projects" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Start New Project" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add to Existing Project" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Start Project" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Add to Project" })).toBeNull();
   });
 
   it("disables both until something has been staged", () => {
     renderBuilder();
     expect(
-      screen.getByRole("button", { name: "Assign to Projects" }),
+      screen.getByRole("button", { name: "Add to Existing Project" }),
     ).toHaveProperty("disabled", true);
     expect(
-      screen.getByRole("button", { name: "Start New Project" }),
+      screen.getByRole("button", { name: "Start Project" }),
     ).toHaveProperty("disabled", true);
   });
 
   it("swaps the staging area for the assignment step, keeping the session", () => {
     useBuilderStore.getState().markCreated(["src-1"]);
     renderBuilder();
-    fireEvent.click(screen.getByRole("button", { name: "Assign to Projects" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add to Existing Project" }));
     expect(screen.getByText("HomeAssignPanel")).toBeTruthy();
     // Back returns to staging rather than navigating, so the staged session
     // -- which lives in the store -- is never unmounted mid-flow.

@@ -129,14 +129,14 @@ export function HomeDataBuilder({
         disabled={!hasStaged}
         onClick={() => setAssigning(true)}
       >
-        Assign to Projects
+        Add to Existing Project
       </Button>
       <Button
         variant="primary"
         disabled={!hasStaged}
         onClick={() => setNewProjectOpen(true)}
       >
-        Start New Project
+        Start Project
       </Button>
     </>
   );
@@ -168,6 +168,7 @@ export function HomeDataBuilder({
           tenantName={tenantName}
           initialSourceTab={method}
           footer={footer}
+          heightClass="h-[calc(100vh-13rem)]"
         />
       )}
 

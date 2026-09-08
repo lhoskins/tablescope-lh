@@ -60,7 +60,7 @@ function StagedSourceCard({
 }) {
   const Icon = connectorIcon(item.sourceType);
   return (
-    <div className="relative flex h-28 flex-col justify-between rounded-xl border border-line-tertiary bg-bg-primary p-3.5">
+    <div className="relative flex flex-col rounded-xl border border-line-tertiary bg-bg-primary p-3.5">
       <button
         type="button"
         onClick={onRemove}
@@ -69,15 +69,38 @@ function StagedSourceCard({
       >
         <IconX size={13} />
       </button>
-      <div className="flex items-center gap-2 pr-5">
-        <Icon size={16} className="shrink-0 text-brand-600" />
-        <span className="min-w-0 truncate text-[13px] font-medium text-ink-primary">
+      <div className="flex items-start gap-2 pr-5">
+        <Icon size={16} className="mt-0.5 shrink-0 text-brand-600" />
+        <span className="min-w-0 flex-1 break-words text-[13px] font-medium text-ink-primary">
           {item.name}
         </span>
       </div>
-      <span className="truncate text-caption text-ink-tertiary">
-        {item.typeLabel}
-      </span>
+      <dl className="mt-2.5 space-y-1 text-caption text-ink-tertiary">
+        <div className="flex items-center justify-between gap-2">
+          <dt>Type</dt>
+          <dd className="truncate text-ink-secondary">{item.typeLabel}</dd>
+        </div>
+        {item.columns > 0 && (
+          <div className="flex items-center justify-between gap-2">
+            <dt>Columns</dt>
+            <dd className="tabular-nums text-ink-secondary">{item.columns}</dd>
+          </div>
+        )}
+        {item.sizeOrStatus !== "—" && (
+          <div className="flex items-center justify-between gap-2">
+            <dt>Size</dt>
+            <dd className="tabular-nums text-ink-secondary">
+              {item.sizeOrStatus}
+            </dd>
+          </div>
+        )}
+        <div className="flex items-center justify-between gap-2">
+          <dt>{item.isFile ? "Staged as" : "Source"}</dt>
+          <dd className="min-w-0 truncate text-ink-secondary" title={item.sourceLabel}>
+            {item.sourceLabel}
+          </dd>
+        </div>
+      </dl>
     </div>
   );
 }
@@ -111,7 +134,7 @@ function StagedSourcesGrid() {
   }
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       {items.map((item) => (
         <StagedSourceCard
           key={item.key}
@@ -195,6 +218,7 @@ export function QuickAddDataSourceWorkspace({
   projectId,
   initialSourceTab,
   footer,
+  heightClass = "h-[calc(100vh-7rem)]",
 }: {
   tenantName: string;
   /** Omitted when opened from Home, where no project has been chosen yet.
@@ -210,6 +234,9 @@ export function QuickAddDataSourceWorkspace({
    *  ("Assign to Projects" / "Start New Project") since there is no single
    *  project to add to. */
   footer?: React.ReactNode;
+  /** Height of the shell. Home stacks a tab strip above this, so the default
+   *  would push the footer buttons below the fold. */
+  heightClass?: string;
 }) {
   const ensureTenant = useBuilderStore((s) => s.ensureTenant);
   const syncExisting = useBuilderStore((s) => s.syncExisting);
@@ -288,17 +315,22 @@ export function QuickAddDataSourceWorkspace({
   const numericProjectId = projectId ? Number(projectId) : undefined;
 
   return (
-    <div className="flex h-[calc(100vh-7rem)] flex-col">
+    <div className={`flex ${heightClass} flex-col`}>
       <div className="mt-1 flex shrink-0 items-start justify-between gap-4">
         <SourceMethodTabs activeTab={sourceTab} onChange={setSourceTab} />
-        <div className="relative shrink-0">
-          <Button variant="secondary" onClick={() => setOptionsOpen((o) => !o)}>
-            Options
-          </Button>
-          {optionsOpen && (
-            <ProjectsOptionsPanel onClose={() => setOptionsOpen(false)} />
-          )}
-        </div>
+        {/* "Also add to" presumes a project this is already being added to.
+            Opened from Home there isn't one, and the footer's "Add to
+            Existing Project" covers the same ground without the ambiguity. */}
+        {projectId && (
+          <div className="relative shrink-0">
+            <Button variant="secondary" onClick={() => setOptionsOpen((o) => !o)}>
+              Options
+            </Button>
+            {optionsOpen && (
+              <ProjectsOptionsPanel onClose={() => setOptionsOpen(false)} />
+            )}
+          </div>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto py-4">

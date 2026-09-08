@@ -278,21 +278,28 @@ export function AiUploadDropzone({
       </button>
 
       {items.length > 0 && (
-        <ul className="mt-3 space-y-2">
+        // Cards, not rows: the intake result is the only place the file's
+        // classification, reason and staged name are shown, and as full-width
+        // rows they read as a log above the staged set rather than as the
+        // things themselves.
+        <ul className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {items.map((item) => (
             <li
               key={item.id}
-              className="rounded-lg border border-line-tertiary px-3 py-2 text-[13px]"
+              className={`flex flex-col rounded-xl border bg-bg-primary p-3.5 ${
+                item.status === "error" ? "border-danger" : "border-line-tertiary"
+              }`}
             >
-              <div className="flex items-center justify-between gap-3">
-                <span className="truncate font-medium text-ink-primary">
+              <div className="flex items-start justify-between gap-2">
+                <span className="min-w-0 flex-1 break-words text-[13px] font-medium text-ink-primary">
                   {item.fileName}
                 </span>
                 <span className="shrink-0 text-caption text-ink-tertiary">
                   {humanSize(item.sizeBytes)}
                 </span>
               </div>
-              <div className="mt-0.5 text-caption text-ink-secondary">
+
+              <div className="mt-1.5 text-caption text-ink-secondary">
                 {item.status === "classifying" && "Detecting file type…"}
                 {item.status !== "classifying" && item.family && (
                   <>
@@ -300,12 +307,17 @@ export function AiUploadDropzone({
                     {item.destination
                       ? ` → ${destinationLabel(item.destination)}`
                       : ""}
-                    {item.reason ? ` · ${item.reason}` : ""}
                   </>
                 )}
               </div>
+              {item.status !== "classifying" && item.reason && (
+                <p className="mt-1 text-caption text-ink-tertiary">
+                  {item.reason}
+                </p>
+              )}
+
               {item.status === "awaiting_choice" && (
-                <div className="mt-2 flex items-center gap-2">
+                <div className="mt-2.5 flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => void resolveChoice(item.id, "data_source")}
@@ -323,15 +335,15 @@ export function AiUploadDropzone({
                 </div>
               )}
               {item.status === "processing" && (
-                <p className="mt-1 text-caption text-ink-tertiary">Processing…</p>
+                <p className="mt-2 text-caption text-ink-tertiary">Processing…</p>
               )}
               {item.status === "done" && item.message && (
-                <p className="mt-1 text-caption text-ink-secondary">
+                <p className="mt-2 text-caption text-ink-secondary">
                   {item.message}
                 </p>
               )}
               {item.status === "error" && (
-                <p className="mt-1 text-caption text-danger">{item.message}</p>
+                <p className="mt-2 text-caption text-danger">{item.message}</p>
               )}
             </li>
           ))}
