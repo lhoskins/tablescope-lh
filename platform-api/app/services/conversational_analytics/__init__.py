@@ -29,7 +29,7 @@ from app.services.insight_card_match import (
     find_matching_insight_cards,
 )
 from app.services.project_ai_context import build_project_ai_context
-from app.services.workspace_context import ActiveResourceContext
+from app.services.workspace_context import ActiveResourceContext, list_project_resource_candidates
 
 from .chart_field_selection import _SUBTYPE_LABELS as _SUBTYPE_LABELS
 from .chart_field_selection import _build_chart_config, apply_chart_patch
@@ -390,6 +390,120 @@ def _matched_insight_dict(m: Any) -> dict[str, Any]:
     }
 
 
+_SNIPPET_TOTAL_CHARS = 6000
+"""Combined ceiling for pinned excerpts, on top of history and grounding."""
+
+
+def _format_context_snippets(snippets: list[tuple[str, str]] | None) -> str:
+    """Quote the passages the user pinned to this conversation.
+
+    Distinct from the active-resource block: that says which items are open,
+    this carries the specific text someone judged worth keeping -- a paragraph
+    of a report, or an insight from an earlier answer.
+
+    Descriptive, never imperative, for the same reason as the resource block:
+    this is prepended to the text the intent classifier reads, so instructions
+    here would change how the turn is routed.
+    """
+    if not snippets:
+        return ""
+    lines: list[str] = []
+    used = 0
+    for label, text in snippets:
+        body = text.strip()
+        if not body:
+            continue
+        if used + len(body) > _SNIPPET_TOTAL_CHARS:
+            break
+        used += len(body)
+        lines.append(f'- {label.strip() or "Excerpt"}: "{body}"')
+    if not lines:
+        return ""
+    return (
+        "--- Pinned excerpts ---\n"
+        "The user kept these passages as context for this conversation:\n"
+        + "\n".join(lines)
+        + "\n--- End pinned excerpts ---"
+    )
+
+
+_UNPINNED_MATCH_LIMIT = 2
+"""Most unpinned resources to name in one turn -- a short list the user can
+act on (open it, or ask a follow-up), not a dump of the whole project."""
+
+_UNPINNED_MIN_OVERLAP = 2
+"""Shared terms required before naming an unpinned resource. Two, not one,
+keeps a single common word (e.g. "revenue") from surfacing every table in
+the project on every turn."""
+
+
+async def _find_unpinned_project_matches(
+    session: AsyncSession,
+    *,
+    project_id: int | None,
+    pinned: set[tuple[str, int]],
+    question: str,
+) -> list[ActiveResourceContext]:
+    """Notice project resources the question is probably about, that aren't
+    already pinned to this workspace.
+
+    The workspace only grounds the assistant on what's been dragged in; a
+    question can still be about something the user hasn't opened yet ("how
+    does this compare to the forecast doc?"). This is a cheap, local
+    term-overlap search over the rest of the project -- no extra LLM call,
+    no vector index -- and only surfaces a match strong enough to be worth
+    naming. It never fetches full content: naming a resource here works the
+    same as naming an already-pinned one, and the model still has to reach
+    it through the normal SQL/document paths if the answer actually needs it.
+    """
+    if project_id is None:
+        return []
+    q_terms = _extract_insight_terms(question)
+    if not q_terms:
+        return []
+    candidates = await list_project_resource_candidates(
+        session, project_id=project_id, exclude=pinned
+    )
+    scored: list[tuple[int, Any]] = []
+    for candidate in candidates:
+        overlap = len(q_terms & _extract_insight_terms(candidate.searchable_text))
+        if overlap >= _UNPINNED_MIN_OVERLAP:
+            scored.append((overlap, candidate))
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return [
+        ActiveResourceContext(
+            resource_type=c.resource_type,
+            resource_id=c.resource_id,
+            label=c.label,
+            summary=c.summary,
+        )
+        for _, c in scored[:_UNPINNED_MATCH_LIMIT]
+    ]
+
+
+def _format_unpinned_matches_prompt(matches: list[ActiveResourceContext]) -> str:
+    """Name project resources the question may be about, that the user
+    hasn't pinned to this workspace.
+
+    Distinct from the active-resource block: those are open right now and
+    are the default focus. These are only *available* -- said neutrally, the
+    same reasoning as the other blocks here, so the model treats a pinned,
+    focused item as primary and only reaches for one of these if the
+    question actually needs it.
+    """
+    if not matches:
+        return ""
+    lines = "\n".join(f"- {m.summary}" for m in matches)
+    return (
+        "--- Also in this project, not pinned to this workspace ---\n"
+        f"{lines}\n"
+        "These are not open in the workspace. Treat any pinned or focused "
+        "item above as the primary subject of the question; use one of these "
+        "only if the question specifically needs it.\n"
+        "--- End ---"
+    )
+
+
 # ── Conversation memory ────────────────────────────────────────────────────
 #
 # A fixed window of recent turns, sent with the answer-synthesis call so the
@@ -520,6 +634,7 @@ async def execute_turn(
     attachment_ids: list[int] | None = None,
     active_resources: list[ActiveResourceContext] | None = None,
     focused_resource: ActiveResourceContext | None = None,
+    context_snippets: list[tuple[str, str]] | None = None,
 ) -> None:
     """Execute a single turn and mutate its persisted fields in place.
 
@@ -586,6 +701,27 @@ async def execute_turn(
         # ground the model's prompts only, never the persisted user message.
         question = f"{active_resource_prompt}\n\n{question}"
         sql_question = f"{active_resource_prompt}\n\n{sql_question}"
+
+    unpinned_matches = await _find_unpinned_project_matches(
+        session,
+        project_id=conversation.project_id,
+        pinned={(r.resource_type, r.resource_id) for r in (active_resources or [])},
+        # The raw message, not `question`: by this point `question` may
+        # already carry the attachment/active-resource prompt blocks
+        # prepended above, and scoring against those would match on their
+        # own scaffolding words ("workspace", "currently", "open") rather
+        # than what the user actually asked.
+        question=turn.user_message,
+    )
+    unpinned_prompt = _format_unpinned_matches_prompt(unpinned_matches)
+    if unpinned_prompt:
+        question = f"{unpinned_prompt}\n\n{question}"
+        sql_question = f"{unpinned_prompt}\n\n{sql_question}"
+
+    snippet_prompt = _format_context_snippets(context_snippets)
+    if snippet_prompt:
+        question = f"{snippet_prompt}\n\n{question}"
+        sql_question = f"{snippet_prompt}\n\n{sql_question}"
 
     # A clarification intent from the classifier is an ambiguous phrasing, not a
     # reason to give up. Treat it like a new analysis so the SQL path gets a

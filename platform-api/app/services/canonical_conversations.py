@@ -143,6 +143,7 @@ async def append_canonical_turn(
     active_resource_id: int | None = None,
     active_resources: list[tuple[str | None, int | None]] | None = None,
     focused_resource: tuple[str | None, int | None] | None = None,
+    context_snippets: list[tuple[str, str]] | None = None,
 ) -> CanonicalTurnResult:
     """Append one turn to the canonical Insight thread for this scope.
 
@@ -268,6 +269,7 @@ async def append_canonical_turn(
         attachment_ids=attachment_ids or [],
         active_resources=resolved_resources,
         focused_resource=resolved_focus,
+        context_snippets=context_snippets,
     )
 
     if turn.status == "success":
