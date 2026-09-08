@@ -14,13 +14,11 @@ export function TurnBubbles({
   turn,
   conversationId,
   projectId,
-  onReviewDashboard,
   onArtifactDecision,
 }: {
   turn: ConversationTurn;
   conversationId?: number;
   projectId?: string;
-  onReviewDashboard?: (turnId: number, prompt: string) => void;
   onArtifactDecision?: () => void;
 }) {
   const result = turn.result;
@@ -66,7 +64,6 @@ export function TurnBubbles({
               conversationId={conversationId}
               projectId={projectId}
               turn={turn}
-              onReviewDashboard={onReviewDashboard}
               onDecision={onArtifactDecision}
             />
           )}

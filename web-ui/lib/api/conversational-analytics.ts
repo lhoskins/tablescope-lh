@@ -58,6 +58,17 @@ export interface ChatAttachmentSummary {
 
 export type ArtifactProposalStatus = "pending" | "accepted" | "rejected";
 
+export interface DashboardWidgetSummary {
+  title: string;
+  chartType: string;
+  businessQuestion: string;
+}
+
+export interface DashboardDesignSummary {
+  widgets: DashboardWidgetSummary[];
+  supportStatus: "fully_supported" | "partially_supported" | "not_supported";
+}
+
 export interface ChatArtifactProposal {
   kind: "query" | "dashboard";
   status: ArtifactProposalStatus;
@@ -66,6 +77,9 @@ export interface ChatArtifactProposal {
   description: string;
   sql?: string | null;
   dataSources?: string[];
+  /** Dashboard proposals only: the generated design to preview inline and,
+   *  on accept, apply directly -- no separate designer step. */
+  dashboardDesign?: DashboardDesignSummary | null;
   createdAt?: string;
   decidedAt?: string;
   decidedBy?: number;

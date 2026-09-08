@@ -17,7 +17,6 @@ import {
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
 import { TurnBubble } from "@/components/tablescope/conversation/conversation-turn";
-import { useChatDashboardReview } from "@/components/tablescope/conversation/use-chat-dashboard-review";
 import {
   createConversation,
   getConversation,
@@ -184,12 +183,6 @@ export function ProjectOverviewChat({ projectId }: ProjectOverviewChatProps) {
     }
   }
 
-  const { reviewDashboard, reviewerNode } = useChatDashboardReview({
-    projectId,
-    conversationId: conversation?.id,
-    onSettled: refreshConversation,
-  });
-
   return (
     <div className="space-y-3 rounded-xl border border-line-secondary bg-bg-primary p-4">
       <div className="flex items-center justify-between gap-3">
@@ -247,7 +240,6 @@ export function ProjectOverviewChat({ projectId }: ProjectOverviewChatProps) {
               onFollowUp={(text) => void send(text)}
               conversationId={conversation!.id}
               projectId={projectId}
-              onReviewDashboard={reviewDashboard}
               onArtifactDecision={() => void refreshConversation()}
             />
           ))}
@@ -308,7 +300,6 @@ export function ProjectOverviewChat({ projectId }: ProjectOverviewChatProps) {
           <IconArrowUp size={15} />
         </button>
       </div>
-      {reviewerNode}
     </div>
   );
 }

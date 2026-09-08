@@ -15,6 +15,11 @@ from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.database import get_db
 from app.models import AnalyticsConversationTurn, Dashboard, FileSourceMeta, SavedQuery
+from app.routes.ai_proxy_dashboard_designer import (
+    DashboardDesignApplyRequest,
+    PrimaryDimensionSelection,
+    apply_dashboard_design,
+)
 from app.routes.ai_proxy_shared import _detect_datasource
 from app.routes.conversational_analytics_conversations import (
     TurnResponse,
@@ -142,8 +147,11 @@ async def decide_artifact_proposal(
 
     Query acceptance creates the SavedQuery here from SQL that was already
     validated and executed by the conversational pipeline. Dashboard
-    acceptance is recorded only after the existing dashboard designer has
-    applied its separately reviewed design and supplies the resulting id.
+    acceptance applies the design the chat turn already generated and
+    previewed (``proposal["dashboardDesign"]``) directly -- no separate
+    designer step. ``asset_id`` is still accepted for a dashboard already
+    created elsewhere (e.g. a client that ran its own apply call), in which
+    case it is only verified and recorded.
     """
     conversation = await _load_conversation(session, context, conversation_id)
     if conversation.project_id is None:
@@ -151,13 +159,22 @@ async def decide_artifact_proposal(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Artifact proposals require a project-scoped conversation",
         )
-    await _check_project_access(session, context, conversation.project_id)
+    # Captured once, up front: apply_dashboard_design (called below for a
+    # dashboard accept) commits its own session internally, which expires
+    # every object already loaded in this session -- including `conversation`
+    # and `turn`, neither of which it touches directly. Reading their
+    # attributes again afterward outside an awaited context raises
+    # MissingGreenlet, so every value this function needs past that point is
+    # captured into a plain local here instead of re-read from the ORM object.
+    project_id = conversation.project_id
+    canonical_conversation_id = conversation.id
+    await _check_project_access(session, context, project_id)
 
     turn = await session.scalar(
         select(AnalyticsConversationTurn)
         .where(
             AnalyticsConversationTurn.id == turn_id,
-            AnalyticsConversationTurn.conversation_id == conversation.id,
+            AnalyticsConversationTurn.conversation_id == canonical_conversation_id,
         )
         .with_for_update()
     )
@@ -175,12 +192,12 @@ async def decide_artifact_proposal(
     current_status = proposal.get("status") or "pending"
     if current_status == "accepted" and req.decision == "accept":
         return TurnSubmissionResponse(
-            conversation_id=conversation.id,
+            conversation_id=canonical_conversation_id,
             turn=_turn_to_response(turn),
         )
     if current_status == "rejected" and req.decision == "reject":
         return TurnSubmissionResponse(
-            conversation_id=conversation.id,
+            conversation_id=canonical_conversation_id,
             turn=_turn_to_response(turn),
         )
     if current_status in {"accepted", "rejected"}:
@@ -191,6 +208,7 @@ async def decide_artifact_proposal(
 
     asset_id: int | None = None
     asset_url: str | None = None
+    turn_user_message = turn.user_message
     if req.decision == "accept" and req.artifact_kind == "query":
         if not turn.sql or turn.status != "success":
             raise HTTPException(
@@ -200,14 +218,14 @@ async def decide_artifact_proposal(
         sources = list(
             await session.scalars(
                 select(FileSourceMeta).where(
-                    FileSourceMeta.project_id == conversation.project_id,
+                    FileSourceMeta.project_id == project_id,
                     FileSourceMeta.tenant_id == context.tenant_id,
                     FileSourceMeta.archived.is_(False),
                 )
             )
         )
         saved_query = SavedQuery(
-            project_id=conversation.project_id,
+            project_id=project_id,
             owner_id=context.user_id,
             name=str(proposal.get("title") or "AI Query")[:255],
             description=str(proposal.get("prompt") or turn.user_message),
@@ -220,23 +238,55 @@ async def decide_artifact_proposal(
         session.add(saved_query)
         await session.flush()
         asset_id = saved_query.id
-        asset_url = f"/projects/{conversation.project_id}/queries"
+        asset_url = f"/projects/{project_id}/queries"
 
     if req.decision == "accept" and req.artifact_kind == "dashboard":
-        if req.asset_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="A created dashboard id is required",
+        if req.asset_id is not None:
+            # A dashboard already created by some other flow -- just verify
+            # and record it, matching the pre-inline-apply behavior.
+            dashboard = await session.get(Dashboard, req.asset_id)
+            if (
+                dashboard is None
+                or dashboard.project_id != project_id
+                or dashboard.tenant_id != context.tenant_id
+            ):
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dashboard not found")
+            asset_id = dashboard.id
+            asset_url = f"/projects/{project_id}/dashboards/{dashboard.id}"
+        else:
+            design = proposal.get("dashboardDesign")
+            if not design or not design.get("suggestion"):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="This proposal has no validated design to apply",
+                )
+            support_status = design.get("supportStatus", "not_supported")
+            primary_dimensions = [
+                PrimaryDimensionSelection(field=c["field"], label=c.get("label") or c["field"])
+                for c in design.get("primaryDimensionCandidates") or []
+                if c.get("fullCoverage") and c.get("field")
+            ]
+            apply_response = await apply_dashboard_design(
+                DashboardDesignApplyRequest(
+                    project_id=project_id,
+                    prompt=str(proposal.get("prompt") or turn_user_message),
+                    mode="create",
+                    dashboard_title=str(proposal.get("title") or ""),
+                    primary_dimensions=primary_dimensions,
+                    audience=design.get("audience", "operational"),
+                    emphasis=design.get("emphasis", "balanced_operational_health"),
+                    period=design.get("period", "1_year"),
+                    currency=design.get("currency", "USD"),
+                    dimension_label=design.get("dimensionLabel", "Site"),
+                    support_status=support_status,
+                    accept_partial=support_status == "partially_supported",
+                    suggestion=design["suggestion"],
+                ),
+                session=session,
+                context=context,
             )
-        dashboard = await session.get(Dashboard, req.asset_id)
-        if (
-            dashboard is None
-            or dashboard.project_id != conversation.project_id
-            or dashboard.tenant_id != context.tenant_id
-        ):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dashboard not found")
-        asset_id = dashboard.id
-        asset_url = f"/projects/{conversation.project_id}/dashboards/{dashboard.id}"
+            asset_id = apply_response["dashboard_id"]
+            asset_url = f"/projects/{project_id}/dashboards/{asset_id}"
 
     proposal.update(
         {
@@ -253,7 +303,7 @@ async def decide_artifact_proposal(
     await session.refresh(turn)
     logger.info(
         "Conversation artifact decision | conversation=%d turn=%d kind=%s decision=%s asset=%s tenant=%d user=%d",
-        conversation.id,
+        canonical_conversation_id,
         turn.id,
         req.artifact_kind,
         req.decision,
@@ -262,7 +312,7 @@ async def decide_artifact_proposal(
         context.user_id,
     )
     return TurnSubmissionResponse(
-        conversation_id=conversation.id,
+        conversation_id=canonical_conversation_id,
         turn=_turn_to_response(turn),
     )
 

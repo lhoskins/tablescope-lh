@@ -8,9 +8,14 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
+from app.auth.rbac import Role, has_role
 from app.models.analytics_conversation import AnalyticsConversation, AnalyticsConversationTurn
 from app.models.chat_attachment import ChatAttachment
 from app.routes.ai_proxy import _ask_and_run_core, _build_source_catalog, _forward_prose_answer
+from app.routes.ai_proxy_dashboard_designer import (
+    DashboardDesignRequest,
+    review_dashboard_design,
+)
 from app.services import ai_intelligence_client as ai_intelligence_client
 from app.services.ai_governance import ai_governance_service, infer_governance_key
 from app.services.ai_grounding import gather_grounding_evidence
@@ -120,24 +125,160 @@ def _artifact_proposal(
     *,
     sql: str | None = None,
     data_sources: list[str] | None = None,
+    title: str | None = None,
+    description: str | None = None,
+    dashboard_design: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build the persisted, non-destructive proposal rendered by Chats."""
+    """Build the persisted, non-destructive proposal rendered by Chats.
+
+    ``dashboard_design`` carries everything needed to render an inline
+    widget preview and, on accept, apply the design without reopening the
+    guided designer: the raw AI ``suggestion`` (verbatim, ready for
+    ``apply_dashboard_design``), a lightweight ``widgets`` summary for
+    display, ``supportStatus``/``primaryDimensionCandidates``, and the
+    generation parameters (``audience``/``emphasis``/``period``/``currency``/
+    ``dimensionLabel``) apply must reuse for the result to match the preview.
+    """
     return {
         "kind": kind,
         "status": "pending",
-        "title": _artifact_title(kind, prompt),
+        "title": title or _artifact_title(kind, prompt),
         "prompt": prompt,
-        "description": (
+        "description": description or (
             "Validated against the project data shown above. Saving creates a governed project query."
             if kind == "query"
             else "Tablescope will profile project data and show the complete dashboard design before creation."
         ),
         "sql": sql if kind == "query" else None,
         "dataSources": data_sources or [],
+        "dashboardDesign": dashboard_design,
         "createdAt": datetime.now(UTC).isoformat(),
         "assetId": None,
         "assetUrl": None,
     }
+
+
+def _dashboard_widget_summaries(suggestion: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """A display-only summary of a dashboard suggestion's charts."""
+    if not suggestion:
+        return []
+    summaries = []
+    for widget in suggestion.get("widgets") or []:
+        if not isinstance(widget, dict):
+            continue
+        summaries.append(
+            {
+                "title": str(widget.get("title") or "Untitled chart"),
+                "chartType": str(widget.get("chartType") or "chart"),
+                "businessQuestion": str(widget.get("businessQuestion") or ""),
+            }
+        )
+    return summaries
+
+
+async def _propose_dashboard(
+    session: AsyncSession,
+    context: RequestContext,
+    turn: AnalyticsConversationTurn,
+    *,
+    project_id: int,
+    prompt: str,
+    governance: dict[str, Any],
+) -> None:
+    """Generate a best-practice dashboard design for ``prompt`` and attach it
+    to ``turn`` as a pending artifact proposal -- no modal, no separate
+    review step. The chat turn itself carries the same profiling/validation
+    the guided designer's review screen does; accepting it applies the
+    design directly (see ``decide_artifact_proposal``).
+    """
+    if not has_role(context.role, Role.EDITOR):
+        turn.status = "error"
+        turn.error_code = "forbidden"
+        turn.assistant_message = "You need editor access on this project to create a dashboard."
+        return
+
+    generation_params = {
+        "audience": "operational",
+        "emphasis": "balanced_operational_health",
+        "period": "1_year",
+        "currency": "USD",
+        "dimensionLabel": "Site",
+    }
+    try:
+        review = await review_dashboard_design(
+            DashboardDesignRequest(
+                project_id=project_id,
+                prompt=prompt,
+                mode="create",
+                audience=generation_params["audience"],
+                emphasis=generation_params["emphasis"],
+                period=generation_params["period"],
+                currency=generation_params["currency"],
+                dimension_label=generation_params["dimensionLabel"],
+            ),
+            session=session,
+            context=context,
+        )
+    except AIUnavailableError:
+        turn.status = "error"
+        turn.error_code = "ai_unavailable"
+        turn.assistant_message = "The AI service is currently unavailable. Please try again shortly."
+        return
+    except Exception:
+        logger.exception("Dashboard design generation failed for project %s", project_id)
+        turn.status = "error"
+        turn.error_code = "dashboard_design_failed"
+        turn.assistant_message = "I couldn't put together a dashboard design just now. Please try again."
+        return
+
+    support_status = review.get("supportStatus", "not_supported")
+    turn.result_metadata = {"artifactKind": "dashboard", "supportStatus": support_status}
+    turn.status = "success"
+
+    if support_status == "not_supported" or not review.get("suggestion"):
+        missing = review.get("missingRequirements") or []
+        turn.explanation = {"generatedAt": datetime.now(UTC).isoformat(), "governance": governance}
+        turn.assistant_message = (
+            "I couldn't find enough validated data for that dashboard. "
+            + (
+                "Missing: " + "; ".join(missing) + "."
+                if missing
+                else "Try describing the metrics or records it should cover, or add a matching datasource."
+            )
+        )
+        return
+
+    suggestion = review["suggestion"]
+    widgets = _dashboard_widget_summaries(suggestion)
+    proposal = _artifact_proposal(
+        "dashboard",
+        prompt,
+        title=str(suggestion.get("title") or _artifact_title("dashboard", prompt)),
+        description=review.get("supportSummary"),
+        data_sources=[s.get("viewName", "") for s in review.get("sources") or [] if s.get("viewName")],
+        dashboard_design={
+            "suggestion": suggestion,
+            "widgets": widgets,
+            "supportStatus": support_status,
+            "primaryDimensionCandidates": review.get("primaryDimensionCandidates") or [],
+            **generation_params,
+        },
+    )
+    turn.explanation = {
+        "generatedAt": datetime.now(UTC).isoformat(),
+        "governance": governance,
+        "artifactProposal": proposal,
+    }
+    chart_list = "; ".join(f"{w['title']} ({w['chartType']})" for w in widgets) or "a set of charts"
+    caveat = (
+        " Some requested data isn't fully available yet -- see the notes below."
+        if support_status == "partially_supported"
+        else ""
+    )
+    turn.assistant_message = (
+        f"I put together a dashboard with {chart_list}, grounded in this project's data.{caveat} "
+        "Click Create if it looks right, or tell me what to add, remove, or change."
+    )
 
 
 def _format_context_prompt(project_context: dict[str, Any] | None) -> str:
@@ -667,24 +808,46 @@ async def execute_turn(
         turn.assistant_message = pre_decision.user_message
         return
 
-    # Dashboard commands create only a durable proposal at this stage.  The
-    # confirmation card opens the existing dashboard designer, where every
-    # query is generated, executed and previewed before the user can apply it.
-    # Nothing is persisted as a dashboard from the chat turn itself.
-    if intent == ConversationalIntent.CREATE_DASHBOARD:
-        turn.explanation = {
-            "generatedAt": datetime.now(UTC).isoformat(),
-            "governance": pre_decision.to_explanation_dict(),
-            "artifactProposal": _artifact_proposal(
-                "dashboard", raw_question
-            ),
-        }
-        turn.result_metadata = {"artifactKind": "dashboard"}
-        turn.assistant_message = (
-            "I prepared a dashboard request. Review the proposed design and "
-            "its validated charts before creating anything."
+    # Dashboard commands generate a validated, best-practice design (the same
+    # profiling the guided designer's review step does) and attach it as a
+    # pending proposal the chat itself previews -- no modal. A follow-up
+    # message while that proposal is still pending ("remove the SLA chart",
+    # "add backlog by priority") is folded onto the original request and the
+    # whole design is regenerated, rather than requiring an explicit new
+    # create-dashboard command. An explicit fresh command always starts over.
+    from sqlalchemy import select as _select
+
+    preceding_turn = await session.scalar(
+        _select(AnalyticsConversationTurn).where(
+            AnalyticsConversationTurn.conversation_id == conversation.id,
+            AnalyticsConversationTurn.sequence == turn.sequence - 1,
         )
-        turn.status = "success"
+    )
+    preceding_proposal = (
+        (preceding_turn.explanation or {}).get("artifactProposal")
+        if preceding_turn is not None
+        else None
+    )
+    is_dashboard_refinement = bool(
+        preceding_proposal
+        and preceding_proposal.get("kind") == "dashboard"
+        and preceding_proposal.get("status") == "pending"
+        and intent not in (ConversationalIntent.CREATE_QUERY, ConversationalIntent.CREATE_DASHBOARD)
+    )
+    if intent == ConversationalIntent.CREATE_DASHBOARD or is_dashboard_refinement:
+        design_prompt = (
+            f"{preceding_proposal['prompt']}\n\nAdditional instruction: {raw_question}"
+            if is_dashboard_refinement
+            else raw_question
+        )
+        await _propose_dashboard(
+            session,
+            context,
+            turn,
+            project_id=project_id,
+            prompt=design_prompt,
+            governance=pre_decision.to_explanation_dict(),
+        )
         if resolved_project_id is not None:
             conversation.project_id = resolved_project_id
         return

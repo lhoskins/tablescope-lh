@@ -1113,11 +1113,51 @@ async def test_create_query_intent_returns_confirmation_then_saves_once(
     assert len(after.json()) == 1
 
 
-async def test_create_dashboard_intent_is_non_destructive_until_review(
+def _fake_review_result(support_status: str = "fully_supported") -> dict:
+    """Shape-matches review_dashboard_design's return value, standing in for
+    the AI profiling/generation call these tests must not actually make."""
+    return {
+        "supportStatus": support_status,
+        "supportSummary": "All proposed insights are validated against 1 project datasource(s).",
+        "missingRequirements": [] if support_status != "not_supported" else ["A datasource for revenue"],
+        "questions": [],
+        "chartRecommendations": [],
+        "sources": [{"viewName": "revenue", "fileName": "revenue.csv", "columns": []}],
+        "suggestion": (
+            {
+                "title": "Revenue & Backlog Overview",
+                "widgets": [
+                    {
+                        "title": "Revenue by month",
+                        "chartType": "bar",
+                        "businessQuestion": "How is revenue trending?",
+                        "sql": 'SELECT month, SUM(amount) FROM "revenue" GROUP BY month',
+                        "status": "valid",
+                    },
+                    {
+                        "title": "Backlog by priority",
+                        "chartType": "pie",
+                        "businessQuestion": "Where is the backlog concentrated?",
+                        "sql": 'SELECT priority, COUNT(*) FROM "revenue" GROUP BY priority',
+                        "status": "valid",
+                    },
+                ],
+            }
+            if support_status != "not_supported"
+            else None
+        ),
+        "domain": "finance",
+        "modelUsed": "test-model",
+        "primaryDimensionCandidates": [],
+    }
+
+
+async def test_create_dashboard_generates_an_inline_preview_not_a_destructive_write(
     client, service_headers, monkeypatch
 ):
-    """Chat persists only a dashboard proposal; the existing designer owns
-    review, query validation, preview and final creation."""
+    """Chat generates and previews a best-practice design immediately (the
+    same profiling the guided designer's review step does) but does not
+    persist anything until the user explicitly accepts it."""
     _, _, project, headers = await _setup(client, service_headers, "conv-dashboard-artifact")
     analytical_calls = 0
 
@@ -1129,6 +1169,14 @@ async def test_create_dashboard_intent_is_non_destructive_until_review(
     monkeypatch.setattr(
         "app.services.conversational_analytics._ask_and_run_core",
         _must_not_run,
+    )
+
+    async def _fake_review(*args, **kwargs):
+        return _fake_review_result()
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics.review_dashboard_design",
+        _fake_review,
     )
 
     created = await client.post(
@@ -1145,8 +1193,17 @@ async def test_create_dashboard_intent_is_non_destructive_until_review(
     assert analytical_calls == 0
     assert turn["intent_type"] == "create_dashboard"
     assert turn["result"] is None
-    assert turn["artifact_proposal"]["kind"] == "dashboard"
-    assert turn["artifact_proposal"]["status"] == "pending"
+    proposal = turn["artifact_proposal"]
+    assert proposal["kind"] == "dashboard"
+    assert proposal["status"] == "pending"
+    widget_titles = {w["title"] for w in proposal["dashboardDesign"]["widgets"]}
+    assert widget_titles == {"Revenue by month", "Backlog by priority"}
+
+    dashboards_before = await client.get(
+        f"/api/projects/{project['id']}/dashboards", headers=headers
+    )
+    assert dashboards_before.status_code == 200
+    assert dashboards_before.json() == []
 
     rejected = await client.post(
         (
@@ -1160,22 +1217,115 @@ async def test_create_dashboard_intent_is_non_destructive_until_review(
     assert rejected.json()["turn"]["artifact_proposal"]["status"] == "rejected"
 
 
-async def test_accept_dashboard_proposal_records_the_designer_created_dashboard(
-    client, db_session, service_headers, monkeypatch
+async def test_create_dashboard_explains_missing_data_without_proposing_anything(
+    client, service_headers, monkeypatch
 ):
-    """Dashboard acceptance never builds a dashboard itself -- it only
-    records the id the existing (separately governed) designer already
-    created, and rejects an id from another project."""
-    from app.models.dashboard import Dashboard
+    """not_supported must not fabricate a proposal there is nothing valid
+    to create from."""
+    _, _, project, headers = await _setup(client, service_headers, "conv-dashboard-unsupported")
 
-    tenant, _, project, headers = await _setup(client, service_headers, "conv-dashboard-accept")
-
-    async def _must_not_run(*args, **kwargs):
-        raise AssertionError("dashboard proposals must not trigger SQL generation")
+    async def _fake_review(*args, **kwargs):
+        return _fake_review_result("not_supported")
 
     monkeypatch.setattr(
-        "app.services.conversational_analytics._ask_and_run_core",
-        _must_not_run,
+        "app.services.conversational_analytics.review_dashboard_design",
+        _fake_review,
+    )
+
+    created = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={
+            "project_id": project["id"],
+            "initial_message": "Please create a dashboard for satellite telemetry",
+        },
+        headers=headers,
+    )
+    assert created.status_code == 200, created.text
+    turn = created.json()["turns"][0]
+    assert turn["status"] == "success"
+    assert turn["artifact_proposal"] is None
+    assert "satellite" not in (turn["assistant_message"] or "").lower()
+    assert "revenue" in (turn["assistant_message"] or "").lower() or "missing" in (
+        turn["assistant_message"] or ""
+    ).lower() or "datasource" in (turn["assistant_message"] or "").lower()
+
+
+async def test_accept_dashboard_proposal_applies_the_generated_design_directly(
+    client, service_headers, monkeypatch
+):
+    """Accepting a chat-generated dashboard proposal creates it directly --
+    no designer visit, no pre-created asset id required."""
+    _, _, project, headers = await _setup(client, service_headers, "conv-dashboard-accept")
+
+    async def _fake_review(*args, **kwargs):
+        return _fake_review_result()
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics.review_dashboard_design",
+        _fake_review,
+    )
+
+    async def _fake_apply(*args, **kwargs):
+        req = args[0] if args else kwargs["req"]
+        assert req.suggestion["title"] == "Revenue & Backlog Overview"
+        assert req.support_status == "fully_supported"
+        return {
+            "status": "created",
+            "dashboard_id": 501,
+            "dashboard_name": req.dashboard_title or req.suggestion["title"],
+            "insights_created": 2,
+            "support_status": req.support_status,
+            "dashboard_url": f"/projects/{req.project_id}/dashboards/501",
+        }
+
+    monkeypatch.setattr(
+        "app.routes.conversational_analytics_turns.apply_dashboard_design",
+        _fake_apply,
+    )
+
+    created = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={
+            "project_id": project["id"],
+            "initial_message": "Please build a dashboard for revenue trends",
+        },
+        headers=headers,
+    )
+    assert created.status_code == 200, created.text
+    conversation = created.json()
+    turn = conversation["turns"][0]
+
+    accepted = await client.post(
+        (
+            f"/api/conversational-analytics/conversations/{conversation['id']}"
+            f"/turns/{turn['id']}/artifact-decision"
+        ),
+        json={"decision": "accept", "artifact_kind": "dashboard"},
+        headers=headers,
+    )
+    assert accepted.status_code == 200, accepted.text
+    proposal = accepted.json()["turn"]["artifact_proposal"]
+    assert proposal["status"] == "accepted"
+    assert proposal["assetId"] == 501
+    assert proposal["assetUrl"] == f"/projects/{project['id']}/dashboards/501"
+
+
+async def test_accept_dashboard_proposal_with_asset_id_still_just_records_it(
+    client, db_session, service_headers, monkeypatch
+):
+    """The pre-existing 'record an already-created dashboard' path (asset_id
+    supplied by the caller) is kept for a client that ran its own apply
+    call, and still rejects an id from another project."""
+    from app.models.dashboard import Dashboard
+
+    tenant, _, project, headers = await _setup(client, service_headers, "conv-dashboard-asset-id")
+
+    async def _fake_review(*args, **kwargs):
+        return _fake_review_result()
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics.review_dashboard_design",
+        _fake_review,
     )
 
     created = await client.post(
@@ -1236,6 +1386,67 @@ async def test_accept_dashboard_proposal_records_the_designer_created_dashboard(
     assert proposal["status"] == "accepted"
     assert proposal["assetId"] == dashboard.id
     assert proposal["assetUrl"] == f"/projects/{project['id']}/dashboards/{dashboard.id}"
+
+
+async def test_followup_while_dashboard_proposal_pending_regenerates_the_whole_design(
+    client, service_headers, monkeypatch
+):
+    """A message typed right after a pending dashboard proposal ("add a
+    chart for X") is folded onto the original request and the whole design
+    is regenerated -- it must not be treated as an unrelated new question,
+    and must not require the literal words "create a dashboard" again."""
+    _, _, project, headers = await _setup(client, service_headers, "conv-dashboard-refine")
+
+    seen_prompts: list[str] = []
+
+    async def _fake_review(req, **kwargs):
+        seen_prompts.append(req.prompt)
+        result = _fake_review_result()
+        if "backlog by priority" in req.prompt.lower():
+            result["suggestion"]["widgets"].append(
+                {
+                    "title": "Backlog aging",
+                    "chartType": "line",
+                    "businessQuestion": "How long has the backlog been open?",
+                    "sql": 'SELECT age_bucket, COUNT(*) FROM "revenue" GROUP BY age_bucket',
+                    "status": "valid",
+                }
+            )
+        return result
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics.review_dashboard_design",
+        _fake_review,
+    )
+
+    created = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={
+            "project_id": project["id"],
+            "initial_message": "Create a dashboard for revenue and backlog trends",
+        },
+        headers=headers,
+    )
+    assert created.status_code == 200, created.text
+    conversation = created.json()
+
+    followup = await client.post(
+        f"/api/conversational-analytics/conversations/{conversation['id']}/turns",
+        json={"message": "Also add a chart for backlog by priority"},
+        headers=headers,
+    )
+    assert followup.status_code == 200, followup.text
+    second_turn = followup.json()["turn"]
+
+    # The regenerated design must have been asked for using the ORIGINAL
+    # request plus the new instruction, not just the bare follow-up text --
+    # otherwise the model has no idea what dashboard is being refined.
+    assert len(seen_prompts) == 2
+    assert "revenue and backlog trends" in seen_prompts[1]
+    assert "backlog by priority" in seen_prompts[1]
+
+    widget_titles = {w["title"] for w in second_turn["artifact_proposal"]["dashboardDesign"]["widgets"]}
+    assert widget_titles == {"Revenue by month", "Backlog by priority", "Backlog aging"}
 
 
 async def test_artifact_decision_rejects_kind_mismatch_and_missing_turn(
@@ -1365,3 +1576,53 @@ def test_save_as_commands_recognize_demonstrative_plus_noun_phrasing() -> None:
         "Add this to a dashboard",
     ):
         assert artifact_intent(phrase) == ConversationalIntent.CREATE_DASHBOARD, phrase
+
+
+async def test_create_dashboard_requires_editor_access(client, service_headers, monkeypatch):
+    """A project-accessible but viewer-role user must not be able to trigger
+    dashboard generation from chat -- submit_turn's route only requires
+    Role.VIEWER, so this check has to happen inside execute_turn itself."""
+    tenant, _, project, owner_headers = await _setup(client, service_headers, "conv-dashboard-viewer")
+
+    r = await client.post(
+        f"/api/tenants/{tenant['id']}/users",
+        json={
+            "email": "viewer@test.com",
+            "display_name": "Viewer User",
+            "role": "viewer",
+            "external_id": "ext-conv-dashboard-viewer",
+        },
+        headers=service_headers,
+    )
+    assert r.status_code == 201, r.text
+    viewer = r.json()
+
+    r = await client.post(
+        f"/api/projects/{project['id']}/members",
+        json={"user_id": viewer["id"], "role": "viewer"},
+        headers=owner_headers,
+    )
+    assert r.status_code == 201, r.text
+
+    viewer_headers = _headers(tenant["id"], viewer["id"], role="viewer")
+
+    async def _fake_review(*args, **kwargs):
+        raise AssertionError("a viewer's dashboard request must never reach generation")
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics.review_dashboard_design",
+        _fake_review,
+    )
+
+    created = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={
+            "project_id": project["id"],
+            "initial_message": "Create a dashboard for revenue trends",
+        },
+        headers=viewer_headers,
+    )
+    assert created.status_code == 200, created.text
+    turn = created.json()["turns"][0]
+    assert turn["status"] == "error"
+    assert turn["artifact_proposal"] is None

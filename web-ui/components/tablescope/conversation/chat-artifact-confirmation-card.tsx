@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   IconCheck,
+  IconChartBar,
   IconDatabase,
   IconExternalLink,
   IconLayoutDashboard,
@@ -21,13 +22,11 @@ export function ChatArtifactConfirmationCard({
   conversationId,
   projectId,
   turn,
-  onReviewDashboard,
   onDecision,
 }: {
   conversationId: number;
   projectId: string;
   turn: ConversationTurn;
-  onReviewDashboard?: (turnId: number, prompt: string) => void;
   onDecision?: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -62,6 +61,8 @@ export function ChatArtifactConfirmationCard({
   const accepted = proposal.status === "accepted";
   const rejected = proposal.status === "rejected";
   const Icon = isQuery ? IconDatabase : IconLayoutDashboard;
+  const widgets = proposal.dashboardDesign?.widgets ?? [];
+  const partial = proposal.dashboardDesign?.supportStatus === "partially_supported";
 
   return (
     <section
@@ -85,6 +86,29 @@ export function ChatArtifactConfirmationCard({
           {(proposal.dataSources?.length ?? 0) > 0 && (
             <p className="mt-1 text-[11px] text-ink-tertiary">
               Grounded in {proposal.dataSources!.join(", ")}
+            </p>
+          )}
+          {widgets.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {widgets.map((widget, index) => (
+                <li
+                  key={`${widget.title}-${index}`}
+                  className="flex items-start gap-1.5 text-[12px] text-ink-secondary"
+                >
+                  <IconChartBar size={13} className="mt-0.5 shrink-0 text-ink-tertiary" />
+                  <span>
+                    <span className="font-medium text-ink-primary">{widget.title}</span>
+                    {widget.businessQuestion && (
+                      <span className="text-ink-tertiary"> — {widget.businessQuestion}</span>
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {partial && !accepted && !rejected && (
+            <p className="mt-2 text-[11px] text-warning">
+              Some requested data isn't fully available yet -- this design covers what could be validated.
             </p>
           )}
         </div>
@@ -119,27 +143,15 @@ export function ChatArtifactConfirmationCard({
               <IconX size={14} />
               Reject
             </Button>
-            {isQuery ? (
-              <Button
-                size="sm"
-                variant="primary"
-                disabled={decision.isPending}
-                onClick={() => decision.mutate("accept")}
-              >
-                <IconCheck size={14} />
-                {decision.isPending ? "Saving…" : "Save query"}
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                variant="primary"
-                disabled={!onReviewDashboard}
-                onClick={() => onReviewDashboard?.(turn.id, proposal.prompt)}
-              >
-                <IconLayoutDashboard size={14} />
-                Review & create
-              </Button>
-            )}
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={decision.isPending}
+              onClick={() => decision.mutate("accept")}
+            >
+              <IconCheck size={14} />
+              {decision.isPending ? "Creating…" : isQuery ? "Save query" : "Create"}
+            </Button>
           </>
         )}
       </div>
