@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { IconPinned, IconPinnedOff } from "@tabler/icons-react";
+import { cn } from "@/lib/cn";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { getUserMeta } from "@/lib/auth";
@@ -16,6 +18,19 @@ import {
 } from "@/lib/api/workspaces";
 import { WorkspaceActionsPane } from "./workspace-actions-pane";
 import { WorkspaceCardInfo } from "./workspace-card-info";
+import { WorkspaceChat } from "./workspace-chat";
+import { SelectionToolbar } from "./selection-toolbar";
+import { WorkspaceSnippetList } from "./workspace-snippet-list";
+import { useSelectionCapture } from "./use-selection-capture";
+import {
+  loadSnippets,
+  nextSnippetId,
+  normalizeSnippetText,
+  saveSnippets,
+  type SnippetTarget,
+  type WorkspaceSnippet,
+} from "./workspace-snippet-storage";
+import type { ConversationTurn } from "@/lib/api/conversational-analytics";
 import { WorkspaceFilesPane } from "./workspace-files-pane";
 import { WorkspacePreviewPane } from "./workspace-preview-pane";
 import { WorkspaceAddCard, type AddableResource } from "./workspace-add-card";
@@ -36,12 +51,32 @@ function friendlyError(err: unknown, fallback: string): string {
   return message;
 }
 
-/** Stand-in for drawer content until the metadata and chat panes land. */
-function DrawerPlaceholder({ text }: { text: string }) {
+/** Header toggle for the Chat/Notes panes: hides the Pinned Context panel
+ *  without discarding what's pinned or changing what still reaches the
+ *  assistant -- a display preference, not a clear. */
+function PinnedContextToggle({
+  hidden,
+  onClick,
+}: {
+  hidden: boolean;
+  onClick: () => void;
+}) {
   return (
-    <p className="px-3 py-4 text-center text-[12px] leading-relaxed text-ink-tertiary">
-      {text}
-    </p>
+    <button
+      type="button"
+      onClick={onClick}
+      title={hidden ? "Show pinned context" : "Hide pinned context"}
+      aria-label={hidden ? "Show pinned context" : "Hide pinned context"}
+      aria-pressed={!hidden}
+      className={cn(
+        "flex h-[26px] w-[26px] items-center justify-center rounded border",
+        hidden
+          ? "border-line-secondary bg-bg-primary text-ink-tertiary hover:bg-brand-50 hover:text-brand-500"
+          : "border-brand-500 bg-brand-50 text-brand-500",
+      )}
+    >
+      {hidden ? <IconPinnedOff size={14} /> : <IconPinned size={14} />}
+    </button>
   );
 }
 
@@ -58,6 +93,37 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
   // Which card is showing in Preview. Keyed by resource rather than card id so
   // the selection survives the optimistic id swap when cards are saved.
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // Pinned excerpts, per workspace and per target.
+  const [chatSnippets, setChatSnippets] = useState<WorkspaceSnippet[]>([]);
+  const [noteSnippets, setNoteSnippets] = useState<WorkspaceSnippet[]>([]);
+  // Purely a display toggle -- hides the Pinned Context panel without
+  // discarding what's pinned or changing what's sent to the assistant.
+  const [chatPinnedHidden, setChatPinnedHidden] = useState(false);
+  const [notesPinnedHidden, setNotesPinnedHidden] = useState(false);
+  // The live turns of each drawer chat, so ↗ can lift the last exchange.
+  const drawerTurns = useRef<Record<string, ConversationTurn[]>>({});
+
+  useEffect(() => {
+    if (activeId == null) {
+      setChatSnippets([]);
+      setNoteSnippets([]);
+      return;
+    }
+    setChatSnippets(loadSnippets(projectId, activeId, "chat"));
+    setNoteSnippets(loadSnippets(projectId, activeId, "notes"));
+  }, [projectId, activeId]);
+
+  const paneTitles = useMemo(
+    () => ({
+      files: "Documents",
+      preview: "Preview",
+      chat: "Chat",
+      notes: "Notes",
+      actions: "Actions",
+    }),
+    [],
+  );
+  const { selection, clear: clearSelection } = useSelectionCapture(paneTitles);
 
   useEffect(() => {
     let cancelled = false;
@@ -210,6 +276,71 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
       (card) => `${card.resource_type}:${card.resource_id}` === selectedKey,
     ) ?? null;
 
+  const revealChatPane = useCallback(() => {
+    if (!paneLayout.isVisible("chat")) paneLayout.togglePaneVisible("chat");
+    if (paneLayout.isCollapsed("chat")) paneLayout.expand("chat");
+  }, [paneLayout]);
+
+  const addSnippet = useCallback(
+    (target: SnippetTarget, label: string, text: string) => {
+      if (activeId == null) return;
+      const body = normalizeSnippetText(text);
+      if (!body) return;
+      const next = [
+        ...(target === "chat" ? chatSnippets : noteSnippets),
+        {
+          id: nextSnippetId(target === "chat" ? chatSnippets : noteSnippets),
+          projectId,
+          workspaceId: activeId,
+          label,
+          text: body,
+          createdAt: new Date().toISOString(),
+        },
+      ];
+      if (target === "chat") {
+        setChatSnippets(next);
+        revealChatPane();
+      } else {
+        setNoteSnippets(next);
+        if (!paneLayout.isVisible("notes")) paneLayout.togglePaneVisible("notes");
+      }
+      saveSnippets(projectId, activeId, target, next);
+    },
+    [activeId, chatSnippets, noteSnippets, paneLayout, projectId, revealChatPane],
+  );
+
+  /** The drawer's ↗: lift that conversation's last exchange into the Chat pane
+   *  as a pinned excerpt. The turns themselves already live in the shared
+   *  project thread; what this captures is *which* part of a long conversation
+   *  the user judged worth keeping. */
+  const sendLastExchangeToChat = useCallback(
+    (paneTitle: string, turns: ConversationTurn[]) => {
+      const last = turns[turns.length - 1];
+      if (!last) {
+        revealChatPane();
+        return;
+      }
+      const parts = [last.user_message, last.assistant_message]
+        .filter((part): part is string => Boolean(part?.trim()))
+        .join(" — ");
+      addSnippet("chat", `${paneTitle} chat`, parts);
+    },
+    [addSnippet, revealChatPane],
+  );
+
+  const removeSnippet = useCallback(
+    (target: SnippetTarget, id: number) => {
+      if (activeId == null) return;
+      const next = (target === "chat" ? chatSnippets : noteSnippets).filter(
+        (s) => s.id !== id,
+      );
+      if (target === "chat") setChatSnippets(next);
+      else setNoteSnippets(next);
+      saveSnippets(projectId, activeId, target, next);
+    },
+    [activeId, chatSnippets, noteSnippets, projectId],
+  );
+
   const panes: PaneSpec[] = [
     {
       id: "files",
@@ -234,32 +365,93 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
         />
       ),
       info: <WorkspaceCardInfo projectId={projectId} card={selectedCard} />,
-      chat: <DrawerPlaceholder text="Ask about the documents in this workspace." />,
-      onSendChatToPane: () => undefined,
+      chat: (
+        <WorkspaceChat
+          projectId={projectId}
+          cards={active?.cards ?? []}
+          focusedCard={selectedCard}
+          resume={false}
+          onTurnsChange={(turns) => {
+            drawerTurns.current.files = turns;
+          }}
+        />
+      ),
+      onSendChatToPane: () =>
+        sendLastExchangeToChat("Documents", drawerTurns.current.files ?? []),
     },
     {
       id: "preview",
       title: "Preview",
       body: <WorkspacePreviewPane projectId={projectId} card={selectedCard} />,
       info: <WorkspaceCardInfo projectId={projectId} card={selectedCard} />,
-      chat: <DrawerPlaceholder text="Ask about the item shown in Preview." />,
-      onSendChatToPane: () => undefined,
+      chat: (
+        <WorkspaceChat
+          projectId={projectId}
+          cards={active?.cards ?? []}
+          focusedCard={selectedCard}
+          resume={false}
+          onTurnsChange={(turns) => {
+            drawerTurns.current.preview = turns;
+          }}
+        />
+      ),
+      onSendChatToPane: () =>
+        sendLastExchangeToChat("Preview", drawerTurns.current.preview ?? []),
     },
     {
       id: "chat",
       title: "Chat",
+      // The one surface that resumes the project's workspace thread: the
+      // drawers show only what was asked in them, this shows the whole history.
+      // It also holds the pinned excerpts, which travel with every question.
+      actions: (
+        <PinnedContextToggle
+          hidden={chatPinnedHidden}
+          onClick={() => setChatPinnedHidden((v) => !v)}
+        />
+      ),
       body: (
-        <p className="flex flex-1 items-center justify-center px-5 text-center text-[12px] leading-relaxed text-ink-tertiary">
-          Ask about the documents
-          <br />
-          loaded into this workspace.
-        </p>
+        <WorkspaceChat
+          projectId={projectId}
+          cards={active?.cards ?? []}
+          focusedCard={selectedCard}
+          resume
+          snippets={chatSnippets}
+          hidePinned={chatPinnedHidden}
+          onRemoveSnippet={(id) => removeSnippet("chat", id)}
+          onClearSnippets={() => {
+            if (activeId == null) return;
+            setChatSnippets([]);
+            saveSnippets(projectId, activeId, "chat", []);
+          }}
+        />
       ),
     },
     {
       id: "notes",
       title: "Notes",
-      body: (
+      actions: (
+        <PinnedContextToggle
+          hidden={notesPinnedHidden}
+          onClick={() => setNotesPinnedHidden((v) => !v)}
+        />
+      ),
+      body: notesPinnedHidden ? (
+        <p className="flex flex-1 items-center justify-center px-5 text-center text-[12px] leading-relaxed text-ink-tertiary">
+          Pinned context is hidden.
+        </p>
+      ) : noteSnippets.length > 0 ? (
+        <WorkspaceSnippetList
+          snippets={noteSnippets}
+          onRemove={(id) => removeSnippet("notes", id)}
+          onClear={() => {
+            if (activeId == null) return;
+            setNoteSnippets([]);
+            saveSnippets(projectId, activeId, "notes", []);
+          }}
+          storageKey="notes"
+        />
+      ) : (
         <p className="flex flex-1 items-center justify-center px-5 text-center text-[12px] leading-relaxed text-ink-tertiary">
           Select text in any pane
           <br />
@@ -270,8 +462,22 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
     {
       id: "actions",
       title: "Actions",
-      body: <WorkspaceActionsPane projectId={projectId} workspaceId={activeId} />,
-      chat: <DrawerPlaceholder text="Ask the assistant about these actions." />,
+      body: (
+        <WorkspaceActionsPane
+          projectId={projectId}
+          workspaceId={activeId}
+          cards={active?.cards ?? []}
+          focusedCard={selectedCard}
+        />
+      ),
+      chat: (
+        <WorkspaceChat
+          projectId={projectId}
+          cards={active?.cards ?? []}
+          focusedCard={selectedCard}
+          resume={false}
+        />
+      ),
       onSendChatToPane: () => undefined,
     },
   ];
@@ -314,6 +520,25 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
         <div className="flex min-h-0 flex-1 flex-col px-3 py-3">
           <WorkspacePanes layout={paneLayout} panes={panes} />
         </div>
+        {/* Rendered at the screen level, not inside a pane: a pane clips its
+            own overflow, which would cut the toolbar off near an edge. */}
+        {selection && activeId != null && (
+          <SelectionToolbar
+            selection={selection}
+            onCopy={() => {
+              void navigator.clipboard?.writeText(selection.text);
+              clearSelection();
+            }}
+            onSendToChat={() => {
+              addSnippet("chat", selection.paneLabel, selection.text);
+              clearSelection();
+            }}
+            onSendToNotes={() => {
+              addSnippet("notes", selection.paneLabel, selection.text);
+              clearSelection();
+            }}
+          />
+        )}
       </div>
     </ProjectShell>
   );

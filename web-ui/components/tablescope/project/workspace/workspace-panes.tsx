@@ -221,6 +221,12 @@ export function WorkspacePanes({
   return (
     <>
       <DndContext
+        // Explicit id, not dnd-kit's default. Without it the `aria-describedby`
+        // it puts on every pane header comes from a module-level counter
+        // (`useUniqueId` in @dnd-kit/utilities), which starts at a different
+        // value on the server than on the client -- so React reported a
+        // hydration mismatch on first paint of this page.
+        id="workspace-panes"
         sensors={sensors}
         collisionDetection={closestCenter}
         onDragStart={(event: DragStartEvent) => setDraggingId(event.active.id as PaneId)}

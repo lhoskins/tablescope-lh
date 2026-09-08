@@ -137,6 +137,10 @@ export interface SubmitCanonicalTurnRequest {
     resource_type: WorkspaceResourceType;
     resource_id: number;
   };
+  /** Passages the user pinned to the conversation -- text selected from a
+   *  document, or an answer worth carrying forward. Quoted to the model
+   *  verbatim, unlike `active_resources`, which names whole items. */
+  context_snippets?: { label: string; text: string }[];
 }
 
 export interface SubmitCanonicalTurnResponse {

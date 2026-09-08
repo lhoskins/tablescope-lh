@@ -1,14 +1,44 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { IconPlus, IconSparkles, IconTrash } from "@tabler/icons-react";
 import { cn } from "@/lib/cn";
+import { useWorkspaceChat } from "./use-workspace-chat";
+import type { WorkspaceCard } from "@/lib/api/workspaces";
 import {
   loadDraftActions,
   nextDraftActionId,
   saveDraftActions,
   type DraftAction,
 } from "./workspace-actions-storage";
+
+/**
+ * Pull individual actions out of an assistant reply.
+ *
+ * The model is asked for one action per line, but replies arrive with bullets,
+ * numbering, bold markers and the occasional "Here are some actions:" preamble.
+ * Rather than trust the format, take only lines that look like list items and
+ * strip their decoration; a reply that ignores the format yields nothing and
+ * leaves the user's own typed actions untouched.
+ */
+export function parseSuggestedActions(message: string | null): string[] {
+  if (!message) return [];
+  return message
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^([-*•]|\d+[.)])\s+/.test(line))
+    .map((line) =>
+      line
+        .replace(/^([-*•]|\d+[.)])\s+/, "")
+        // Markdown emphasis and code spans appear mid-sentence, not just at the
+        // ends -- an anchored strip left backticks around identifiers intact.
+        .replace(/\*\*/g, "")
+        .replace(/`/g, "")
+        .trim(),
+    )
+    .filter((line) => line.length > 0 && line.length <= 300)
+    .slice(0, 10);
+}
 
 /**
  * The step before Project Actions: jot down what you want done while you're
@@ -19,19 +49,26 @@ import {
 export function WorkspaceActionsPane({
   projectId,
   workspaceId,
-  onSuggest,
-  suggesting = false,
+  cards,
+  focusedCard,
 }: {
   projectId: string;
   workspaceId: number | null;
-  /** Ask the assistant for actions given what the user described. Wired to the
-   *  workspace chat; until that lands the button stays disabled. */
-  onSuggest?: (context: string) => void;
-  suggesting?: boolean;
+  /** Grounding for suggestions: the workspace's cards, and the one being read. */
+  cards: WorkspaceCard[];
+  focusedCard?: WorkspaceCard | null;
 }) {
   const [actions, setActions] = useState<DraftAction[]>([]);
   const [draft, setDraft] = useState("");
   const [context, setContext] = useState("");
+  const { send, busy, turns, error } = useWorkspaceChat({
+    projectId,
+    cards,
+    focusedCard,
+    resume: false,
+  });
+  // Turns arriving from a suggestion request become checkable draft actions.
+  const consumedTurns = useRef(0);
 
   useEffect(() => {
     setActions(workspaceId == null ? [] : loadDraftActions(projectId, workspaceId));
@@ -42,22 +79,55 @@ export function WorkspaceActionsPane({
     if (workspaceId != null) saveDraftActions(projectId, workspaceId, next);
   };
 
-  const add = () => {
-    const text = draft.trim();
-    if (!text || workspaceId == null) return;
+  const appendActions = (texts: string[], suggested: boolean) => {
+    if (workspaceId == null || texts.length === 0) return;
+    let nextId = nextDraftActionId(actions);
     persist([
       ...actions,
-      {
-        id: nextDraftActionId(actions),
+      ...texts.map((text) => ({
+        id: nextId++,
         projectId,
         workspaceId,
         text,
+        suggested: suggested || undefined,
         done: false,
         createdAt: new Date().toISOString(),
-      },
+      })),
     ]);
+  };
+
+  const add = () => {
+    const text = draft.trim();
+    if (!text) return;
+    appendActions([text], false);
     setDraft("");
   };
+
+  const suggest = () => {
+    const situation = context.trim();
+    if (!situation || busy) return;
+    // Asked as a question rather than an instruction, and grounded on the
+    // workspace's cards by the shared chat hook.
+    void send(
+      `${situation}\n\nBased on the items open in this workspace, what are the ` +
+        "most useful next actions? Reply as a short list, one action per line.",
+    );
+  };
+
+  // Turn the assistant's reply into draft actions the user can tick off.
+  useEffect(() => {
+    if (turns.length <= consumedTurns.current) return;
+    const latest = turns[turns.length - 1];
+    consumedTurns.current = turns.length;
+    const suggestions = parseSuggestedActions(latest.assistant_message);
+    if (suggestions.length > 0) {
+      appendActions(suggestions, true);
+      setContext("");
+    }
+    // `appendActions` closes over `actions`, which this effect also updates via
+    // persist -- depending on it would re-run and duplicate the suggestions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turns]);
 
   if (workspaceId == null) {
     return (
@@ -156,18 +226,19 @@ export function WorkspaceActionsPane({
         />
         <button
           type="button"
-          onClick={() => onSuggest?.(context.trim())}
-          disabled={!onSuggest || !context.trim() || suggesting}
-          title={
-            onSuggest
-              ? "Ask the assistant for actions based on this workspace"
-              : "Available once the workspace chat is wired up"
-          }
+          onClick={suggest}
+          disabled={!context.trim() || busy}
+          title="Ask the assistant for actions based on this workspace"
           className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-line-secondary bg-bg-primary text-[12px] font-medium text-ink-secondary hover:bg-brand-50 hover:text-brand-500 disabled:opacity-40"
         >
           <IconSparkles size={14} />
-          {suggesting ? "Thinking…" : "Suggest actions"}
+          {busy ? "Thinking…" : "Suggest actions"}
         </button>
+        {error && (
+          <p role="alert" className="text-[11px] text-danger">
+            {error}
+          </p>
+        )}
       </div>
     </div>
   );
