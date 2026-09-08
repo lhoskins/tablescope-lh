@@ -780,6 +780,30 @@ const routes: MockRoute[] = [
     respond: () => [],
   },
 
+  // ── Shell chrome ───────────────────────────────────────────────────────
+  // Unmocked, these fell through to a real backend and filled the console with
+  // connection/CORS errors on every project page.
+  {
+    method: "GET",
+    test: /\/api\/mfa\/status/,
+    respond: () => ({ enabled: false, enrolled: false, required: false }),
+  },
+  {
+    method: "GET",
+    test: /\/api\/projects\/\d+\/members/,
+    // Shape per ProjectMember in lib/ui/use-project-data/project-member.ts.
+    respond: (url) => [
+      {
+        project_id: Number(/\/projects\/(\d+)\//.exec(url)?.[1] ?? 1),
+        user_id: MOCK_USER_ID,
+        role: "owner",
+        is_active: true,
+        email: "design.preview@vitruvity.test",
+        display_name: "Design Preview",
+      },
+    ],
+  },
+
   // ── Preview pane ───────────────────────────────────────────────────────
   {
     // Structured document preview -- see app/services/document_preview.py for
