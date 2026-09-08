@@ -7,6 +7,7 @@ import { apiClient } from "@/lib/api-client";
 import { useBuilderStore } from "@/lib/stores/data-source-builder-store";
 import { analyzeFile } from "@/lib/api/data-source-builder";
 import { sessionSourceFromPreview } from "./import-source";
+import { usePendingDocumentsStore } from "@/lib/stores/pending-documents-store";
 import {
   FALLBACK_CAPABILITIES,
   acceptAttribute,
@@ -96,6 +97,15 @@ export function AiUploadDropzone({
     );
   }, []);
 
+  const stageDocument = usePendingDocumentsStore((s) => s.add);
+
+  // Anything that finished -- data source or document -- now has its own card
+  // in the staged grid below, badged with what it became. Keeping the intake
+  // card as well showed every file twice. What is left here is genuinely
+  // transient: still classifying, still uploading, waiting on the "use as
+  // data / use as document" choice, or failed.
+  const visibleItems = items.filter((item) => item.status !== "done");
+
   const ingestStructured = useCallback(
     async (file: File) => {
       if (hasSource((s) => s.isFileUpload && s.displayName === file.name)) {
@@ -113,9 +123,14 @@ export function AiUploadDropzone({
   const ingestDocument = useCallback(
     async (file: File) => {
       if (!projectId) {
-        throw new Error(
-          `${file.name} is a document — open this upload from a project to add it.`,
-        );
+        // No project yet -- the usual case from Home. A document's upload
+        // route carries the project in its path, so hold the File and send it
+        // once a project is settled. See lib/stores/pending-documents-store.
+        const staged = stageDocument(file);
+        if (!staged) {
+          throw new Error(`${file.name} is already staged.`);
+        }
+        return "Staged — will be added when you choose a project.";
       }
       await apiClient.upload(`/api/projects/${projectId}/assets/upload`, file, {
         asset_type: "document",
@@ -123,7 +138,7 @@ export function AiUploadDropzone({
       });
       return "Added to Documents — extraction and indexing continue in the background.";
     },
-    [projectId],
+    [projectId, stageDocument],
   );
 
   const route = useCallback(
@@ -277,13 +292,13 @@ export function AiUploadDropzone({
         />
       </button>
 
-      {items.length > 0 && (
+      {visibleItems.length > 0 && (
         // Cards, not rows: the intake result is the only place the file's
         // classification, reason and staged name are shown, and as full-width
         // rows they read as a log above the staged set rather than as the
         // things themselves.
         <ul className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {items.map((item) => (
+          {visibleItems.map((item) => (
             <li
               key={item.id}
               className={`flex flex-col rounded-xl border bg-bg-primary p-3.5 ${

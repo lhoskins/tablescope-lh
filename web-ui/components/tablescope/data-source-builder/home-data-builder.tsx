@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { ActionCard, ActionCenter } from "@/components/tablescope/project/action-center";
 import { NewProjectDialog } from "@/components/tablescope/project/new-project-dialog";
 import { useBuilderStore } from "@/lib/stores/data-source-builder-store";
+import { usePendingDocumentsStore } from "@/lib/stores/pending-documents-store";
+import { apiClient } from "@/lib/api-client";
 import { QuickAddDataSourceWorkspace } from "./quick-add-workspace";
 import type { SourceTab } from "./source-method-tabs";
 import { ConnectedSourcesSection } from "./connected-sources-section";
@@ -62,14 +64,59 @@ export function HomeDataBuilder({
   // Set when "Start New Project" created the project, so the confirm modal's
   // success can land the user in it.
   const [createdProjectId, setCreatedProjectId] = useState<string | null>(null);
+  const [docError, setDocError] = useState<string | null>(null);
+
+  const pendingDocuments = usePendingDocumentsStore((s) => s.documents);
+  const clearDocuments = usePendingDocumentsStore((s) => s.clear);
+
+  /**
+   * Send the documents that were waiting on a project.
+   *
+   * Data sources go through applyChanges in the confirm modal; documents can't
+   * -- their route is /projects/{id}/assets/upload and applyChanges has no
+   * concept of them. So they are uploaded here, to the one project, once the
+   * id exists. A document belongs in one place, so multi-project assignment
+   * sends them to the first project chosen.
+   */
+  const uploadPendingDocuments = useCallback(
+    async (projectId: string) => {
+      const docs = usePendingDocumentsStore.getState().documents;
+      if (docs.length === 0) return;
+      const failed: string[] = [];
+      for (const doc of docs) {
+        try {
+          await apiClient.upload(
+            `/api/projects/${projectId}/assets/upload`,
+            doc.file,
+            { asset_type: "document", visibility: "shared_project" },
+          );
+        } catch {
+          failed.push(doc.fileName);
+        }
+      }
+      clearDocuments();
+      setDocError(
+        failed.length > 0
+          ? `Couldn't add ${failed.join(", ")}. Add ${failed.length === 1 ? "it" : "them"} from the project's Documents.`
+          : null,
+      );
+    },
+    [clearDocuments],
+  );
 
   const pending = useMemo(
     () => getPendingChanges(),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [getPendingChanges, sources, projects],
   );
-  const hasStaged = createdKeys.length > 0;
+  // Documents count as staged: a PDF on its own is a legitimate thing to
+  // arrive with, and gating the buttons on data sources alone left the user
+  // stuck with no way forward.
+  const hasStaged = createdKeys.length > 0 || pendingDocuments.length > 0;
+  const onlyDocuments = createdKeys.length === 0 && pendingDocuments.length > 0;
   const canApply = pending.adding.length > 0 || pending.removing.length > 0;
+
+  const firstTargetId = projects.find((p) => p.isToggled)?.projectId ?? null;
 
   const sourcesAdding = useMemo(
     () => pending.adding.reduce((n, a) => n + a.tableNames.length, 0),
@@ -108,9 +155,18 @@ export function HomeDataBuilder({
           scopeIds: [],
         },
       ]);
-      setConfirmOpen(true);
+      void uploadPendingDocuments(projectId).then(() => {
+        // With no data sources there is nothing for the confirm modal to
+        // apply, so go straight to the project rather than showing an empty
+        // review step.
+        if (useBuilderStore.getState().createdKeys.length === 0) {
+          router.push(`/projects/${projectId}/workspace`);
+          return;
+        }
+        setConfirmOpen(true);
+      });
     },
-    [queryClient, setProjects],
+    [queryClient, router, setProjects, uploadPendingDocuments],
   );
 
   const onConfirmClose = useCallback(() => {
@@ -126,6 +182,7 @@ export function HomeDataBuilder({
     <>
       <Button
         variant="secondary"
+        size="lg"
         disabled={!hasStaged}
         onClick={() => setAssigning(true)}
       >
@@ -133,6 +190,7 @@ export function HomeDataBuilder({
       </Button>
       <Button
         variant="primary"
+        size="lg"
         disabled={!hasStaged}
         onClick={() => setNewProjectOpen(true)}
       >
@@ -168,7 +226,7 @@ export function HomeDataBuilder({
           tenantName={tenantName}
           initialSourceTab={method}
           footer={footer}
-          heightClass="h-[calc(100vh-13rem)]"
+          heightClass=""
         />
       )}
 
@@ -189,8 +247,13 @@ export function HomeDataBuilder({
               </Button>
               <Button
                 variant="primary"
-                disabled={!canApply}
-                onClick={() => setConfirmOpen(true)}
+                size="lg"
+                disabled={!canApply && !(onlyDocuments && firstTargetId)}
+                onClick={() => {
+                  if (firstTargetId) void uploadPendingDocuments(firstTargetId);
+                  if (canApply) setConfirmOpen(true);
+                  else setAssigning(false);
+                }}
               >
                 Assign
               </Button>
@@ -201,6 +264,12 @@ export function HomeDataBuilder({
 
       {tab === "connected" && <ConnectedSourcesSection />}
       {tab === "all" && <AllDataSourcesPanel />}
+
+      {docError && (
+        <p role="alert" className="text-small text-danger">
+          {docError}
+        </p>
+      )}
 
       <ConfirmationModal
         open={confirmOpen}

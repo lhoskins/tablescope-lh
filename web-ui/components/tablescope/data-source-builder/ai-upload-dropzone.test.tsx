@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { usePendingDocumentsStore } from "@/lib/stores/pending-documents-store";
 import { AiUploadDropzone } from "./ai-upload-dropzone";
 import type { Classification } from "@/lib/uploads/intake";
 
@@ -139,7 +140,10 @@ describe("AiUploadDropzone (unified intake)", () => {
     expect(upload).not.toHaveBeenCalled();
   });
 
-  it("refuses a document upload when no project context is available", async () => {
+  it("stages a document instead of uploading it when there is no project", async () => {
+    // A document's route carries the project in its path, so with no project
+    // the File is held until one is chosen -- previously this was refused
+    // outright, which left a Home user with a PDF and nowhere to go.
     classifyFile.mockResolvedValue(
       classification({
         extension: ".pdf",
@@ -150,9 +154,12 @@ describe("AiUploadDropzone (unified intake)", () => {
     render(<AiUploadDropzone />);
     await pick("policy.pdf", "application/pdf");
 
-    expect(
-      await screen.findByText(/open this upload from a project/i),
-    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        usePendingDocumentsStore.getState().documents.map((d) => d.fileName),
+      ).toEqual(["policy.pdf"]),
+    );
+    // Still not uploaded -- there is nowhere to put it yet.
     expect(upload).not.toHaveBeenCalled();
   });
 

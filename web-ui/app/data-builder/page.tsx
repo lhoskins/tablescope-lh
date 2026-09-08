@@ -64,8 +64,14 @@ function DataBuilderPage() {
         <span className="text-h2 text-ink-primary">Data Builder</span>
       }
     >
+      {/* Not `tenant.name`: that falls back to "Tablescope" until identity
+          loads, and the builder store's ensureTenant wipes the whole staged
+          session whenever the key changes -- so a file staged before identity
+          arrived vanished the moment the real tenant name did. The empty
+          string is the in-project page's convention; ensureTenant early-returns
+          on it. */}
       <HomeDataBuilder
-        tenantName={tenant.name}
+        tenantName={identity?.tenant.name ?? ""}
         tab={tab}
         method={method}
         onTabChange={(next) =>
