@@ -40,9 +40,14 @@ export function WorkspaceCanvas({
 
   if (cards.length === 0) {
     return (
-      <p className="px-5 py-8 text-[13px] text-ink-tertiary">
-        This workspace is empty. Open a table, dashboard or document to add it as a card.
-      </p>
+      <div className="px-5 py-8 text-[13px] text-ink-tertiary">
+        <p className="text-ink-secondary">This workspace is empty.</p>
+        <p className="mt-3 max-w-md leading-relaxed">
+          To begin, drag tables, documents or data sources from the left-hand
+          sidebar, or use the <span className="whitespace-nowrap">+ Add file</span>{" "}
+          button in the menu pane.
+        </p>
+      </div>
     );
   }
 
