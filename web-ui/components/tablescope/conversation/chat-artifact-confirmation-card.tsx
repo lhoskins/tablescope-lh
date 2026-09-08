@@ -108,7 +108,7 @@ export function ChatArtifactConfirmationCard({
           )}
           {partial && !accepted && !rejected && (
             <p className="mt-2 text-[11px] text-warning">
-              Some requested data isn't fully available yet -- this design covers what could be validated.
+              Some requested data isn&apos;t fully available yet -- this design covers what could be validated.
             </p>
           )}
         </div>
