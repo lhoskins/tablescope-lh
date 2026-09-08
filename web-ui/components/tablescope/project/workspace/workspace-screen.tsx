@@ -9,7 +9,6 @@ import { getUserMeta } from "@/lib/auth";
 import {
   createWorkspace,
   deleteWorkspace,
-  listWorkspaces,
   publishWorkspace,
   unpublishWorkspace,
   updateWorkspace,
@@ -38,6 +37,8 @@ import { toCardPatch } from "./workspace-canvas";
 import { PaneViewsToggle, WorkspacePanes, type PaneSpec } from "./workspace-panes";
 import { usePaneLayout } from "./use-pane-layout";
 import { WorkspaceTabBar } from "./workspace-tab-bar";
+import { nextUntitledName } from "./workspace-default-name";
+import { loadOrBootstrapWorkspaces } from "./workspace-bootstrap";
 
 /** A dead network request surfaces as the browser's own wording -- "Load
  *  failed" in Safari, "Failed to fetch" in Chrome -- which tells the user
@@ -129,7 +130,7 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
     let cancelled = false;
     async function load() {
       try {
-        const list = await listWorkspaces(projectId);
+        const list = await loadOrBootstrapWorkspaces(projectId);
         if (cancelled) return;
         setWorkspaces(list);
         setActiveId((current) => current ?? list[0]?.id ?? null);
@@ -155,7 +156,7 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
     setError(null);
     try {
       const created = await createWorkspace(projectId, {
-        name: `Workspace ${workspaces.length + 1}`,
+        name: nextUntitledName(workspaces),
       });
       setWorkspaces((prev) => [...prev, created]);
       setActiveId(created.id);
@@ -164,7 +165,7 @@ export function WorkspaceScreen({ projectId }: { projectId: string }) {
     } finally {
       setCreating(false);
     }
-  }, [projectId, workspaces.length]);
+  }, [projectId, workspaces]);
 
   const onCardsChange = useCallback(
     async (cards: WorkspaceCard[]) => {

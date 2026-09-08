@@ -98,7 +98,7 @@ export function WorkspaceAddCard({
         title="Add a table, document or data source"
         className="flex h-[26px] items-center gap-1 rounded border border-line-secondary bg-bg-primary px-2 text-[12px] font-medium text-ink-secondary hover:bg-brand-50 hover:text-brand-500"
       >
-        <IconPlus size={13} /> Add card
+        <IconPlus size={13} /> Add file
       </button>
       {open && (
         <ul

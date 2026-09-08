@@ -40,7 +40,10 @@ export function NewProjectDialog({
       setError(null);
       onClose();
       onCreated?.(created.id);
-      if (redirect) router.push(`/projects/${created.id}`);
+      // A brand-new project has no activity to show on Overview -- send the
+      // creator straight to the Workspace, where the first thing they'd do
+      // (pin a table, upload a file) actually lives.
+      if (redirect) router.push(`/projects/${created.id}/workspace`);
     },
     onError: (err: Error) => setError(err.message),
   });
@@ -48,9 +51,19 @@ export function NewProjectDialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px]"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="new-project-title"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <div className="w-full max-w-md rounded-xl border border-line-tertiary bg-bg-primary p-5 shadow-lg">
-        <h2 className="text-h2 text-ink-primary">New project</h2>
+        <h2 id="new-project-title" className="text-h2 text-ink-primary">
+          New project
+        </h2>
         <form
           className="mt-4 space-y-4"
           onSubmit={(e) => {
@@ -74,7 +87,7 @@ export function NewProjectDialog({
           </div>
           <div>
             <label className="mb-1 block text-small font-medium text-ink-secondary">
-              Description
+              What is it you are trying to accomplish?
             </label>
             <input
               value={description}
