@@ -322,6 +322,18 @@ class ActiveResourceRef(BaseModel):
     resource_id: int
 
 
+class ContextSnippet(BaseModel):
+    """A passage the user pinned to the conversation.
+
+    Bounded here rather than trusted from the client: these are concatenated
+    into the prompt, and the prompt has a hard ceiling that vLLM enforces with
+    a 400 rather than truncation.
+    """
+
+    label: str = Field(default="", max_length=200)
+    text: str = Field(..., min_length=1, max_length=2000)
+
+
 class SubmitCanonicalTurnRequest(BaseModel):
     surface: str = Field(..., max_length=32)
     project_id: int | None = Field(default=None)
@@ -336,6 +348,16 @@ class SubmitCanonicalTurnRequest(BaseModel):
     # A named workspace pins several cards at once. When present this list
     # supersedes the single pair above, which stays for existing callers.
     active_resources: list[ActiveResourceRef] | None = Field(default=None)
+    # Which of the active_resources the user is actually reading -- the card
+    # open in the workspace's preview pane. Additive to the list rather than a
+    # replacement for it: the assistant answers about this item by default and
+    # still sees the others for context.
+    focused_resource: ActiveResourceRef | None = Field(default=None)
+    # Excerpts the user deliberately pinned to this conversation: text selected
+    # from a document, or an answer worth carrying forward. Unlike
+    # active_resources (whole items) these are the specific passages someone
+    # judged relevant, so they are quoted to the model verbatim.
+    context_snippets: list[ContextSnippet] | None = Field(default=None)
 
 
 class SubmitCanonicalTurnResponse(BaseModel):
@@ -379,6 +401,16 @@ async def submit_canonical_turn(
             active_resources=(
                 [(r.resource_type, r.resource_id) for r in req.active_resources]
                 if req.active_resources
+                else None
+            ),
+            focused_resource=(
+                (req.focused_resource.resource_type, req.focused_resource.resource_id)
+                if req.focused_resource
+                else None
+            ),
+            context_snippets=(
+                [(s.label, s.text) for s in req.context_snippets]
+                if req.context_snippets
                 else None
             ),
         )

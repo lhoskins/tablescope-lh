@@ -1,7 +1,7 @@
 "use client";
 
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   IconArrowLeft,
@@ -44,8 +44,10 @@ export function QueryResultView({
 }: {
   projectId: string;
   query: SavedQuery;
-  backLabel: string;
-  onBack: () => void;
+  /** Omitted when embedded (the Workspace's Preview pane), where there is no
+   *  previous screen to go back to. */
+  backLabel?: string;
+  onBack?: () => void;
   onEdit?: () => void;
 }) {
   const { data, isLoading, error } = useQuery({
@@ -62,16 +64,22 @@ export function QueryResultView({
   });
 
   const { data: allQueries } = useProjectQueries(projectId);
-  const availableQueries = (allQueries ?? []).map((q) => ({
-    id: q.id,
-    name: q.name,
-    sql: q.sql_text,
-    leftDatasource: q.left_datasource,
-  }));
+  // Memoized because the grid uses this as an effect dependency: rebuilt every
+  // render, it re-ran that effect every render.
+  const availableQueries = useMemo(
+    () =>
+      (allQueries ?? []).map((q) => ({
+        id: q.id,
+        name: q.name,
+        sql: q.sql_text,
+        leftDatasource: q.left_datasource,
+      })),
+    [allQueries],
+  );
 
   return (
     <div className="space-y-4">
-      <DetailBackBar label={backLabel} onBack={onBack} />
+      {backLabel && onBack && <DetailBackBar label={backLabel} onBack={onBack} />}
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-h1 text-ink-primary">{query.name}</h1>

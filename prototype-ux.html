@@ -991,5 +991,177 @@ function initDs(f){
 }
 initDs('all');
 </script>
+
+<!-- ══════════════════════════════════════════════════════
+     AUDIT LAYER — added by Claude, purely additive.
+     Scans clickable-looking elements and flags which ones have
+     no onclick AND no data-intent annotation yet. Does not touch
+     showScreen() or any existing behavior. Safe to delete this
+     block (from here to the matching </script> below) any time.
+     ══════════════════════════════════════════════════════ -->
+<script>
+(function(){
+  var SELECTOR = 'button, a[href], [role="button"], .nav-card, .nav-row, .vt-btn, .ws-icon-btn, .plus-btn, .ws-tab, .rp-tab, .sw-btn';
+
+  function label(el){
+    var t = (el.textContent || '').trim().replace(/\s+/g,' ');
+    if (t) return t.length > 40 ? t.slice(0,40) + '…' : t;
+    var aria = el.getAttribute('aria-label');
+    if (aria) return aria;
+    return '(' + el.tagName.toLowerCase() + (el.className ? '.' + String(el.className).split(' ')[0] : '') + ')';
+  }
+
+  function classify(el){
+    var hasOnclick = !!el.getAttribute('onclick');
+    var intent = el.getAttribute('data-intent');
+    if (intent) return { status: 'annotated', intent: intent, hasOnclick: hasOnclick };
+    if (hasOnclick) return { status: 'wired', intent: null, hasOnclick: true };
+    return { status: 'unaddressed', intent: null, hasOnclick: false };
+  }
+
+  function scan(){
+    var els = Array.prototype.slice.call(document.querySelectorAll(SELECTOR));
+    return els.map(function(el){
+      var c = classify(el);
+      return { el: el, label: label(el), status: c.status, intent: c.intent, onclick: el.getAttribute('onclick') };
+    });
+  }
+
+  var auditOn = false;
+
+  function paintAudit(items){
+    items.forEach(function(it){
+      it.el.classList.remove('__aud-wired','__aud-annotated','__aud-unaddressed');
+      if (auditOn) it.el.classList.add('__aud-' + it.status);
+      it.el.removeAttribute('data-aud-tip');
+      if (auditOn){
+        var tip = it.status === 'annotated' ? it.intent
+                : it.status === 'wired' ? ('onclick: ' + it.onclick)
+                : '⚠ not yet decided';
+        it.el.setAttribute('data-aud-tip', tip);
+      }
+    });
+  }
+
+  function render(){
+    var items = scan();
+    var wired = items.filter(function(i){return i.status==='wired';}).length;
+    var annotated = items.filter(function(i){return i.status==='annotated';}).length;
+    var unaddressed = items.filter(function(i){return i.status==='unaddressed';});
+
+    document.getElementById('__aud-summary').textContent =
+      unaddressed.length + ' unaddressed · ' + wired + ' wired · ' + annotated + ' annotated';
+
+    var list = document.getElementById('__aud-list');
+    if (unaddressed.length === 0){
+      list.innerHTML = '<div class="__aud-ok">✓ everything clickable has either a handler or a data-intent note</div>';
+    } else {
+      list.innerHTML = unaddressed.map(function(i){
+        return '<div class="__aud-row">' + i.label + '</div>';
+      }).join('');
+    }
+
+    paintAudit(items);
+    window.__auditItems = items;
+  }
+
+  function exportJSON(){
+    var items = window.__auditItems || scan();
+    var out = items.map(function(i){
+      return { label: i.label, status: i.status, intent: i.intent, onclick: i.onclick };
+    });
+    var box = document.getElementById('__aud-export');
+    box.value = JSON.stringify(out, null, 2);
+    box.style.display = 'block';
+    box.select();
+  }
+
+  function buildPanel(){
+    var panel = document.createElement('div');
+    panel.id = '__aud-panel';
+    panel.innerHTML =
+      '<div id="__aud-head">' +
+        '<span id="__aud-summary">scanning…</span>' +
+        '<button id="__aud-toggle">Audit mode</button>' +
+        '<button id="__aud-export-btn">Export JSON</button>' +
+        '<button id="__aud-collapse">–</button>' +
+      '</div>' +
+      '<div id="__aud-body">' +
+        '<div id="__aud-list"></div>' +
+        '<textarea id="__aud-export" readonly></textarea>' +
+      '</div>';
+    document.body.appendChild(panel);
+
+    document.getElementById('__aud-toggle').addEventListener('click', function(){
+      auditOn = !auditOn;
+      this.classList.toggle('on', auditOn);
+      render();
+    });
+    document.getElementById('__aud-collapse').addEventListener('click', function(){
+      panel.classList.toggle('collapsed');
+      this.textContent = panel.classList.contains('collapsed') ? '+' : '–';
+    });
+    document.getElementById('__aud-export-btn').addEventListener('click', exportJSON);
+
+    var style = document.createElement('style');
+    style.textContent =
+      '#__aud-panel{position:fixed;right:14px;bottom:14px;z-index:99999;font:12px/1.4 -apple-system,Segoe UI,sans-serif;' +
+      'background:#1c1c1e;color:#f2f2f2;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.35);width:300px;overflow:hidden}' +
+      '#__aud-head{display:flex;align-items:center;gap:6px;padding:8px 10px;background:#2c2c2e}' +
+      '#__aud-summary{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}' +
+      '#__aud-head button{background:#3a3a3c;color:#fff;border:0;border-radius:6px;padding:4px 8px;font:inherit;cursor:pointer}' +
+      '#__aud-toggle.on{background:#ff5a1f}' +
+      '#__aud-collapse{width:20px}' +
+      '#__aud-body{max-height:260px;overflow:auto;padding:8px 10px}' +
+      '#__aud-panel.collapsed #__aud-body{display:none}' +
+      '.__aud-row{padding:5px 0;border-top:1px solid #3a3a3c;color:#ffb26b}' +
+      '.__aud-row:first-child{border-top:0}' +
+      '.__aud-ok{color:#7cd992}' +
+      '#__aud-export{display:none;width:100%;height:140px;margin-top:8px;background:#0f0f10;color:#d4d2ce;border:1px solid #3a3a3c;border-radius:6px;font:10px/1.4 ui-monospace,monospace;padding:6px}' +
+      'body.__aud-cursor .__aud-wired{outline:2px solid #2ecc71!important;outline-offset:1px}' +
+      'body.__aud-cursor .__aud-annotated{outline:2px solid #3aa0ff!important;outline-offset:1px}' +
+      'body.__aud-cursor .__aud-unaddressed{outline:2px dashed #ff5a1f!important;outline-offset:1px}' +
+      '[data-aud-tip]{position:relative}';
+    document.head.appendChild(style);
+  }
+
+  function wireHoverTips(){
+    document.body.addEventListener('mouseover', function(e){
+      var el = e.target.closest('[data-aud-tip]');
+      if (!el || !auditOn) return;
+      var tip = document.getElementById('__aud-hover-tip') || (function(){
+        var d = document.createElement('div');
+        d.id = '__aud-hover-tip';
+        d.style.cssText = 'position:fixed;z-index:100000;background:#111;color:#fff;padding:4px 8px;border-radius:6px;font:11px/1.3 -apple-system,sans-serif;pointer-events:none;max-width:260px;';
+        document.body.appendChild(d);
+        return d;
+      })();
+      tip.textContent = el.getAttribute('data-aud-tip');
+      var r = el.getBoundingClientRect();
+      tip.style.left = r.left + 'px';
+      tip.style.top = (r.top - 26) + 'px';
+      tip.style.display = 'block';
+    });
+    document.body.addEventListener('mouseout', function(e){
+      var tip = document.getElementById('__aud-hover-tip');
+      if (tip) tip.style.display = 'none';
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', function(){
+    buildPanel();
+    wireHoverTips();
+    render();
+    document.body.classList.add('__aud-cursor');
+  });
+  if (document.readyState !== 'loading'){
+    buildPanel();
+    wireHoverTips();
+    render();
+    document.body.classList.add('__aud-cursor');
+  }
+})();
+</script>
+
 </body>
 </html>

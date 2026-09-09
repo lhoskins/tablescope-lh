@@ -87,17 +87,24 @@ export function WorkspaceAddCard({
   const { resources, isPinned } = useAddableResources(projectId, cards);
 
   return (
-    <div className="px-5 pt-3">
+    // Anchored dropdown: this control lives in the pane header now, so the
+    // resource list has to float over the pane instead of pushing its content
+    // down the way an inline list did.
+    <div className="relative">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-[12px] font-medium text-ink-secondary hover:bg-bg-secondary"
+        title="Add a table, document or data source"
+        className="flex h-[26px] items-center gap-1 rounded border border-line-secondary bg-bg-primary px-2 text-[12px] font-medium text-ink-secondary hover:bg-brand-50 hover:text-brand-500"
       >
-        <IconPlus size={13} /> Add card
+        <IconPlus size={13} /> Add file
       </button>
       {open && (
-        <ul aria-label="Add a resource to this workspace" className="mt-2 max-h-64 overflow-y-auto rounded-md border border-line-tertiary">
+        <ul
+          aria-label="Add a resource to this workspace"
+          className="absolute left-0 top-[30px] z-30 max-h-64 w-64 overflow-y-auto rounded-md border border-line-tertiary bg-bg-primary shadow-lg"
+        >
           {resources.length === 0 && (
             <li className="px-3 py-2 text-[12px] text-ink-tertiary">
               This project has no tables, dashboards, documents or data sources yet.

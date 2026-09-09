@@ -39,7 +39,7 @@ describe("WorkspaceTabBar", () => {
     expect(onSelect).toHaveBeenCalledWith(2);
   });
 
-  it("creates a workspace from either add affordance", () => {
+  it("creates a workspace from the + button", () => {
     const onCreate = vi.fn();
     render(
       <WorkspaceTabBar
@@ -51,8 +51,7 @@ describe("WorkspaceTabBar", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "New workspace" }));
-    fireEvent.click(screen.getByRole("button", { name: "+ New Workspace" }));
-    expect(onCreate).toHaveBeenCalledTimes(2);
+    expect(onCreate).toHaveBeenCalledTimes(1);
   });
 
   it("hides the actions menu for a workspace the current user doesn't own", () => {
@@ -118,7 +117,7 @@ describe("WorkspaceTabBar", () => {
     expect(onUnpublish).toHaveBeenCalledWith(2);
   });
 
-  it("deletes a workspace via the kebab menu", () => {
+  it("deletes a workspace from the tab's own close button, no menu needed", () => {
     const onDelete = vi.fn();
     render(
       <WorkspaceTabBar
@@ -131,8 +130,22 @@ describe("WorkspaceTabBar", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Revenue review actions" }));
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete Revenue review" }));
     expect(onDelete).toHaveBeenCalledWith(1);
+  });
+
+  it("offers no close button on a workspace the current user doesn't own", () => {
+    render(
+      <WorkspaceTabBar
+        workspaces={workspaces}
+        activeWorkspaceId={1}
+        onSelect={vi.fn()}
+        onCreate={vi.fn()}
+        currentUserId={99}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: /^Delete / })).toBeNull();
   });
 });

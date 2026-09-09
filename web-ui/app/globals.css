@@ -35,6 +35,13 @@
   --color-warning-bg: #faeeda;
   --color-danger: #7d1f1a;
   --color-danger-bg: #fdecea;
+  /* Brighter siblings for figures printed straight onto a white surface, where
+     the tinted-chip colours above land almost black and green/red become hard
+     to tell apart at a glance. Used by the Change summary grid; the +/- sign is
+     always present too, so colour is reinforcing the reading rather than
+     carrying it alone. */
+  --color-success-strong: #0a8f5f;
+  --color-danger-strong: #d33a2f;
 
   /* Radius */
   --radius-sm: 6px;
@@ -156,6 +163,38 @@ body {
 }
 .react-grid-item > .react-resizable-handle::after {
   display: none;
+}
+
+/* Workspace pane dividers: while one is being dragged, suppress text selection
+   and force the resize cursor document-wide. Without this a fast drag paints a
+   selection across every pane it crosses -- which the Notes pane would then
+   offer to capture. Mirrors the reference app's `.resizing-ew` body class. */
+body.workspace-resizing {
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: col-resize;
+}
+
+/* The workspace pane row scrolls sideways once the panes stop fitting (each
+   has a 240px floor). macOS overlay scrollbars stay invisible until a scroll
+   is already underway, which hid the fact that more panes were reachable, so
+   this row opts into a permanent slim scrollbar. */
+.workspace-pane-row {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-primary) transparent;
+}
+.workspace-pane-row::-webkit-scrollbar {
+  height: 8px;
+}
+.workspace-pane-row::-webkit-scrollbar-track {
+  background: transparent;
+}
+.workspace-pane-row::-webkit-scrollbar-thumb {
+  background: var(--border-secondary);
+  border-radius: 4px;
+}
+.workspace-pane-row::-webkit-scrollbar-thumb:hover {
+  background: var(--border-primary);
 }
 
 

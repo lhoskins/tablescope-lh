@@ -13,6 +13,7 @@ import {
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
   IconSettings,
+  IconDatabasePlus,
 } from "@tabler/icons-react";
 import { signOut } from "@/lib/auth";
 import { cn } from "@/lib/cn";
@@ -26,7 +27,6 @@ import type {
 
 import {
   homeNavGroups,
-  projectNavGroups,
   canViewSettings,
   type NavItem,
 } from "./nav";
@@ -235,16 +235,33 @@ export function Sidebar({
           />
         )}
 
-        {mode === "project" && project && (
-          <NavGroupBlock
-            // Just "Tools" (Data Source Builder) -- the rest of
-            // projectNavGroups duplicates the top nav grid and is
-            // intentionally not re-added here.
-            group={projectNavGroups(project.id)[1]}
-            activeNav={activeNav}
-            collapsed={collapsed}
-          />
-        )}
+        <NavGroupBlock
+          // Just "Tools" (Data Source Builder) -- the rest of
+          // projectNavGroups duplicates the top nav grid and is
+          // intentionally not re-added here. Shown in both modes: a data
+          // source belongs to a project, but the builder shouldn't only be
+          // reachable after already picking one. In project mode this links
+          // straight into that project's builder; outside a project it goes
+          // through the /data-source-builder compatibility route, which
+          // sends a user with exactly one accessible project straight into
+          // it and otherwise asks them to pick one.
+          group={{
+            heading: "Tools",
+            items: [
+              {
+                key: "project-data-source-builder",
+                label: "Data Source Builder",
+                href:
+                  mode === "project" && project
+                    ? `/projects/${project.id}/data-source-builder`
+                    : "/data-source-builder",
+                icon: IconDatabasePlus,
+              },
+            ],
+          }}
+          activeNav={activeNav}
+          collapsed={collapsed}
+        />
       </nav>
 
       <AccountMenu user={user} collapsed={collapsed} />

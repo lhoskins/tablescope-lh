@@ -35,6 +35,7 @@ describe("homeNavGroups", () => {
     const keys = allItemKeys(groups);
     expect(keys).toEqual([
       "home",
+      "dashboards",
       "business-insight",
       "projects",
       "ai-assistant",

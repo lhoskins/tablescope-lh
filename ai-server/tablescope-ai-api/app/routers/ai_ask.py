@@ -38,6 +38,32 @@ def _fit_context(text: str, max_model_len: int = 8192, max_tokens: int = 512) ->
     return text[:char_budget].rstrip() + "\n\n[context truncated for length]"
 
 
+# Backstop for the conversation-history block. Callers are expected to send a
+# bounded window (platform-api trims to ~8k chars), but nothing structural
+# stops a future caller passing fifty turns: unlike context_text, history_text
+# was previously size-unbounded here -- capped only at a message count -- and
+# vLLM answers an oversized prompt with a 400 rather than truncating it.
+_HISTORY_CHAR_BUDGET = 9000
+
+
+def _fit_history(history_text: str, char_budget: int = _HISTORY_CHAR_BUDGET) -> str:
+    """Trim whole history lines from the front, keeping the newest exchange.
+
+    Drops oldest-first because a follow-up refers to what was just said. The
+    "Conversation so far:" header is re-attached so the block still reads as
+    history rather than as loose dialogue.
+    """
+    if len(history_text) <= char_budget:
+        return history_text
+    header, _, body = history_text.partition("\n")
+    lines = [line for line in body.split("\n") if line.strip()]
+    while lines and len(header) + sum(len(line) + 1 for line in lines) > char_budget:
+        lines.pop(0)
+    if not lines:
+        return ""
+    return f"{header}\n[earlier turns omitted for length]\n" + "\n".join(lines) + "\n\n"
+
+
 def _format_investigation_steps(question: str, steps: list[dict[str, Any]]) -> str:
     """Render a multi-query "why" investigation's full trail for synthesis.
 
@@ -192,7 +218,7 @@ async def ask(req: AskRequest) -> AskResponse:
 
     ctx = None
     context_text = ""
-    history_text = _format_conversation_history(req.history)
+    history_text = _fit_history(_format_conversation_history(req.history))
     if not grounded_block:
         # Build permission-aware context only when we need the document/KG
         # grounding. Data-driven questions already carry their own result.
@@ -255,6 +281,17 @@ async def ask(req: AskRequest) -> AskResponse:
 
 
 
+    # Logged like the dashboard/plan paths: with no tokenizer here, character
+    # length is the only signal for how close real prompts run to the window.
+    logger.info(
+        "ask prompt len=%d (history=%d, context=%d, max_tokens=%d) tenant=%s project=%s",
+        len(prompt),
+        len(history_text),
+        len(context_text),
+        answer_max_tokens,
+        req.tenant_id,
+        req.project_id,
+    )
     answer = await llm_client.generate(
         prompt=prompt,
         system_prompt=answer_system_prompt,

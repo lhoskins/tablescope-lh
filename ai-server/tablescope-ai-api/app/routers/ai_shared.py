@@ -211,6 +211,11 @@ SYSTEM_PROMPT = (
 
 
 # Cap history sent to the model so long conversations stay within budget.
+#
+# NOTE: this counts *messages*, not turns -- the list it slices holds one entry
+# per role, so a turn contributes two. 20 here is ~10 exchanges. The name is
+# kept for compatibility; don't "align" it with a caller's turn-based budget
+# without halving it first.
 _MAX_HISTORY_TURNS = 20
 
 

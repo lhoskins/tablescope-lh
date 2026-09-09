@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { IconX } from "@tabler/icons-react";
+import { IconFileText, IconX } from "@tabler/icons-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useProjectSummaries } from "@/lib/ui/use-shell-data";
 import { listMyDataSources } from "@/lib/api/data-source-builder";
@@ -11,6 +12,10 @@ import {
   useBuilderStore,
   type ProjectAssignment,
 } from "@/lib/stores/data-source-builder-store";
+import {
+  usePendingDocumentsStore,
+  type PendingDocument,
+} from "@/lib/stores/pending-documents-store";
 import { buildExistingSources } from "./existing-sources";
 import { SourceMethodTabs, type SourceTab } from "./source-method-tabs";
 import { DatabaseConnectionsPanel } from "./database-connections-panel";
@@ -51,35 +56,102 @@ function FileUrlPanel() {
   );
 }
 
-function StagedSourceCard({
-  item,
+/**
+ * One staged item. Every file gets this same card whatever it is -- the badge
+ * says what it became, the rows are the same rows, and a row with nothing
+ * behind it is simply left out. Documents used to be described in a different
+ * shape from data sources, which made two kinds of thing out of what is really
+ * one list of "stuff I just added".
+ */
+interface StagedCardModel {
+  name: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  badge: { label: string; tone: "brand" | "ai" };
+  /** Rows are rendered in order; entries with an empty value are dropped. */
+  rows: [string, string | null][];
+  removeLabel: string;
+}
+
+function formatBytes(bytes: number): string | null {
+  if (!bytes || bytes <= 0) return null;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function StagedCard({
+  model,
   onRemove,
 }: {
-  item: FlatItem;
+  model: StagedCardModel;
   onRemove: () => void;
 }) {
-  const Icon = connectorIcon(item.sourceType);
+  const Icon = model.icon;
+  const rows = model.rows.filter(([, value]) => value);
   return (
-    <div className="relative flex h-28 flex-col justify-between rounded-xl border border-line-tertiary bg-bg-primary p-3.5">
+    <div className="relative flex flex-col rounded-xl border border-line-tertiary bg-bg-primary p-3.5">
       <button
         type="button"
         onClick={onRemove}
-        aria-label={`Remove ${item.name}`}
+        aria-label={model.removeLabel}
         className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded text-ink-tertiary hover:bg-bg-secondary hover:text-danger"
       >
         <IconX size={13} />
       </button>
-      <div className="flex items-center gap-2 pr-5">
-        <Icon size={16} className="shrink-0 text-brand-600" />
-        <span className="min-w-0 truncate text-[13px] font-medium text-ink-primary">
-          {item.name}
+      <div className="flex items-start gap-2 pr-5">
+        <Icon size={16} className="mt-0.5 shrink-0 text-brand-600" />
+        <span className="min-w-0 flex-1 break-words text-[13px] font-medium text-ink-primary">
+          {model.name}
         </span>
       </div>
-      <span className="truncate text-caption text-ink-tertiary">
-        {item.typeLabel}
-      </span>
+      <div className="mt-2">
+        <Badge tone={model.badge.tone}>{model.badge.label}</Badge>
+      </div>
+      <dl className="mt-2.5 space-y-1 text-caption text-ink-tertiary">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex items-center justify-between gap-2">
+            <dt>{label}</dt>
+            <dd
+              className="min-w-0 truncate text-ink-secondary"
+              title={value ?? undefined}
+            >
+              {value}
+            </dd>
+          </div>
+        ))}
+      </dl>
     </div>
   );
+}
+
+function sourceCardModel(item: FlatItem): StagedCardModel {
+  return {
+    name: item.name,
+    icon: connectorIcon(item.sourceType),
+    badge: { label: "Data source", tone: "brand" },
+    rows: [
+      ["Type", item.typeLabel],
+      ["Columns", item.columns > 0 ? String(item.columns) : null],
+      ["Size", item.sizeOrStatus !== "—" ? item.sizeOrStatus : null],
+      [item.isFile ? "Staged as" : "Source", item.sourceLabel],
+    ],
+    removeLabel: `Remove ${item.name}`,
+  };
+}
+
+function documentCardModel(doc: PendingDocument): StagedCardModel {
+  return {
+    name: doc.fileName,
+    icon: IconFileText,
+    badge: { label: "Document", tone: "ai" },
+    rows: [
+      ["Type", "Document"],
+      ["Columns", null],
+      ["Size", formatBytes(doc.sizeBytes)],
+      ["Staged as", "Added when you pick a project"],
+    ],
+    removeLabel: `Remove ${doc.fileName}`,
+  };
 }
 
 /** Everything staged so far this session, as removable thumbnail cards. */
@@ -91,6 +163,8 @@ function StagedSourcesGrid() {
   const unmarkCreated = useBuilderStore((s) => s.unmarkCreated);
 
   const items = flattenCreated(sources, createdKeys);
+  const pendingDocuments = usePendingDocumentsStore((s) => s.documents);
+  const removeDocument = usePendingDocumentsStore((s) => s.remove);
 
   const remove = (item: FlatItem) => {
     if (item.isFile) {
@@ -102,7 +176,7 @@ function StagedSourcesGrid() {
     unmarkCreated(item.key);
   };
 
-  if (items.length === 0) {
+  if (items.length === 0 && pendingDocuments.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-line-secondary px-4 py-10 text-center text-small text-ink-tertiary">
         Nothing staged yet — add a file, link, database, or network share above.
@@ -111,12 +185,19 @@ function StagedSourcesGrid() {
   }
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       {items.map((item) => (
-        <StagedSourceCard
+        <StagedCard
           key={item.key}
-          item={item}
+          model={sourceCardModel(item)}
           onRemove={() => remove(item)}
+        />
+      ))}
+      {pendingDocuments.map((doc) => (
+        <StagedCard
+          key={doc.id}
+          model={documentCardModel(doc)}
+          onRemove={() => removeDocument(doc.id)}
         />
       ))}
     </div>
@@ -193,9 +274,29 @@ function ProjectsOptionsPanel({ onClose }: { onClose: () => void }) {
 export function QuickAddDataSourceWorkspace({
   tenantName,
   projectId,
+  initialSourceTab,
+  footer,
+  heightClass = "h-[calc(100vh-7rem)]",
 }: {
   tenantName: string;
-  projectId: string;
+  /** Omitted when opened from Home, where no project has been chosen yet.
+   *  Everything below tolerates that: uploads, URL import, database and
+   *  network panels all send project_id only when they have one. The one
+   *  exception is a document (PDF/DOCX) upload, which the dropzone refuses
+   *  with an explanatory message because its route is project-scoped. */
+  projectId?: string;
+  /** Which method card starts selected. Home's "Data Sources" tile deep-links
+   *  to "database" the way the old ?intent=database shim did. */
+  initialSourceTab?: SourceTab;
+  /** Replaces the default "Add to Project" button. Home passes its own pair
+   *  ("Assign to Projects" / "Start New Project") since there is no single
+   *  project to add to. */
+  footer?: React.ReactNode;
+  /** Height of the shell. The default fills the viewport, which pins the
+   *  footer to the bottom of the screen -- right inside a project, where the
+   *  staged list can be long. Home passes "" so the shell sizes to its
+   *  content and the buttons sit directly beneath the staged cards. */
+  heightClass?: string;
 }) {
   const ensureTenant = useBuilderStore((s) => s.ensureTenant);
   const syncExisting = useBuilderStore((s) => s.syncExisting);
@@ -206,7 +307,7 @@ export function QuickAddDataSourceWorkspace({
   const toggleProject = useBuilderStore((s) => s.toggleProject);
   const getPendingChanges = useBuilderStore((s) => s.getPendingChanges);
 
-  const [sourceTab, setSourceTab] = useState<SourceTab>("upload");
+  const [sourceTab, setSourceTab] = useState<SourceTab>(initialSourceTab ?? "upload");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
 
@@ -252,7 +353,7 @@ export function QuickAddDataSourceWorkspace({
   // entering the builder from inside a project instead of standalone.
   const autoToggled = useRef(false);
   useEffect(() => {
-    if (autoToggled.current) return;
+    if (autoToggled.current || !projectId) return;
     const row = projects.find((p) => p.projectId === projectId);
     if (row && !row.isToggled) {
       autoToggled.current = true;
@@ -271,23 +372,30 @@ export function QuickAddDataSourceWorkspace({
   );
   const canAdd = createdKeys.length > 0 && pending.adding.length > 0;
 
-  const numericProjectId = Number(projectId);
+  const numericProjectId = projectId ? Number(projectId) : undefined;
 
   return (
-    <div className="flex h-[calc(100vh-7rem)] flex-col">
+    <div className={`flex flex-col ${heightClass}`}>
       <div className="mt-1 flex shrink-0 items-start justify-between gap-4">
         <SourceMethodTabs activeTab={sourceTab} onChange={setSourceTab} />
-        <div className="relative shrink-0">
-          <Button variant="secondary" onClick={() => setOptionsOpen((o) => !o)}>
-            Options
-          </Button>
-          {optionsOpen && (
-            <ProjectsOptionsPanel onClose={() => setOptionsOpen(false)} />
-          )}
-        </div>
+        {/* "Also add to" presumes a project this is already being added to.
+            Opened from Home there isn't one, and the footer's "Add to
+            Existing Project" covers the same ground without the ambiguity. */}
+        {projectId && (
+          <div className="relative shrink-0">
+            <Button variant="secondary" onClick={() => setOptionsOpen((o) => !o)}>
+              Options
+            </Button>
+            {optionsOpen && (
+              <ProjectsOptionsPanel onClose={() => setOptionsOpen(false)} />
+            )}
+          </div>
+        )}
       </div>
 
-      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto py-4">
+      <div
+        className={`space-y-5 py-4 ${heightClass ? "min-h-0 flex-1 overflow-y-auto" : ""}`}
+      >
         {sourceTab === "upload" && (
           <UploadFilePanel projectId={numericProjectId} />
         )}
@@ -300,14 +408,16 @@ export function QuickAddDataSourceWorkspace({
         <StagedSourcesGrid />
       </div>
 
-      <div className="flex shrink-0 items-center justify-end border-t border-line-tertiary pt-3">
-        <Button
-          variant="primary"
-          disabled={!canAdd}
-          onClick={() => setConfirmOpen(true)}
-        >
-          Add to Project
-        </Button>
+      <div className="flex shrink-0 items-center justify-end gap-3 border-t border-line-tertiary pt-4">
+        {footer ?? (
+          <Button
+            variant="primary"
+            disabled={!canAdd}
+            onClick={() => setConfirmOpen(true)}
+          >
+            Add to Project
+          </Button>
+        )}
       </div>
 
       <ConfirmationModal

@@ -27,6 +27,7 @@ export function ProjectShell({
   contextPanel,
   scrollable,
   showResourceTabs = true,
+  showAssistant = true,
   workspaceItem = null,
   assistantSurface = "project_workspace",
   assistantContextLabel,
@@ -51,6 +52,10 @@ export function ProjectShell({
    *  this flag -- it's the project's persistent top-level navigation, not a
    *  per-page resource strip. */
   showResourceTabs?: boolean;
+  /** Render the docked AI Assistant rail on the right. The Workspace page sets
+   *  this false because it carries the same chat inside its own pane, and two
+   *  chat boxes side by side is worse than one in the right place. */
+  showAssistant?: boolean;
   /** The specific table/dashboard/document/data source this page currently
    *  has open, if any. Feeds the project workspace tab strip and grounds the
    *  docked AI Assistant. */
@@ -118,14 +123,16 @@ export function ProjectShell({
       contextPanel={
         <>
           {contextPanel}
-          <WorkspaceAssistantPanel
-            projectId={projectId}
-            activeItem={workspaceItem}
-            surface={assistantSurface}
-            contextLabel={assistantContextLabel}
-            workspaceCards={assistantWorkspaceCards}
-            defaultOpen={assistantDefaultOpen}
-          />
+          {showAssistant && (
+            <WorkspaceAssistantPanel
+              projectId={projectId}
+              activeItem={workspaceItem}
+              surface={assistantSurface}
+              contextLabel={assistantContextLabel}
+              workspaceCards={assistantWorkspaceCards}
+              defaultOpen={assistantDefaultOpen}
+            />
+          )}
         </>
       }
       scrollable={scrollable}

@@ -21,6 +21,8 @@ import {
   useProjectQueries,
 } from "@/lib/ui/use-project-data";
 import { loadWorkspaceTabs } from "@/components/tablescope/project/workspace/workspace-tabs-storage";
+import { setResourceDragData } from "@/components/tablescope/project/workspace/workspace-drag";
+import type { AddableResource } from "@/components/tablescope/project/workspace/workspace-add-card";
 import type { ProjectSummary } from "@/lib/ui/types";
 
 /**
@@ -72,33 +74,39 @@ export function ProjectsTree({
   return (
     <div className="space-y-0.5">
       <div className="group flex items-center rounded-md pr-1 text-ink-secondary hover:bg-bg-secondary hover:text-ink-primary">
+        {/* The chevron trails the row rather than leading it: on the left it
+            indented the folder icon past every other nav row's glyph (NavRow
+            uses the same gap-2.5 px-2.5 and size 15), which read as a stray
+            misalignment rather than a hierarchy. Creating a project happens
+            on the PRIVATE / SHARED headers below, where the choice of
+            visibility is already on screen -- and on Home's New Project tile. */}
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
           className="flex flex-1 items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-[13px]"
         >
-          {open ? (
-            <IconChevronDown size={13} stroke={1.8} className="shrink-0 text-ink-tertiary" />
-          ) : (
-            <IconChevronRight size={13} stroke={1.8} className="shrink-0 text-ink-tertiary" />
-          )}
           <IconFolders size={15} stroke={1.8} className="shrink-0" />
           <span className="flex-1 truncate">Projects</span>
-          {all.length > 0 && (
-            <span className="rounded-full bg-brand-50 px-1.5 text-[11px] font-medium text-brand-700">
-              {all.length}
-            </span>
+        </button>
+        {/* Hidden from the accessibility tree and the tab order: the labelled
+            button above already carries aria-expanded, so exposing a second
+            control for the same toggle would just be a duplicate to tab past.
+            This exists so a click on the chevron itself does what it looks
+            like it should. */}
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-hidden="true"
+          onClick={() => setOpen((v) => !v)}
+          className="flex h-6 w-5 shrink-0 items-center justify-center text-ink-tertiary"
+        >
+          {open ? (
+            <IconChevronDown size={13} stroke={1.8} />
+          ) : (
+            <IconChevronRight size={13} stroke={1.8} />
           )}
         </button>
-        <Link
-          href="/projects?new=1"
-          title="New project"
-          aria-label="New project"
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-tertiary opacity-0 hover:bg-bg-primary hover:text-ink-primary group-hover:opacity-100"
-        >
-          <IconPlus size={13} />
-        </Link>
       </div>
 
       {open && (
@@ -107,11 +115,13 @@ export function ProjectsTree({
             label="PRIVATE"
             projects={privateProjects}
             currentProjectId={currentProjectId}
+            newProjectHref="/projects?new=1"
           />
           <ProjectVisibilityGroup
             label="SHARED"
             projects={sharedProjects}
             currentProjectId={currentProjectId}
+            newProjectHref="/projects?new=1&shared=1"
           />
         </div>
       )}
@@ -123,16 +133,31 @@ function ProjectVisibilityGroup({
   label,
   projects,
   currentProjectId,
+  newProjectHref,
 }: {
   label: string;
   projects: ProjectSummary[];
   currentProjectId?: string | null;
+  /** Opens the New project dialog pre-set to this group's visibility. */
+  newProjectHref: string;
 }) {
-  if (projects.length === 0) return null;
+  // Rendered even when empty, unlike before: the "+" that creates a project of
+  // this visibility lives on the header, so hiding the header would leave a
+  // user with no shared projects yet unable to create their first one here.
   return (
     <div className="space-y-0.5">
-      <div className="px-2 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wide text-ink-tertiary">
-        {label} ({projects.length})
+      <div className="group/header flex items-center px-2 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wide text-ink-tertiary">
+        <span className="flex-1">
+          {label} ({projects.length})
+        </span>
+        <Link
+          href={newProjectHref}
+          title={`New ${label.toLowerCase()} project`}
+          aria-label={`New ${label.toLowerCase()} project`}
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-tertiary opacity-0 hover:bg-bg-primary hover:text-ink-primary focus-visible:opacity-100 group-hover/header:opacity-100"
+        >
+          <IconPlus size={12} />
+        </Link>
       </div>
       {projects.map((p) => (
         <div key={p.id}>
@@ -179,6 +204,11 @@ function ProjectAssetTree({ projectId }: { projectId: string }) {
     key: `table:${q.id}`,
     label: q.name,
     href: `/projects/${projectId}/queries?q=${q.id}`,
+    drag: {
+      resource_type: "table" as const,
+      resource_id: String(q.id),
+      label: q.name,
+    },
   });
   const tables = queries ?? [];
   const manualTables = tables.filter((q) => !q.ai_generated);
@@ -215,6 +245,11 @@ function ProjectAssetTree({ projectId }: { projectId: string }) {
           key: `document:${d.id}`,
           label: d.title,
           href: `/projects/${projectId}/documents?doc=${d.id}`,
+          drag: {
+            resource_type: "document" as const,
+            resource_id: String(d.id),
+            label: d.title,
+          },
         }))}
         openTabKeys={openTabKeys}
       />
@@ -226,6 +261,18 @@ function ProjectAssetTree({ projectId }: { projectId: string }) {
           key: `data_source:${typeof d.id === "number" ? d.id : d.lifecycleId}`,
           label: d.fileName,
           href: `/projects/${projectId}/data-sources?ds=${encodeURIComponent(d.lifecycleId)}`,
+          // Only numeric-id sources resolve as a workspace card -- the backend
+          // looks the id up as a DatabaseDataSource, so a file source's
+          // lifecycle id would pin a card that can never load. Same rule the
+          // "+ Add card" list applies.
+          drag:
+            typeof d.id === "number"
+              ? {
+                  resource_type: "data_source" as const,
+                  resource_id: String(d.id),
+                  label: d.fileName,
+                }
+              : undefined,
         }))}
         openTabKeys={openTabKeys}
       />
@@ -233,7 +280,15 @@ function ProjectAssetTree({ projectId }: { projectId: string }) {
   );
 }
 
-type AssetItem = { key: string; label: string; href: string };
+type AssetItem = {
+  key: string;
+  label: string;
+  href: string;
+  /** Present when this row can be dragged into a workspace pane. Omitted for
+   *  resources a workspace card can't resolve -- see the data-source note in
+   *  `ProjectAssetTree`. */
+  drag?: AddableResource;
+};
 
 function AssetGroup({
   label,
@@ -307,8 +362,21 @@ function AssetLink({
   return (
     <Link
       href={item.href}
+      // Draggable straight into the Workspace's Documents pane. Links are
+      // natively draggable as URLs, so rows without a resource payload are
+      // explicitly opted out -- otherwise dragging one would look like it
+      // should work and then quietly do nothing.
+      draggable={item.drag != null}
+      onDragStart={(event) => {
+        if (!item.drag) {
+          event.preventDefault();
+          return;
+        }
+        setResourceDragData(event.dataTransfer, item.drag);
+      }}
       className={cn(
         "block truncate rounded px-1.5 py-1 text-[12px]",
+        item.drag && "cursor-grab active:cursor-grabbing",
         openTabKeys.has(item.key)
           ? "font-medium text-brand-500"
           : "text-ink-secondary hover:bg-bg-secondary hover:text-ink-primary",
