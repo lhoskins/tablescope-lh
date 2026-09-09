@@ -1,14 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   IconDots,
   IconLock,
   IconPencil,
   IconPlus,
   IconShare,
-  IconTrash,
   IconUsers,
+  IconX,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/cn";
 import { MenuItem } from "@/app/ai/menu-item";
@@ -28,6 +28,7 @@ export function WorkspaceTabBar({
   onPublish,
   onUnpublish,
   onDelete,
+  trailing,
 }: {
   workspaces: Workspace[];
   activeWorkspaceId: number | null;
@@ -39,11 +40,20 @@ export function WorkspaceTabBar({
   onPublish?: (workspaceId: number) => void;
   onUnpublish?: (workspaceId: number) => void;
   onDelete?: (workspaceId: number) => void;
+  /** Pinned to the right of the strip -- the Workspace page puts its Pane
+   *  Views swatches here rather than spending a row of its own on them. */
+  trailing?: ReactNode;
 }) {
   return (
+    // Browser-style tabs: the strip is tinted and the active tab is white, so
+    // the selected workspace reads as the sheet in front rather than as a
+    // highlighted pill.
     <nav
       aria-label="Workspaces"
-      className="flex items-center gap-1 overflow-x-auto border-b border-line-tertiary px-5 py-1.5"
+      // `overflow-y-hidden` is load-bearing: setting only `overflow-x-auto`
+      // makes CSS compute the other axis to `auto` too, which put a vertical
+      // scrollbar on a strip that never needs one.
+      className="flex items-end gap-1 overflow-x-auto overflow-y-hidden border-b border-line-tertiary bg-bg-secondary px-5 pt-1.5"
     >
       {workspaces.map((workspace) => (
         <WorkspaceTabItem
@@ -68,14 +78,9 @@ export function WorkspaceTabBar({
       >
         <IconPlus size={13} />
       </button>
-      <button
-        type="button"
-        onClick={onCreate}
-        disabled={creating}
-        className="shrink-0 rounded-md px-2.5 py-1 text-[12px] font-medium text-brand-600 hover:bg-brand-50 disabled:opacity-50"
-      >
-        + New Workspace
-      </button>
+      {/* `mr-*` pulls the group in from the right edge so it doesn't sit flush
+          against the pane row's scrollbar gutter. */}
+      {trailing && <div className="ml-auto mr-20 pl-3">{trailing}</div>}
     </nav>
   );
 }
@@ -115,7 +120,12 @@ function WorkspaceTabItem({
     setEditing(false);
   };
 
-  const showMenu = canManage && (Boolean(onRename) || Boolean(onPublish) || Boolean(onUnpublish) || Boolean(onDelete));
+  // Delete gets its own always-visible "x" rather than living in the
+  // hover-only overflow menu, which made removing a workspace hard to find.
+  // The menu keeps rename/publish. Both are owner-only.
+  const showClose = canManage && Boolean(onDelete);
+  const showMenu =
+    canManage && (Boolean(onRename) || Boolean(onPublish) || Boolean(onUnpublish));
 
   if (editing) {
     return (
@@ -140,11 +150,13 @@ function WorkspaceTabItem({
         onClick={onSelect}
         aria-current={active ? "page" : undefined}
         className={cn(
-          "flex items-center gap-1.5 rounded-md py-1 pl-2.5 text-[12px] font-medium transition-colors",
-          showMenu ? "pr-6" : "pr-2.5",
+          "flex items-center gap-1.5 rounded-t-md border border-b-0 py-1.5 pl-2.5 text-[12px] font-medium transition-colors",
+          showMenu && showClose ? "pr-10" : showMenu || showClose ? "pr-6" : "pr-2.5",
           active
-            ? "bg-brand-50 text-brand-700"
-            : "text-ink-secondary hover:bg-bg-secondary hover:text-ink-primary",
+            ? // Sits flush with the strip's bottom border so the tab and the
+              // content below it read as one surface.
+              "-mb-px border-line-tertiary bg-bg-primary text-ink-primary"
+            : "border-transparent text-ink-secondary hover:bg-bg-primary/60 hover:text-ink-primary",
         )}
       >
         <span className="max-w-[12rem] truncate">{workspace.name}</span>
@@ -158,11 +170,23 @@ function WorkspaceTabItem({
           onClick={() => setMenuOpen((v) => !v)}
           aria-label={`${workspace.name} actions`}
           className={cn(
-            "absolute right-0.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-ink-tertiary hover:text-ink-secondary",
+            "absolute top-1/2 -translate-y-1/2 rounded p-0.5 text-ink-tertiary hover:text-ink-secondary",
+            showClose ? "right-[18px]" : "right-0.5",
             menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100",
           )}
         >
           <IconDots size={14} />
+        </button>
+      )}
+      {showClose && (
+        <button
+          type="button"
+          onClick={onDelete}
+          aria-label={`Delete ${workspace.name}`}
+          title={`Delete ${workspace.name}`}
+          className="absolute right-0.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-ink-tertiary transition-colors hover:bg-danger/10 hover:text-danger"
+        >
+          <IconX size={13} />
         </button>
       )}
       {menuOpen && (
@@ -197,17 +221,6 @@ function WorkspaceTabItem({
                     }}
                   />
                 )}
-            {onDelete && (
-              <MenuItem
-                icon={<IconTrash size={14} />}
-                label="Delete"
-                danger
-                onClick={() => {
-                  onDelete();
-                  setMenuOpen(false);
-                }}
-              />
-            )}
           </div>
         </>
       )}

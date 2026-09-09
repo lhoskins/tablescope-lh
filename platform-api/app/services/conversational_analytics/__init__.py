@@ -5,6 +5,7 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
@@ -34,7 +35,7 @@ from app.services.insight_card_match import (
     find_matching_insight_cards,
 )
 from app.services.project_ai_context import build_project_ai_context
-from app.services.workspace_context import ActiveResourceContext
+from app.services.workspace_context import ActiveResourceContext, list_project_resource_candidates
 
 from .chart_field_selection import _SUBTYPE_LABELS as _SUBTYPE_LABELS
 from .chart_field_selection import _build_chart_config, apply_chart_patch
@@ -318,12 +319,21 @@ def _format_context_prompt(project_context: dict[str, Any] | None) -> str:
 
 def _format_active_resource_prompt(
     active_resources: list[ActiveResourceContext] | None,
+    focused_resource: ActiveResourceContext | None = None,
 ) -> str:
     """Return a short grounding block for the workspace's active items.
 
     A named workspace pins several cards at once, so every resolved card is
     listed. The assistant keeps full project access; this only narrows its
-    default focus."""
+    default focus.
+
+    ``focused_resource`` is the one the user is actually reading -- a document
+    open in the workspace's preview pane, say. Without it the model gets the
+    whole set as undifferentiated peers, so a question like "what should I fix
+    first?" is as likely to be answered about a table the user isn't looking
+    at. Naming the focus keeps the rest of the workspace available for
+    cross-referencing while pointing the default interpretation at the item in
+    front of them."""
     if not active_resources:
         return ""
     if len(active_resources) == 1:
@@ -337,6 +347,14 @@ def _format_active_resource_prompt(
             "The user currently has these items open in this project workspace:\n"
             f"{lines}\n"
         )
+    if focused_resource is not None and len(active_resources) > 1:
+        # Descriptive, not imperative. An earlier version added "Answer about
+        # that item unless the question says otherwise" -- and because this
+        # block is prepended to the question the classifier sees, those
+        # instructions changed the detected intent and routed turns away from
+        # the SQL path entirely. State the fact and let the model weigh it, the
+        # way the rest of this block does.
+        body += f"Of those, the user is currently looking at {focused_resource.label}.\n"
     return f"--- Active workspace items ---\n{body}--- End active workspace items ---"
 
 
@@ -567,6 +585,202 @@ def _matched_insight_dict(m: Any) -> dict[str, Any]:
     }
 
 
+_SNIPPET_TOTAL_CHARS = 6000
+"""Combined ceiling for pinned excerpts, on top of history and grounding."""
+
+
+def _format_context_snippets(snippets: list[tuple[str, str]] | None) -> str:
+    """Quote the passages the user pinned to this conversation.
+
+    Distinct from the active-resource block: that says which items are open,
+    this carries the specific text someone judged worth keeping -- a paragraph
+    of a report, or an insight from an earlier answer.
+
+    Descriptive, never imperative, for the same reason as the resource block:
+    this is prepended to the text the intent classifier reads, so instructions
+    here would change how the turn is routed.
+    """
+    if not snippets:
+        return ""
+    lines: list[str] = []
+    used = 0
+    for label, text in snippets:
+        body = text.strip()
+        if not body:
+            continue
+        if used + len(body) > _SNIPPET_TOTAL_CHARS:
+            break
+        used += len(body)
+        lines.append(f'- {label.strip() or "Excerpt"}: "{body}"')
+    if not lines:
+        return ""
+    return (
+        "--- Pinned excerpts ---\n"
+        "The user kept these passages as context for this conversation:\n"
+        + "\n".join(lines)
+        + "\n--- End pinned excerpts ---"
+    )
+
+
+_UNPINNED_MATCH_LIMIT = 2
+"""Most unpinned resources to name in one turn -- a short list the user can
+act on (open it, or ask a follow-up), not a dump of the whole project."""
+
+_UNPINNED_MIN_OVERLAP = 2
+"""Shared terms required before naming an unpinned resource. Two, not one,
+keeps a single common word (e.g. "revenue") from surfacing every table in
+the project on every turn."""
+
+
+async def _find_unpinned_project_matches(
+    session: AsyncSession,
+    *,
+    project_id: int | None,
+    pinned: set[tuple[str, int]],
+    question: str,
+) -> list[ActiveResourceContext]:
+    """Notice project resources the question is probably about, that aren't
+    already pinned to this workspace.
+
+    The workspace only grounds the assistant on what's been dragged in; a
+    question can still be about something the user hasn't opened yet ("how
+    does this compare to the forecast doc?"). This is a cheap, local
+    term-overlap search over the rest of the project -- no extra LLM call,
+    no vector index -- and only surfaces a match strong enough to be worth
+    naming. It never fetches full content: naming a resource here works the
+    same as naming an already-pinned one, and the model still has to reach
+    it through the normal SQL/document paths if the answer actually needs it.
+    """
+    if project_id is None:
+        return []
+    q_terms = _extract_insight_terms(question)
+    if not q_terms:
+        return []
+    candidates = await list_project_resource_candidates(
+        session, project_id=project_id, exclude=pinned
+    )
+    scored: list[tuple[int, Any]] = []
+    for candidate in candidates:
+        overlap = len(q_terms & _extract_insight_terms(candidate.searchable_text))
+        if overlap >= _UNPINNED_MIN_OVERLAP:
+            scored.append((overlap, candidate))
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return [
+        ActiveResourceContext(
+            resource_type=c.resource_type,
+            resource_id=c.resource_id,
+            label=c.label,
+            summary=c.summary,
+        )
+        for _, c in scored[:_UNPINNED_MATCH_LIMIT]
+    ]
+
+
+def _format_unpinned_matches_prompt(matches: list[ActiveResourceContext]) -> str:
+    """Name project resources the question may be about, that the user
+    hasn't pinned to this workspace.
+
+    Distinct from the active-resource block: those are open right now and
+    are the default focus. These are only *available* -- said neutrally, the
+    same reasoning as the other blocks here, so the model treats a pinned,
+    focused item as primary and only reaches for one of these if the
+    question actually needs it.
+    """
+    if not matches:
+        return ""
+    lines = "\n".join(f"- {m.summary}" for m in matches)
+    return (
+        "--- Also in this project, not pinned to this workspace ---\n"
+        f"{lines}\n"
+        "These are not open in the workspace. Treat any pinned or focused "
+        "item above as the primary subject of the question; use one of these "
+        "only if the question specifically needs it.\n"
+        "--- End ---"
+    )
+
+
+# ── Conversation memory ────────────────────────────────────────────────────
+#
+# A fixed window of recent turns, sent with the answer-synthesis call so the
+# model can resolve follow-ups ("that", "explain more") instead of treating
+# every question as the first one. ai-server already formats and re-caps this
+# (_format_conversation_history in app/routers/ai_shared.py); these budgets
+# keep the request small enough that it never gets there oversized.
+#
+# Deliberately NOT sent to intent classification or SQL generation: a normal
+# analytical question is ~3 LLM calls and an investigation up to 8, so history
+# on every call would multiply prefill for no benefit. Classification already
+# receives prior_turn, and SQL generation already gets the previous SQL.
+#
+# Known limitation: this is a window, not memory. A thread longer than the
+# budget forgets its oldest turns -- no indexing or rolling summary yet. That
+# is the planned revamp, and this is the seam it attaches to.
+_HISTORY_MAX_TURNS = 8
+"""Turns, not messages -- each contributes up to two role messages below."""
+_HISTORY_MSG_CHARS = 600
+"""Per message, user and assistant alike: a pasted wall of text in a question
+crowds out the conversation just as effectively as a long answer."""
+_HISTORY_TOTAL_CHARS = 8000
+"""~2,300 tokens of a 20,480-token input window, measured across both roles."""
+
+
+async def _build_llm_history(
+    session: AsyncSession,
+    conversation: AnalyticsConversation,
+    current_turn: AnalyticsConversationTurn,
+) -> list[dict[str, str]]:
+    """Recent turns as ``{"role", "content"}`` dicts, oldest to newest.
+
+    Queried rather than read from ``conversation.turns``: that relationship is
+    lazily loaded and every caller of ``execute_turn`` hands us a conversation
+    without it (both ``load_canonical_conversation`` and the route helper
+    default to ``with_turns=False``, and the canonical path loads the row with
+    a bare ``SELECT ... FOR UPDATE``). Touching it here would raise
+    ``MissingGreenlet`` on an AsyncSession -- and would also pull an entire
+    long-lived thread into memory to use its last few turns.
+
+    Only successful turns: a failed turn's ``assistant_message`` is an error
+    string, and feeding that back would teach the model that the failure was
+    the answer.
+    """
+    rows = (
+        (
+            await session.execute(
+                select(AnalyticsConversationTurn)
+                .where(
+                    AnalyticsConversationTurn.conversation_id == conversation.id,
+                    AnalyticsConversationTurn.id != current_turn.id,
+                    AnalyticsConversationTurn.status == "success",
+                )
+                .order_by(AnalyticsConversationTurn.sequence.desc())
+                .limit(_HISTORY_MAX_TURNS)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    messages: list[dict[str, str]] = []
+    for prior in reversed(rows):  # newest-first query, oldest-first prompt
+        if prior.user_message:
+            messages.append(
+                {"role": "user", "content": prior.user_message[:_HISTORY_MSG_CHARS]}
+            )
+        if prior.assistant_message:
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": prior.assistant_message[:_HISTORY_MSG_CHARS],
+                }
+            )
+
+    # Drop oldest-first so the most recent exchange always survives; it is the
+    # one a follow-up actually refers to.
+    while messages and sum(len(m["content"]) for m in messages) > _HISTORY_TOTAL_CHARS:
+        messages.pop(0)
+    return messages
+
+
 async def _synthesize_answer(
     context: RequestContext,
     project_id: int,
@@ -576,6 +790,7 @@ async def _synthesize_answer(
     matched_insights: list[dict[str, Any]] | None = None,
     conversation_id: int | None = None,
     turn_id: int | None = None,
+    history: list[dict[str, str]] | None = None,
 ) -> str | None:
     """Ask the LLM to synthesize the final answer from data and/or insight cards.
 
@@ -593,6 +808,7 @@ async def _synthesize_answer(
             matched_insights=matched_insights,
             conversation_id=conversation_id,
             turn_id=turn_id,
+            history=history or [],
         )
         if response and response.get("answer"):
             return str(response["answer"]).strip()
@@ -612,6 +828,8 @@ async def execute_turn(
     datasource_id: int | None = None,
     attachment_ids: list[int] | None = None,
     active_resources: list[ActiveResourceContext] | None = None,
+    focused_resource: ActiveResourceContext | None = None,
+    context_snippets: list[tuple[str, str]] | None = None,
 ) -> None:
     """Execute a single turn and mutate its persisted fields in place.
 
@@ -622,6 +840,10 @@ async def execute_turn(
     prior_turn: AnalyticsConversationTurn | None = None
     if conversation.last_successful_turn_id is not None:
         prior_turn = await session.get(AnalyticsConversationTurn, conversation.last_successful_turn_id)
+    # Built once here and consumed by whichever answer path this turn takes --
+    # the document-Q&A bypass below or the analytical synthesis at the end.
+    # Same shape as prior_turn above: one query up front, local variable after.
+    history = await _build_llm_history(session, conversation, turn)
     question = turn.user_message
     raw_question = question
 
@@ -669,12 +891,33 @@ async def execute_turn(
         question = f"{attachment_context}\n\n{question}"
         sql_question = f"{attachment_context}\n\n{sql_question}"
 
-    active_resource_prompt = _format_active_resource_prompt(active_resources)
+    active_resource_prompt = _format_active_resource_prompt(active_resources, focused_resource)
     if active_resource_prompt:
         # Same pattern as attachment_context above: the active workspace items
         # ground the model's prompts only, never the persisted user message.
         question = f"{active_resource_prompt}\n\n{question}"
         sql_question = f"{active_resource_prompt}\n\n{sql_question}"
+
+    unpinned_matches = await _find_unpinned_project_matches(
+        session,
+        project_id=conversation.project_id,
+        pinned={(r.resource_type, r.resource_id) for r in (active_resources or [])},
+        # The raw message, not `question`: by this point `question` may
+        # already carry the attachment/active-resource prompt blocks
+        # prepended above, and scoring against those would match on their
+        # own scaffolding words ("workspace", "currently", "open") rather
+        # than what the user actually asked.
+        question=turn.user_message,
+    )
+    unpinned_prompt = _format_unpinned_matches_prompt(unpinned_matches)
+    if unpinned_prompt:
+        question = f"{unpinned_prompt}\n\n{question}"
+        sql_question = f"{unpinned_prompt}\n\n{sql_question}"
+
+    snippet_prompt = _format_context_snippets(context_snippets)
+    if snippet_prompt:
+        question = f"{snippet_prompt}\n\n{question}"
+        sql_question = f"{snippet_prompt}\n\n{sql_question}"
 
     # A clarification intent from the classifier is an ambiguous phrasing, not a
     # reason to give up. Treat it like a new analysis so the SQL path gets a
@@ -906,7 +1149,7 @@ async def execute_turn(
             context,
             project_id=project_id,
             question=question,
-            history=[],
+            history=history,
             scope="authorized_project",
             include_query_history=False,
             include_dashboard_context=False,
@@ -1156,6 +1399,7 @@ async def execute_turn(
         matched_insights=matched_insights_for_synthesis,
         conversation_id=conversation.id,
         turn_id=turn.id,
+        history=history,
     )
     turn.assistant_message = (
         synthesized

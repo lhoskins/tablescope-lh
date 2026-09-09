@@ -162,13 +162,16 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
     setDeleteTarget(source);
     setDeletePreflight(null);
     setDeleteError(null);
-    setDeleteBusy(true);
+    // Note: deleteBusy is intentionally NOT set here. It drives the confirm
+    // button's "Deleting..." label/disabled state in DeleteSourceDialog, and
+    // is reserved for the actual delete in confirmDelete() below. The button
+    // is already disabled correctly while this preflight check is in flight
+    // (deletePreflight is null -> safe is false -> disabled), so reusing
+    // deleteBusy here just mislabels a "checking" state as "Deleting...".
     try {
       setDeletePreflight(await preflightDelete(source));
     } catch (err) {
       setDeleteError((err as Error).message);
-    } finally {
-      setDeleteBusy(false);
     }
   }, []);
 

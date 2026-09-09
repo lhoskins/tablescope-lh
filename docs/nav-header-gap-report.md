@@ -1,5 +1,55 @@
 # Nav Card Grid + Project Header — Why the Live Build Doesn't Match the Prototype
 
+> **UPDATE (checked against `UX-design-02`, current HEAD) — read this part first.**
+> The analysis below was written against `UX-design-01` / `release/deploy-2026-08-07`.
+> The codebase has moved since then. Re-verified directly against source on
+> `UX-design-02`:
+>
+> - **Resolved:** `ProjectResourceTabs` (the file this report names) no longer
+>   exists. It's been replaced by `web-ui/components/tablescope/project/project-nav-grid.tsx`
+>   (`ProjectNavGrid`), whose own code comment cites this report and
+>   `ux-workspace-redesign-gap-analysis.md` directly. It already renders all 12
+>   items (Overview, Workspace, Tables, Documents, Dashboards, Data Sources,
+>   Project Insights, Project Actions, Reference, Scopes, Knowledge Graph,
+>   Chats) wired to real routes via `projectGridItems` in
+>   `components/tablescope/nav.ts`. **Do not send Devin after
+>   `project-resource-tabs.tsx` — that file is gone.**
+> - **Still open, worth checking:** `ProjectNavGrid`'s active item gets a
+>   background/color change, but non-active items have no visible border —
+>   the prototype's `.nav-card` gives every card a baseline `border` +
+>   `border-radius` regardless of state. May already look close enough
+>   visually; confirm against `prototype-ux.html` before treating it as a bug.
+> - **Still open, confirmed unchanged:** `showProjectHeader` still defaults to
+>   `false` in `web-ui/components/tablescope/project-shell.tsx` and is opt-in
+>   per page — same root cause as originally described below (title/badge/
+>   Share-toggle/Members row missing on most project pages).
+>
+> **Current Devin prompt** (target branch updated — PRs for this work land on
+> `UX-design-02-updates`, a buffer branch reviewed before merging into
+> `UX-design-02`, not `UX-design-02` directly):
+>
+> > Repo `vitruvity33/tablescope`, branch base `UX-design-02`. Read
+> > `ux-design/devin-instructions.md` first. In
+> > `web-ui/components/tablescope/`: (1) compare `project/project-nav-grid.tsx`'s
+> > styling against `prototype-ux.html`'s `.nav-card`/`.nav-card.active` CSS —
+> > if every item should have a visible border + rounded corners at rest, not
+> > just the active one, add that. (2) `project-shell.tsx`'s
+> > `showProjectHeader` defaults to `false` and is opt-in per page, which is
+> > why the title/badge/Share-toggle/Members row is missing on most project
+> > pages (Workspace, Project Actions, Project Insights, Scopes, Knowledge
+> > Graph, and the detail views of Data Sources/Dashboards). Make it default
+> > to `true` (or drop the prop) so it renders unconditionally. Push to your
+> > own `devin/<short-description>` branch and open the PR into
+> > **`UX-design-02-updates`**.
+>
+> Everything below this line is the original analysis, written against
+> `UX-design-01` — kept for the header-row reasoning (still accurate) but its
+> file paths/line references are stale for `UX-design-02`.
+
+---
+
+# Nav Card Grid + Project Header — Why the Live Build Doesn't Match the Prototype
+
 **Checked against:** `UX-design-01` (HEAD `87b667e7`), same code inherited by `release/deploy-2026-08-07` — verified by reading the actual component source, not the plan text.
 
 ## Bottom line

@@ -43,8 +43,10 @@ export function DocumentDetailView({
   onBack,
 }: {
   asset: ProjectAsset;
-  backLabel: string;
-  onBack: () => void;
+  /** Omitted when embedded (the Workspace's Info drawer), where there is no
+   *  previous screen to go back to. */
+  backLabel?: string;
+  onBack?: () => void;
 }) {
   const meta = (asset.ai_metadata ?? {}) as Record<string, unknown>;
   const tags = (meta.tags ?? []) as AITag[];
@@ -60,7 +62,7 @@ export function DocumentDetailView({
 
   return (
     <div className="space-y-4">
-      <DetailBackBar label={backLabel} onBack={onBack} />
+      {backLabel && onBack && <DetailBackBar label={backLabel} onBack={onBack} />}
 
       <header className="flex items-start gap-2.5">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-bg-secondary text-ink-tertiary">

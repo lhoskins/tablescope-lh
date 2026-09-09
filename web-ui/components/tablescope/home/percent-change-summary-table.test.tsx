@@ -77,17 +77,29 @@ function renderTable(
 }
 
 describe("PercentChangeSummaryTable", () => {
-  it("renders full-cell conditional formatting and no direction arrows (executive presentation)", () => {
+  it("colors the figure, not the cell, and shows no direction arrows (executive presentation)", () => {
+    // This replaces an earlier full-cell fill (#74C990/#EA7975/#626365 edge to
+    // edge, white text). Painting every cell made the grid read as a heat map
+    // in which the numbers were the least legible element, and looked unlike
+    // the rest of the app. Sign now comes from the text colour alone.
     const rows = [row("r1", "Revenue", [0.05, -0.03, 0.0, null])];
     renderTable(rows, vi.fn(), "executive");
 
-    const positiveCell = screen.getByLabelText("Positive +5.00%").closest("td");
-    expect(positiveCell?.classList.contains("bg-[#74C990]")).toBe(true);
-    expect(positiveCell?.classList.contains("text-white")).toBe(true);
+    const positiveCell = screen.getByLabelText("Positive +5.0%").closest("td");
+    expect(positiveCell?.classList.contains("text-success-strong")).toBe(true);
+    expect(positiveCell?.classList.contains("text-white")).toBe(false);
 
-    const negativeCell = screen.getByLabelText("Negative -3.00%").closest("td");
-    expect(negativeCell?.classList.contains("bg-[#EA7975]")).toBe(true);
-    expect(negativeCell?.classList.contains("text-white")).toBe(true);
+    const negativeCell = screen.getByLabelText("Negative -3.0%").closest("td");
+    expect(negativeCell?.classList.contains("text-danger-strong")).toBe(true);
+    expect(negativeCell?.classList.contains("text-white")).toBe(false);
+
+    // No *value* cell carries a fill -- the table's own surface shows through,
+    // so rows stay readable across a wide period grid. (The sticky insight
+    // column keeps its background; it has to occlude what scrolls beneath.)
+    [positiveCell, negativeCell].forEach((cell) => {
+      const classes = Array.from(cell?.classList ?? []);
+      expect(classes.some((c) => c.startsWith("bg-"))).toBe(false);
+    });
 
     // The blank (null) cell is also treated as 0.00% in executive
     // presentation (see the dedicated test below), so both it and the real
@@ -95,9 +107,8 @@ describe("PercentChangeSummaryTable", () => {
     const zeroCells = screen.getAllByLabelText("No change, +0.00%");
     expect(zeroCells.length).toBe(2);
     zeroCells.forEach((cell) => {
-      const td = cell.closest("td");
-      expect(td?.classList.contains("bg-[#626365]")).toBe(true);
-      expect(td?.classList.contains("text-white")).toBe(true);
+      // A flat period is quiet rather than alarming.
+      expect(cell.closest("td")?.classList.contains("text-ink-tertiary")).toBe(true);
     });
 
     // No IconArrowUp/IconArrowDown should appear inside body cells.
@@ -108,17 +119,16 @@ describe("PercentChangeSummaryTable", () => {
   });
 
   it("keeps the original theme-token colors under the default (Project Insights) presentation", () => {
-    // The approved #74C990/#EA7975/#626365 palette is specific to the
-    // Business Insight executive briefing (see business-intelligence-workspace.tsx,
-    // which is the only caller that passes presentation="executive"). Project
-    // Insights and any other default caller must keep the original
-    // success/danger design tokens so this restyle doesn't leak beyond its
-    // stated scope.
+    // Only the executive briefing's styling was in question, so Project
+    // Insights keeps its subtle success/danger tints. Pinned here so a future
+    // change to one presentation doesn't silently restyle the other.
     const rows = [row("r1", "Revenue", [0.05, -0.03, 0.0, null])];
     renderTable(rows, vi.fn(), "default");
 
     const positiveCell = screen.getByLabelText("Positive +5.00%").closest("td");
     expect(positiveCell?.classList.contains("bg-success-bg")).toBe(true);
+    // The muted chip token, not the brighter `-strong` one the executive grid
+    // uses: here the figure sits on a tint, not on white.
     expect(positiveCell?.classList.contains("text-success")).toBe(true);
     expect(positiveCell?.classList.contains("bg-[#74C990]")).toBe(false);
 
@@ -132,7 +142,7 @@ describe("PercentChangeSummaryTable", () => {
     expect(zeroCell?.classList.contains("bg-[#626365]")).toBe(false);
   });
 
-  it("shows blank (no comparable prior period) cells as 0.00% in #626365 under executive presentation", () => {
+  it("still shows blank (no comparable prior period) cells as a quiet 0.0% under executive presentation", () => {
     const rows = [row("r1", "Revenue", [0.05, null, 0.0, null])];
     renderTable(rows, vi.fn(), "executive");
 
@@ -142,9 +152,8 @@ describe("PercentChangeSummaryTable", () => {
     expect(blankCells.length).toBe(3);
     blankCells.forEach((cell) => {
       const td = cell.closest("td");
-      expect(td?.classList.contains("bg-[#626365]")).toBe(true);
-      expect(td?.classList.contains("text-white")).toBe(true);
-      expect(td?.textContent).toBe("+0.00%");
+      expect(td?.classList.contains("text-ink-tertiary")).toBe(true);
+      expect(td?.textContent).toBe("+0.0%");
     });
   });
 

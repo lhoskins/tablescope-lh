@@ -33,7 +33,7 @@ describe("WorkspaceAddCard", () => {
     documentsData.rows = [];
 
     render(<WorkspaceAddCard projectId="7" cards={cards} onAdd={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Add card" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add file" }));
 
     expect(screen.getByRole("button", { name: /Orders DB/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Salesforce Leads/ })).toBeTruthy();
@@ -50,7 +50,7 @@ describe("WorkspaceAddCard", () => {
 
     const onAdd = vi.fn();
     render(<WorkspaceAddCard projectId="7" cards={cards} onAdd={onAdd} />);
-    fireEvent.click(screen.getByRole("button", { name: "Add card" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add file" }));
     fireEvent.click(screen.getByRole("button", { name: /Orders DB/ }));
 
     expect(onAdd).toHaveBeenCalledWith({

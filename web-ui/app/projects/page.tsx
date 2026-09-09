@@ -49,6 +49,9 @@ export default function ProjectsPage() {
 
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  // Which visibility the New project dialog opens with -- the sidebar's
+  // PRIVATE and SHARED headers each deep-link here with their own.
+  const [newShared, setNewShared] = useState(false);
   const { toasts, push, dismiss } = useToasts();
 
   useEffect(() => {
@@ -56,7 +59,9 @@ export default function ProjectsPage() {
       router.replace("/login");
       return;
     }
-    if (new URLSearchParams(window.location.search).get("new") != null) {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("new") != null) {
+      setNewShared(params.get("shared") != null);
       setShowCreate(true);
     }
   }, [router]);
@@ -93,7 +98,14 @@ export default function ProjectsPage() {
       centered
       topBarLeft={<span className="text-h2 text-ink-primary">Projects</span>}
       topBarRight={
-        <Button variant="primary" size="md" onClick={() => setShowCreate(true)}>
+        <Button
+          variant="primary"
+          size="md"
+          onClick={() => {
+            setNewShared(false);
+            setShowCreate(true);
+          }}
+        >
           <IconPlus size={15} />
           New project
         </Button>
@@ -152,7 +164,11 @@ export default function ProjectsPage() {
         </ProjectAccordionSection>
       </div>
 
-      <NewProjectDialog open={showCreate} onClose={() => setShowCreate(false)} />
+      <NewProjectDialog
+        open={showCreate}
+        defaultShared={newShared}
+        onClose={() => setShowCreate(false)}
+      />
       <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </AppShell>
   );
