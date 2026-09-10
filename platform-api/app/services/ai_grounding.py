@@ -40,7 +40,7 @@ from app.schemas.ai_grounding import (
 from app.services import ai_intelligence_client, insight_registry
 from app.services.insight_card_match import _chart_signature, _data_shape_score, _extract_terms
 from app.services.knowledge_graph_builder import _load_stored_graph, enrich_node
-from app.services.reference_catalog_service import get_reference_kpis
+from app.services.reference_catalog_service import get_reference_kpis, get_reference_tags
 from app.services.reference_library_service import extract_reference_domains
 
 logger = logging.getLogger(__name__)
@@ -418,19 +418,20 @@ async def _ranked_kpis(
         return []
 
     question_tokens = _question_tokens(question)
-    scored = [
-        (
-            _kpi_match_score(kpi, question_tokens, relevant_columns),
+    scored = []
+    for kpi in kpis:
+        score = _kpi_match_score(kpi, question_tokens, relevant_columns)
+        scored.append((
+            score,
             GroundingKPI(
                 kpi_key=kpi.get("kpi_key", ""),
                 display_name=kpi.get("display_name", ""),
                 business_domain=kpi.get("business_domain"),
                 required_fields=kpi.get("required_fields") or [],
                 related_tags=kpi.get("related_tags") or [],
+                match_score=round(float(score), 3),
             ),
-        )
-        for kpi in kpis
-    ]
+        ))
     scored.sort(key=lambda x: x[0], reverse=True)
 
     # Keep a minimum set when nothing strongly matches, but prefer ranked top-N.
@@ -766,6 +767,101 @@ async def _reference_documents_for_question(
         )
         for row in rows
     ]
+
+
+_ACRONYM_RE = re.compile(r"\b[A-Z]{3,}\b")
+
+
+def _acronyms(text_: str) -> set[str]:
+    """Distinctive 3+ letter all-caps acronyms in ``text_`` (e.g. SCOR, OEE).
+
+    Deliberately requires 3+ letters -- 2-letter acronyms (IT, US, OK, ID)
+    are common English words too and would make this an unreliable, noisy
+    signal instead of a confident one.
+    """
+    return set(_ACRONYM_RE.findall(text_ or ""))
+
+
+async def question_names_reference_entry(
+    session: AsyncSession,
+    *,
+    tenant_id: int,
+    project_id: int,
+    question: str,
+) -> bool:
+    """True when the question names an actual Reference Library document or
+    Industry KPI/tag catalog entry by its real key, name, or acronym.
+
+    This is an exact/deterministic match against real catalog content, not
+    a fuzzy relevance score -- used to route a question to the
+    reference-answer path *before* any SQL generation is attempted (e.g.
+    "tell me about SCOR" should never reach the SQL generator at all when
+    "SCOR" is a real catalog entry). A scored/fuzzy match here would risk
+    answering an unrelated data question from whatever reference content
+    happens to rank highest, which is the false-positive behavior this
+    deliberately avoids -- a question that does not name anything real
+    still falls through to normal SQL generation, and a hard error if that
+    also fails, with no guessing either way.
+    """
+    tokens = _question_tokens(question)
+    question_acronyms = _acronyms(question)
+    if not tokens and not question_acronyms:
+        return False
+
+    try:
+        kpis = await get_reference_kpis(session, tenant_id)
+        tags = await get_reference_tags(session, tenant_id)
+    except Exception as exc:
+        logger.warning("Reference catalog lookup failed for routing check: %s", exc)
+        kpis, tags = [], []
+
+    for entry in (*kpis, *tags):
+        key = str(entry.get("kpi_key") or entry.get("tag_key") or "").lower()
+        if key and key in tokens:
+            return True
+        display_name = str(entry.get("display_name") or "")
+        if display_name:
+            if display_name.upper() in question_acronyms or (
+                display_name.isupper() and display_name.lower() in tokens
+            ):
+                return True
+            name_tokens = {
+                t.lower() for t in _GROUNDING_TOKEN_RE.findall(display_name) if len(t) > 2
+            }
+            # Every significant word of the display name must appear
+            # somewhere in the question -- one shared word ("cost") is not
+            # a real match, but the whole name being present is.
+            if name_tokens and name_tokens <= tokens:
+                return True
+
+    if not question_acronyms:
+        return False
+
+    try:
+        rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT title FROM reference_documents
+                    WHERE status = 'active'
+                      AND (
+                        tier = 'industry'
+                        OR (tier = 'company' AND tenant_id = :tenant_id)
+                        OR (tier = 'project' AND project_id = :project_id)
+                      )
+                    """
+                ),
+                {"tenant_id": tenant_id, "project_id": project_id},
+            )
+        ).fetchall()
+    except Exception as exc:
+        logger.warning("Reference document title lookup failed for routing check: %s", exc)
+        return False
+
+    for row in rows:
+        if _acronyms(row.title or "") & question_acronyms:
+            return True
+    return False
 
 
 def _merge_passages(
