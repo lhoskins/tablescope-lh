@@ -1159,6 +1159,22 @@ async def execute_turn(
                 project_id=project_id,
                 question=prior_turn.user_message,
             )
+        if (
+            grounding is not None
+            and not grounding.reference_documents
+            and prior_turn is not None
+            and prior_turn.intent_type == ConversationalIntent.DOCUMENT_QA
+            and prior_turn.user_message
+        ):
+            # Bare follow-up ("give me more detail") needs the prior document
+            # to find the same reference source again.
+            grounding = await gather_grounding_evidence(
+                session,
+                tenant_id=context.tenant_id,
+                user_id=context.user_id,
+                project_id=project_id,
+                question=prior_turn.user_message,
+            )
         if grounding is None:
             from app.schemas.ai_grounding import GroundingEvidence
             grounding = GroundingEvidence()
@@ -1186,6 +1202,19 @@ async def execute_turn(
         answer = (
             prose.get("answer") if isinstance(prose, dict) else (str(prose) if prose else "")
         )
+        sources = [
+            (d.title, d.source_url)
+            for d in grounding.reference_documents
+            if d.source_url
+        ]
+        if sources:
+            citations = "\n".join(
+                f"- {title} - {url}" for title, url in sources
+            )
+            if answer:
+                answer = f"{answer}\n\nSources:\n{citations}"
+            else:
+                answer = f"Sources:\n{citations}"
         turn.assistant_message = (
             answer
             or "I couldn't find a relevant document for that question. Try rephrasing or checking the Reference Library."
