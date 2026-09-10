@@ -896,33 +896,18 @@ async def execute_turn(
         question = f"{attachment_context}\n\n{question}"
         sql_question = f"{attachment_context}\n\n{sql_question}"
 
-    active_resource_prompt = _format_active_resource_prompt(active_resources, focused_resource)
-    if active_resource_prompt:
-        # Same pattern as attachment_context above: the active workspace items
-        # ground the model's prompts only, never the persisted user message.
-        question = f"{active_resource_prompt}\n\n{question}"
-        sql_question = f"{active_resource_prompt}\n\n{sql_question}"
-
-    unpinned_matches = await _find_unpinned_project_matches(
-        session,
-        project_id=conversation.project_id,
-        pinned={(r.resource_type, r.resource_id) for r in (active_resources or [])},
-        # The raw message, not `question`: by this point `question` may
-        # already carry the attachment/active-resource prompt blocks
-        # prepended above, and scoring against those would match on their
-        # own scaffolding words ("workspace", "currently", "open") rather
-        # than what the user actually asked.
-        question=turn.user_message,
-    )
-    unpinned_prompt = _format_unpinned_matches_prompt(unpinned_matches)
-    if unpinned_prompt:
-        question = f"{unpinned_prompt}\n\n{question}"
-        sql_question = f"{unpinned_prompt}\n\n{sql_question}"
-
-    snippet_prompt = _format_context_snippets(context_snippets)
-    if snippet_prompt:
-        question = f"{snippet_prompt}\n\n{question}"
-        sql_question = f"{snippet_prompt}\n\n{sql_question}"
+    # Workspace-context grounding (active resources, unpinned project matches,
+    # pinned excerpts) used to be prepended to `question`/`sql_question` here.
+    # Live incident: prepending this scaffolding ahead of the user's actual
+    # question changed what the SQL generator and source resolver saw, and
+    # produced wrong-project source matches (turn matched an unrelated
+    # project's sources) and spurious "could not match an authorized project
+    # source" clarification responses on questions that used to resolve
+    # cleanly pre-workspace-context. Removed rather than reworded again --
+    # `active_resources`/`focused_resource`/`context_snippets` are still
+    # accepted on the request (see conversational_analytics_turns.py) so the
+    # workspace UI keeps working, they are just no longer folded into the
+    # model-facing prompt.
 
     # A clarification intent from the classifier is an ambiguous phrasing, not a
     # reason to give up. Treat it like a new analysis so the SQL path gets a
