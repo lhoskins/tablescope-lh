@@ -121,3 +121,30 @@ async def test_no_anchor_project_id_behaves_as_before(db_session, monkeypatch) -
     result = await bipr.resolve_business_insight_project(db_session, _context(), "vague question")
     assert result.status == "resolved"
     assert result.project_id == b
+
+
+async def test_non_member_cannot_be_resolved_onto_a_shared_project_it_does_not_own(
+    db_session, monkeypatch
+) -> None:
+    """is_shared controls discoverability, never authorization by itself
+    (app/services/project_access.py, TS-ISO-003) -- a same-tenant user who
+    neither owns a project nor holds an active ProjectMember row for it must
+    never have a cross-project question resolved onto it just because it is
+    marked shared. This resolver predates that policy and missed the fix
+    (it scores candidates inline rather than gating a route), so a
+    non-member user's question could silently be answered from -- and leak
+    the contents of -- any shared project in the tenant that happened to
+    score higher than the projects they actually have access to."""
+    owned = Project(tenant_id=TENANT, name="Owned", owner_id=2, is_shared=False)
+    shared_unowned = Project(tenant_id=TENANT, name="Shared", owner_id=2, is_shared=True)
+    db_session.add_all([owned, shared_unowned])
+    await db_session.flush()
+
+    caller = RequestContext(
+        claims=TokenClaims(sub="u", tenant_id=TENANT, user_id=1, role="editor")
+    )
+    # The caller owns neither project and has no ProjectMember row for either.
+    _patch_scores(monkeypatch, {owned.id: 10.0, shared_unowned.id: 90.0})
+    result = await bipr.resolve_business_insight_project(db_session, caller, "vague question")
+    assert result.status == "no_match"
+    assert result.project_id is None

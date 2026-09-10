@@ -38,7 +38,22 @@ class ProjectResolveResult:
 async def _authorized_project_ids(
     session: AsyncSession, context: RequestContext
 ) -> list[tuple[int, str]]:
-    """Return the (id, name) of all projects the caller may access."""
+    """Return the (id, name) of all projects the caller may access.
+
+    Per the canonical policy (app/services/project_access.py, TS-ISO-003): a
+    project is accessible only to its owner or an active ProjectMember.
+    ``is_shared`` controls discoverability/joinability, never authorization
+    by itself -- this resolver predates that policy (2026-07-31, a month
+    before TS-ISO-003 closed the same gap elsewhere) and was missed because
+    it scores candidate projects inline rather than gating a route, so the
+    audit's route-level sweep never found it. Left uncorrected, any
+    same-tenant user without membership could have a cross-project question
+    (Business Insight / ai_assistant surface) resolved onto -- and answered
+    from -- any project merely marked shared, which both leaks that
+    project's data and can silently steer a question to the wrong project
+    when the shared project happens to score higher than the one the user
+    actually intended.
+    """
     stmt = select(Project.id, Project.name).where(
         Project.tenant_id == context.tenant_id
     )
@@ -56,7 +71,6 @@ async def _authorized_project_ids(
         stmt = stmt.where(
             or_(
                 Project.owner_id == context.user_id,
-                Project.is_shared.is_(True),
                 Project.id.in_(member_sub),
             )
         )
