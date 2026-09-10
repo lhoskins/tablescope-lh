@@ -75,6 +75,15 @@ async def refresh_google_drive_tokens(ctx: dict[str, object]) -> dict[str, int]:
         credentials = list((await session.scalars(stmt)).all())
         for credential in credentials:
             try:
+                # An earlier credential's failure and rollback in this same
+                # loop expires every object in the session -- including
+                # every column, id included -- regardless of
+                # expire_on_commit. Refresh must run, inside this awaited
+                # context, before ANY attribute of this credential (even
+                # credential.id below) is read synchronously, or that read
+                # hits an unawaited refresh and raises MissingGreenlet.
+                await session.refresh(credential)
+                credential_id = credential.id
                 if await _refresh_google_drive_credential(credential):
                     refreshed += 1
                     re_registered += await _reregister_live_google_drive_sources(
@@ -85,7 +94,7 @@ async def refresh_google_drive_tokens(ctx: dict[str, object]) -> dict[str, int]:
                 await session.rollback()
                 logger.warning(
                     "Google Drive token refresh error for credential %s: %s",
-                    credential.id,
+                    credential_id,
                     exc,
                 )
     return {"refreshed": refreshed, "re_registered": re_registered}
