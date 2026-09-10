@@ -336,6 +336,20 @@ async def _execute_with_repair(
         )
         candidate = collapse_bare_following_parens(candidate)
         candidate = rebuild_group_by_from_select(candidate)
+        # rebuild_group_by_from_select copies a SELECT-list expression's exact
+        # text into the rebuilt GROUP BY clause; when that expression ends in
+        # a CASE's END and ORDER BY immediately follows, one of its assembly
+        # paths concatenates them with no separating space, reintroducing the
+        # exact "ENDORDER BY" glue the first _fix_glued_keywords call above
+        # already cleaned up. A second pass here catches that -- it's a pure,
+        # idempotent formatting repair (see test_fix_glued_keywords.py), safe
+        # to run again on already-correct SQL. Do NOT "fix" this by moving
+        # the first call to run after rebuild_group_by_from_select instead:
+        # verified that leaves rebuild_group_by_from_select parsing SQL that
+        # arrived pre-glued from the model, which makes it silently drop the
+        # ORDER BY clause entirely instead of raising -- a correctness bug
+        # worse than the parse error this is fixing.
+        candidate = _fix_glued_keywords(candidate)
         return candidate
 
     async def _execute(candidate: str) -> dict[str, Any]:
