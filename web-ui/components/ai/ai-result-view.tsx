@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import {
   IconCheck,
   IconLoader2,
@@ -105,7 +106,10 @@ export function ResultChart({
   rows: Record<string, unknown>[];
   viz: SuggestedVisualization;
 }) {
-  const chart = buildChart(columns, rows, viz);
+  // Memoized so a parent re-render that doesn't actually change the result
+  // (e.g. a sibling composer's keystroke) doesn't hand EChartsWidget a
+  // fresh chart object and force a full dispose+reinit every time.
+  const chart = useMemo(() => buildChart(columns, rows, viz), [columns, rows, viz]);
   if (!chart) return null;
   return (
     <div className="mb-3 rounded-md border border-line-tertiary p-3">

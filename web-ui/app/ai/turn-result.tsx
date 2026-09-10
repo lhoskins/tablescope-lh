@@ -1,7 +1,7 @@
 "use client";
 
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -39,18 +39,26 @@ import type { CurrentUser, TenantSummary } from "@/lib/ui/types";
 export function TurnResult({ turn }: { turn: ConversationTurn }) {
   const [showSql, setShowSql] = useState(false);
   const result = turn.result;
-  if (!result) return null;
   const chart = turn.chart_config;
   // Map the persisted chart config onto the shared renderer contract; the
   // subtype (horizontal_bar, donut, …) rides through as chartStyle.
-  const viz: SuggestedVisualization = chart
-    ? {
-        type: chart.type as SuggestedVisualization["type"],
-        xField: chart.labelColumn,
-        yField: chart.valueColumns?.[0],
-        chartStyle: chart.subtype,
-      }
-    : { type: "table" };
+  // Memoized so a fresh object identity doesn't reach ResultChart's own
+  // memoization on every unrelated re-render (e.g. a keystroke elsewhere
+  // in the page) and defeat it. Computed before the early return below so
+  // this hook always runs in the same order regardless of `result`.
+  const viz: SuggestedVisualization = useMemo(
+    () =>
+      chart
+        ? {
+            type: chart.type as SuggestedVisualization["type"],
+            xField: chart.labelColumn,
+            yField: chart.valueColumns?.[0],
+            chartStyle: chart.subtype,
+          }
+        : { type: "table" },
+    [chart],
+  );
+  if (!result) return null;
   return (
     <div className="mt-2 rounded-xl border border-line-tertiary bg-bg-primary p-3">
       {chart && chart.type !== "table" && (

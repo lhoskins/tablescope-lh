@@ -172,94 +172,102 @@ export function InsightChartView({
    */
   options?: Partial<VisualizationOptions>;
 }) {
-  const dataRows = chart.data.rows;
-  const series = chart.data.series;
+  // Built once per actual content change, not per render -- this used to
+  // construct a brand-new widget/data object on every render regardless of
+  // whether chart/options changed, which fed EChartsWidget's effect deps a
+  // fresh reference every time and forced a full dispose+reinit on every
+  // keystroke anywhere a parent re-rendered this component (e.g. a sibling
+  // chat composer's autosize textarea). See EChartsWidget.tsx's effect deps.
+  const built = useMemo(() => {
+    const dataRows = chart.data.rows;
+    const series = chart.data.series;
 
-  if (dataRows && dataRows.length > 0) {
-    const widget = buildMultiDimWidget(chart, dataRows);
-    if (options) {
-      widget.visualizationOptions = { ...widget.visualizationOptions, ...options };
+    if (dataRows && dataRows.length > 0) {
+      const widget = buildMultiDimWidget(chart, dataRows);
+      if (options) {
+        widget.visualizationOptions = { ...widget.visualizationOptions, ...options };
+      }
+      return { kind: "multi-dim" as const, widget, data: dataRows };
     }
-    const height =
-      heightProp ??
-      (chart.type === "funnel" || chart.type === "sankey"
-        ? 260
-        : chart.type === "heatmap"
-          ? 240
-          : 220);
-    return (
-      <div className="w-full" style={{ height }}>
-        <WidgetRenderer widget={widget} data={dataRows} />
-      </div>
+
+    if (!series || series.length === 0) return null;
+
+    // Two-metric charts (combo/scatter/bubble) carry a second value; expose both
+    // columns so the renderer can map them onto the right axes.
+    const hasValue2 = series.some((s) => typeof s.value2 === "number");
+    const labels = chart.seriesLabels;
+    const roles = chart.roles;
+    const valueName = labels?.value ?? roles?.y ?? "value";
+    const value2Name = labels?.value2 ?? roles?.y2 ?? "value2";
+    const xName = roles?.x ?? "label";
+
+    // For scatter, the first metric is the X axis and the second is the Y axis.
+    const isScatter = chart.type === "scatter";
+    const xColumnName = isScatter ? valueName : xName;
+    const yColumnName = isScatter ? value2Name : valueName;
+
+    const rows = series.map((s) => {
+      if (isScatter) {
+        return { [valueName]: s.value, [value2Name]: s.value2 ?? 0 };
+      }
+      if (hasValue2) {
+        return { [xName]: s.label, [valueName]: s.value, [value2Name]: s.value2 ?? 0 };
+      }
+      return { [xName]: s.label, [valueName]: s.value };
+    });
+
+    const valueScale = autoValueScale(
+      rows.flatMap((row) => [row[valueName], hasValue2 ? row[value2Name] : undefined] as unknown[]).map(Number),
     );
-  }
+    const base: WidgetConfig = {
+      id: "insight-chart",
+      type: chart.type as WidgetType,
+      chartSubtype: (chart.subtype || undefined) as WidgetConfig["chartSubtype"],
+      title: "",
+      dataSource: { kind: "custom_sql" },
+      xColumn: xColumnName,
+      xColumnType: isScatter ? "number" : "string",
+      yColumn: yColumnName,
+      aggregation: "sum",
+      sortBy: "x_asc",
+      filters: [],
+      visualizationOptions: { showLegend: false, showGrid: false, valueScale, ...options },
+      colSpan: 1,
+      position: 0,
+    };
 
-  if (!series || series.length === 0) return null;
-
-  // Two-metric charts (combo/scatter/bubble) carry a second value; expose both
-  // columns so the renderer can map them onto the right axes.
-  const hasValue2 = series.some((s) => typeof s.value2 === "number");
-  const labels = chart.seriesLabels;
-  const roles = chart.roles;
-  const valueName = labels?.value ?? roles?.y ?? "value";
-  const value2Name = labels?.value2 ?? roles?.y2 ?? "value2";
-  const xName = roles?.x ?? "label";
-
-  // For scatter, the first metric is the X axis and the second is the Y axis.
-  const isScatter = chart.type === "scatter";
-  const xColumnName = isScatter ? valueName : xName;
-  const yColumnName = isScatter ? value2Name : valueName;
-
-  const rows = series.map((s) => {
-    if (isScatter) {
-      return { [valueName]: s.value, [value2Name]: s.value2 ?? 0 };
+    let widget: WidgetConfig = base;
+    if ((chart.type === "combo" && hasValue2) || chart.type === "scatter") {
+      widget = { ...base, y2Column: isScatter ? undefined : value2Name, y2Aggregation: "sum" };
     }
-    if (hasValue2) {
-      return { [xName]: s.label, [valueName]: s.value, [value2Name]: s.value2 ?? 0 };
-    }
-    return { [xName]: s.label, [valueName]: s.value };
-  });
 
-  const valueScale = autoValueScale(
-    rows.flatMap((row) => [row[valueName], hasValue2 ? row[value2Name] : undefined] as unknown[]).map(Number),
-  );
-  const base: WidgetConfig = {
-    id: "insight-chart",
-    type: chart.type as WidgetType,
-    chartSubtype: (chart.subtype || undefined) as WidgetConfig["chartSubtype"],
-    title: "",
-    dataSource: { kind: "custom_sql" },
-    xColumn: xColumnName,
-    xColumnType: isScatter ? "number" : "string",
-    yColumn: yColumnName,
-    aggregation: "sum",
-    sortBy: "x_asc",
-    filters: [],
-    visualizationOptions: { showLegend: false, showGrid: false, valueScale, ...options },
-    colSpan: 1,
-    position: 0,
-  };
+    return { kind: "series" as const, widget, data: rows, rowCount: rows.length };
+  }, [chart, options]);
 
-  let widget: WidgetConfig = base;
-  if ((chart.type === "combo" && hasValue2) || chart.type === "scatter") {
-    widget = { ...base, y2Column: isScatter ? undefined : value2Name, y2Aggregation: "sum" };
-  }
+  if (!built) return null;
 
   // Horizontal bars stack their category labels down the y-axis, so give each
   // bar vertical room instead of cramming them into a fixed 180px box.
   const isHorizontalBar =
+    built.kind === "series" &&
     chart.type === "bar" &&
     (chart.subtype === "horizontal_bar" ||
       chart.subtype === "stacked_horizontal");
   const height =
     heightProp ??
-    (isHorizontalBar
-      ? Math.min(520, Math.max(180, rows.length * 28 + 48))
-      : 180);
+    (built.kind === "multi-dim"
+      ? chart.type === "funnel" || chart.type === "sankey"
+        ? 260
+        : chart.type === "heatmap"
+          ? 240
+          : 220
+      : isHorizontalBar
+        ? Math.min(520, Math.max(180, (built.rowCount ?? 0) * 28 + 48))
+        : 180);
 
   return (
     <div className="w-full" style={{ height }}>
-      <WidgetRenderer widget={widget} data={rows} />
+      <WidgetRenderer widget={built.widget} data={built.data} />
     </div>
   );
 }
