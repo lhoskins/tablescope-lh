@@ -547,12 +547,19 @@ async def _ask_and_run_core(
     card_context: Any | None = None,
     conversation_id: int | None = None,
     turn_id: int | None = None,
+    history: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Resolve a source, generate SQL, execute it, and return the result dict.
 
     Shared by the ask-and-run action endpoint and the AI Assistant chat so both
     ground answers on real executed data. Never raises on a generation/execution
     failure — returns a structured ``status`` with SQL + error instead.
+
+    ``history`` only reaches the reference-library-answer path below (a
+    conversational follow-up like "give me more detail" needs to know what
+    was already said); it plays no role in SQL generation itself, so callers
+    that never carry a conversation (the direct ask-and-run REST action) can
+    safely leave it unset.
     """
     # A question that asks to SEE an insight's query is a RETRIEVAL, not a
     # generation. Generating SQL here is exactly how an invented query got
@@ -599,6 +606,7 @@ async def _ask_and_run_core(
         prose = await _forward_prose_answer(
             session, context,
             project_id=project_id, question=question,
+            history=history,
             scope="authorized_project",
             include_query_history=False, include_dashboard_context=False,
             grounding_evidence=grounding_evidence,

@@ -137,6 +137,22 @@ async def test_does_not_match_when_nothing_real_is_named(db_session):
     )
 
 
+async def test_matches_a_document_title_by_acronym_typed_lowercase(db_session):
+    """Live regression: "Tell me about scor" (lowercase) fell through to SQL
+    generation and matched an unrelated "Score" data source instead of the
+    real SCOR reference document, because the acronym check only looked for
+    an all-caps run already present in the question -- a user rarely types
+    an acronym in caps. The match still has to land on a real document's
+    title acronym below, so this only widens which question words get
+    checked, not what counts as a match."""
+    await _seed_reference_document(
+        db_session, title="SCOR Framework Overview", tenant_id=1
+    )
+    assert await question_names_reference_entry(
+        db_session, tenant_id=1, project_id=1, question="Tell me about scor"
+    )
+
+
 async def test_multi_word_display_name_requires_every_word(db_session):
     # Regression guard against the exact false-positive shape that was
     # rejected: a KPI/tag whose name shares only ONE common word with the
@@ -211,6 +227,59 @@ async def test_ask_and_run_core_routes_to_reference_answer_before_generation(
     assert result["status"] == "reference_library_answer"
     assert "Supply Chain Operations Reference" in result["explanation"]
     assert result["sql"] == ""
+
+
+async def test_ask_and_run_core_passes_conversation_history_to_reference_answer(
+    db_session, monkeypatch
+):
+    """Live regression: a chat follow-up like "give me a detail summary of
+    the SCOR model" was answered from scratch every time, with no memory of
+    the prior exchange, because _ask_and_run_core had no way to receive the
+    conversation's history at all -- unlike the older Phase D document-Q&A
+    bypass in conversational_analytics, which always passed it. Callers that
+    have a conversation (conversational_analytics._run_analytical_turn) must
+    thread ``history`` through to the reference-answer path."""
+    from app.auth.context import RequestContext
+    from app.auth.jwt import TokenClaims
+    from app.routes import ai_proxy_ask_and_run as core_module
+
+    await _seed_catalog_kpi(db_session, kpi_key="scor", display_name="SCOR Model")
+
+    tenant = Tenant(slug="reflib-history", name="Reflib History")
+    db_session.add(tenant)
+    await db_session.flush()
+    await db_session.commit()
+
+    captured: dict = {}
+
+    async def _fake_resolver(*args, **kwargs):
+        from app.services.project_source_resolver.types import ResolverResult
+
+        return ResolverResult(status="no_match")
+
+    async def _fake_prose(*args, **kwargs):
+        captured["history"] = kwargs.get("history")
+        return {"answer": "More detail on the SCOR model."}
+
+    monkeypatch.setattr(core_module, "_resolve_action_sources", _fake_resolver)
+    monkeypatch.setattr(core_module, "_forward_prose_answer", _fake_prose)
+
+    context = RequestContext(
+        claims=TokenClaims(sub="u", tenant_id=tenant.id, user_id=1, role="editor")
+    )
+    conversation_history = [
+        {"role": "user", "content": "Tell me about SCOR"},
+        {"role": "assistant", "content": "SCOR is a supply-chain framework."},
+    ]
+    result = await core_module._ask_and_run_core(
+        db_session, context,
+        project_id=1,
+        question="Give me a detail summary of the SCOR model",
+        max_rows=100,
+        history=conversation_history,
+    )
+    assert result["status"] == "reference_library_answer"
+    assert captured["history"] == conversation_history
 
 
 async def test_ask_and_run_core_generation_proceeds_normally_without_a_match(

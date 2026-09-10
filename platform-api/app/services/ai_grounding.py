@@ -818,7 +818,16 @@ async def question_names_reference_entry(
     also fails, with no guessing either way.
     """
     tokens = _question_tokens(question)
-    question_acronyms = _acronyms(question)
+    # Real acronyms typed as-cased ("Tell me about SCOR") plus every
+    # alphabetic question word uppercased ("scor" -> "SCOR"): users don't
+    # reliably type an acronym in caps, and the match still has to land on
+    # a real KPI/tag display name or reference-document title below, so
+    # this only widens which question words get *checked*, not what counts
+    # as a match. Live gap: "Tell me about scor" (lowercase) fell all the
+    # way through to SQL generation because _acronyms() alone found no
+    # all-caps run in the question, even though "SCOR Model Documentation"
+    # exists as a real reference document.
+    question_acronyms = _acronyms(question) | {t.upper() for t in tokens if t.isalpha()}
     if not tokens and not question_acronyms:
         return False
 
