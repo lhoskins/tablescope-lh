@@ -211,19 +211,27 @@ def _is_document_question(question: str) -> bool:
 
 def _prior_turn_state(prior_turn: AnalyticsConversationTurn | None) -> dict[str, Any]:
     """Grounded conversation state handed to the classifier."""
-    if prior_turn is None or not prior_turn.result_cache:
+    if prior_turn is None:
         return {"has_prior_result": False}
     profile = prior_turn.result_metadata or {}
     cache = prior_turn.result_cache or {}
-    return {
-        "has_prior_result": True,
-        "prior_sql": prior_turn.sql or "",
-        "result_columns": cache.get("columns", []),
-        "numeric_columns": profile.get("numericColumns", []),
-        "categorical_columns": profile.get("categoricalColumns", []),
-        "row_count": cache.get("rowCount", 0),
-        "current_chart": prior_turn.chart_config or {},
+    state = {
+        "has_prior_result": bool(cache),
+        "prior_intent": prior_turn.intent_type,
+        "prior_assistant_message": (prior_turn.assistant_message or "")[:500],
     }
+    if cache:
+        state.update(
+            {
+                "prior_sql": prior_turn.sql or "",
+                "result_columns": cache.get("columns", []),
+                "numeric_columns": profile.get("numericColumns", []),
+                "categorical_columns": profile.get("categoricalColumns", []),
+                "row_count": cache.get("rowCount", 0),
+                "current_chart": prior_turn.chart_config or {},
+            }
+        )
+    return state
 
 
 async def classify_turn(
@@ -277,6 +285,7 @@ async def classify_turn(
                 ConversationalIntent.CREATE_DASHBOARD,
                 ConversationalIntent.EXPLAIN,
                 ConversationalIntent.CLARIFICATION,
+                ConversationalIntent.DOCUMENT_QA,
             }:
                 if intent in {ConversationalIntent.CHART_CHANGE, ConversationalIntent.EXPLAIN} and not state[
                     "has_prior_result"

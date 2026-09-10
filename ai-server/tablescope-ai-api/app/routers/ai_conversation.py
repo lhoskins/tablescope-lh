@@ -29,6 +29,7 @@ _CONVERSATION_INTENTS = {
     "chart_change",
     "explain",
     "clarification",
+    "document_qa",
 }
 
 # Closed chart vocabulary — mirrors what the web-ui WidgetRenderer can draw.
@@ -72,6 +73,14 @@ def _conversation_turn_prompt(req: ConversationTurnClassifyRequest) -> str:
     best_practices = load_prompt_reference(
         "conversational_analytics_best_practices.md"
     )
+    prior_intent = req.prior_intent or "(none)"
+    prior_answer = (req.prior_assistant_message or "").strip()[:500] or "(none)"
+    history_lines = ""
+    if req.conversation_history:
+        history_lines = "\n".join(
+            f"- {m.get('role', 'unknown')}: {m.get('content', '')[:300]}"
+            for m in req.conversation_history[-4:]
+        ) + "\n"
     return (
         "## Conversation state\n"
         f"- has_prior_result: {req.has_prior_result}\n"
@@ -80,14 +89,25 @@ def _conversation_turn_prompt(req: ConversationTurnClassifyRequest) -> str:
         f"- numeric_columns: {req.numeric_columns}\n"
         f"- categorical_columns: {req.categorical_columns}\n"
         f"- row_count: {req.row_count}\n"
-        f"- current_chart: {chart_json}\n\n"
+        f"- current_chart: {chart_json}\n"
+        f"- prior_intent: {prior_intent}\n"
+        f"- prior_assistant_message: {prior_answer}\n"
+        f"{history_lines}\n"
+        "## Intent rules\n"
+        "- new_analysis: user wants data from project tables\n"
+        "- query_change: modify or follow up on the prior SQL/result\n"
+        "- chart_change: only change how the prior result is displayed\n"
+        "- explain: explain the prior SQL/result\n"
+        "- clarification: ambiguous, needs clarification\n"
+        "- document_qa: question about Reference Library documents, policies, procedures, frameworks, or standards; also a follow-up asking for more detail about a previous document answer\n"
+        "- If prior_intent is document_qa and the current message is a generic follow-up asking for more detail, context, or clarification, return document_qa.\n\n"
         f"{best_practices}\n\n"
         "## Chart vocabulary (closed set)\n"
         f"Types: {sorted(_CHART_TYPES)}\n"
         f"{subtype_lines}\n\n"
         "## Output schema (JSON only, all keys required)\n"
         "{\n"
-        '  "intent": "new_analysis|query_change|chart_change|explain|clarification",\n'
+        '  "intent": "new_analysis|query_change|chart_change|explain|clarification|document_qa",\n'
         '  "chart": {\n'
         '    "type": "table|bar|line|pie|scatter|null",\n'
         '    "subtype": "one of the listed subtypes or null",\n'

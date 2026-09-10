@@ -1,5 +1,7 @@
 """Schemas for conversational-analytics turn classification."""
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from .common import AIBaseRequest
@@ -22,6 +24,9 @@ class ConversationTurnClassifyRequest(AIBaseRequest):
     categorical_columns: list[str] = Field(default_factory=list)
     row_count: int = 0
     current_chart: dict = Field(default_factory=dict)
+    prior_intent: str | None = None
+    prior_assistant_message: str | None = None
+    conversation_history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ConversationTurnClassifyResponse(BaseModel):

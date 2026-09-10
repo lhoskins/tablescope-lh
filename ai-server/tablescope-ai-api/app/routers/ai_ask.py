@@ -28,7 +28,7 @@ router = APIRouter()
 
 
 _DETAILED_ANSWER_RE = re.compile(
-    r"\b(?:detail(?:ed)?|comprehensive|in[- ]depth|full|thorough|deep[- ]dive|"
+    r"\b(?:detail(?:ed|s)?|comprehensive|in[- ]depth|full|thorough|deep[- ]dive|"
     r"two[- ]page)\b",
     re.IGNORECASE,
 )
@@ -261,6 +261,17 @@ async def ask(req: AskRequest) -> AskResponse:
                 detail=f"Access denied: {e.reason}",
             )
         context_text = context_builder.context_to_prompt_text(ctx)
+        # Reference Library questions should be structured and cite titles/URLs.
+        if ctx.allowed_context.get("reference_documents"):
+            prose_instruction = (
+                "Provide a structured answer about the referenced document(s). "
+                "Use headings: Purpose and Scope, Major Components, Process or "
+                "Lifecycle, Roles and Governance, Metrics or Requirements, "
+                "Implementation Implications, Limitations. "
+                "Cite each source title and its URL. "
+                "Omit headings that the source does not support."
+            )
+            prose_answer_max_tokens = max(prose_answer_max_tokens, 2400)
         # Fold in the Knowledge Graph context so prose answers cite validated
         # risks/gaps/measured KPIs surfaced by the graph (not Reference Library docs).
         kg_block = format_knowledge_graph_context(req.knowledge_graph_context)
@@ -303,7 +314,7 @@ async def ask(req: AskRequest) -> AskResponse:
             "return a concise list with each document title, its domain tag, and a one-line summary. "
             "If the question names a domain (e.g. IT, ESG, Finance), only include documents "
             "whose domain_tag matches that domain. If it asks about a specific document, "
-            "answer from that document's retrieved passages and summary and cite its title. "
+            "answer from that document's retrieved passages and summary and cite its title and source URL. "
             "Do not invent data or SQL that is not shown. "
             f"{prose_instruction}"
         )

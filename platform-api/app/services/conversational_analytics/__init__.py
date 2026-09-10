@@ -1135,7 +1135,7 @@ async def execute_turn(
 
     # Phase D: Reference Library / document Q&A bypasses SQL generation.
     # These questions are answered directly from grounded documents and KG context.
-    if _is_document_question(question):
+    if intent == ConversationalIntent.DOCUMENT_QA or _is_document_question(question):
         grounding = await gather_grounding_evidence(
             session,
             tenant_id=context.tenant_id,
