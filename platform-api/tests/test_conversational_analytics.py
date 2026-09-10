@@ -813,6 +813,31 @@ def test_strip_model_markup_removes_code_fences():
     assert "```" not in _strip_model_markup("Here you go:\n```sql\nSELECT 2;")
 
 
+def test_strip_model_markup_rejects_bare_sql_answer():
+    from app.routes.ai_proxy import _strip_model_markup
+
+    assert _strip_model_markup('SELECT "System", COUNT(*) FROM "backup_jobs"') == ""
+    assert _strip_model_markup("WITH totals AS (SELECT 1) SELECT * FROM totals") == ""
+    assert _strip_model_markup("Backup success was 98.4%.") == "Backup success was 98.4%."
+
+
+async def test_synthesized_answer_rejects_bare_sql(monkeypatch):
+    from app.services import conversational_analytics as ca
+
+    async def _fake_ask(**kwargs):
+        return {"answer": 'SELECT "System", COUNT(*) FROM "backup_jobs"'}
+
+    class _Context:
+        tenant_id = 1
+        user_id = 2
+
+    monkeypatch.setattr(ca.ai_intelligence_client, "ask", _fake_ask)
+
+    answer = await ca._synthesize_answer(_Context(), 3, "Show backup success rate")
+
+    assert answer is None
+
+
 def test_apply_chart_patch_validates_columns():
     from app.services.conversational_analytics import apply_chart_patch
 

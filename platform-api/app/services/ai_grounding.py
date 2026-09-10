@@ -771,6 +771,19 @@ async def _reference_documents_for_question(
 
 _ACRONYM_RE = re.compile(r"\b[A-Z]{3,}\b")
 
+# KPI and tag names are also ordinary analytical language ("incident",
+# "backup success rate", "on-time delivery").  They must not redirect a data
+# question away from SQL merely because the same words exist in the reference
+# catalog.  Catalog entries only become an upfront prose/reference request when
+# the user explicitly asks for a definition, formula, framework, or catalog
+# explanation.  Reference-document title/acronym matches remain sufficient on
+# their own because they identify an actual document rather than a metric word.
+_CATALOG_EXPLANATION_RE = re.compile(
+    r"\b(?:define|definition|meaning|formula|calculat(?:e|ed|ion)|"
+    r"framework|model|documentation|reference|standard|kpi|metric|catalog)\b",
+    re.IGNORECASE,
+)
+
 
 def _acronyms(text_: str) -> set[str]:
     """Distinctive 3+ letter all-caps acronyms in ``text_`` (e.g. SCOR, OEE).
@@ -789,14 +802,15 @@ async def question_names_reference_entry(
     project_id: int,
     question: str,
 ) -> bool:
-    """True when the question names an actual Reference Library document or
-    Industry KPI/tag catalog entry by its real key, name, or acronym.
+    """True when the question explicitly asks about a governed reference.
 
     This is an exact/deterministic match against real catalog content, not
     a fuzzy relevance score -- used to route a question to the
-    reference-answer path *before* any SQL generation is attempted (e.g.
-    "tell me about SCOR" should never reach the SQL generator at all when
-    "SCOR" is a real catalog entry). A scored/fuzzy match here would risk
+    reference-answer path *before* any SQL generation is attempted. Document
+    acronyms are sufficient; KPI/tag names additionally require definition or
+    catalog language. This distinction prevents ordinary analytical questions
+    such as "show backup success rate" from being diverted merely because the
+    metric is governed. A scored/fuzzy match here would risk
     answering an unrelated data question from whatever reference content
     happens to rank highest, which is the false-positive behavior this
     deliberately avoids -- a question that does not name anything real
@@ -808,31 +822,32 @@ async def question_names_reference_entry(
     if not tokens and not question_acronyms:
         return False
 
-    try:
-        kpis = await get_reference_kpis(session, tenant_id)
-        tags = await get_reference_tags(session, tenant_id)
-    except Exception as exc:
-        logger.warning("Reference catalog lookup failed for routing check: %s", exc)
-        kpis, tags = [], []
+    if _CATALOG_EXPLANATION_RE.search(question):
+        try:
+            kpis = await get_reference_kpis(session, tenant_id)
+            tags = await get_reference_tags(session, tenant_id)
+        except Exception as exc:
+            logger.warning("Reference catalog lookup failed for routing check: %s", exc)
+            kpis, tags = [], []
 
-    for entry in (*kpis, *tags):
-        key = str(entry.get("kpi_key") or entry.get("tag_key") or "").lower()
-        if key and key in tokens:
-            return True
-        display_name = str(entry.get("display_name") or "")
-        if display_name:
-            if display_name.upper() in question_acronyms or (
-                display_name.isupper() and display_name.lower() in tokens
-            ):
+        for entry in (*kpis, *tags):
+            key = str(entry.get("kpi_key") or entry.get("tag_key") or "").lower()
+            if key and key in tokens:
                 return True
-            name_tokens = {
-                t.lower() for t in _GROUNDING_TOKEN_RE.findall(display_name) if len(t) > 2
-            }
-            # Every significant word of the display name must appear
-            # somewhere in the question -- one shared word ("cost") is not
-            # a real match, but the whole name being present is.
-            if name_tokens and name_tokens <= tokens:
-                return True
+            display_name = str(entry.get("display_name") or "")
+            if display_name:
+                if display_name.upper() in question_acronyms or (
+                    display_name.isupper() and display_name.lower() in tokens
+                ):
+                    return True
+                name_tokens = {
+                    t.lower() for t in _GROUNDING_TOKEN_RE.findall(display_name) if len(t) > 2
+                }
+                # Every significant word of the display name must appear
+                # somewhere in the question -- one shared word ("cost") is not
+                # a real match, but the whole name being present is.
+                if name_tokens and name_tokens <= tokens:
+                    return True
 
     if not question_acronyms:
         return False

@@ -27,6 +27,28 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+_DETAILED_ANSWER_RE = re.compile(
+    r"\b(?:detail(?:ed)?|comprehensive|in[- ]depth|full|thorough|deep[- ]dive|"
+    r"two[- ]page)\b",
+    re.IGNORECASE,
+)
+
+
+def _prose_answer_profile(question: str) -> tuple[str, int]:
+    """Return evidence-bound prose guidance and its generation budget."""
+    if _DETAILED_ANSWER_RE.search(question or ""):
+        return (
+            "Provide a detailed, structured summary (roughly 700-1,100 words when "
+            "the supplied evidence supports that depth). Use descriptive headings. "
+            "Cover the subject's purpose and scope, major components, process or "
+            "lifecycle, roles and governance, metrics or requirements, implementation "
+            "implications, and limitations when those topics are present in the sources. "
+            "Cite source titles. Omit unsupported sections and never pad or invent detail.",
+            2400,
+        )
+    return "Keep the answer concise and conversational.", 1536
+
+
 def _fit_context(text: str, max_model_len: int = 8192, max_tokens: int = 512) -> str:
     """Truncate context so prompt + max_tokens stays under vLLM max_model_len."""
     # Approx 3.5 chars per token; reserve tokens for system prompt, question,
@@ -219,6 +241,7 @@ async def ask(req: AskRequest) -> AskResponse:
     ctx = None
     context_text = ""
     history_text = _fit_history(_format_conversation_history(req.history))
+    prose_instruction, prose_answer_max_tokens = _prose_answer_profile(req.question)
     if not grounded_block:
         # Build permission-aware context only when we need the document/KG
         # grounding. Data-driven questions already carry their own result.
@@ -245,7 +268,15 @@ async def ask(req: AskRequest) -> AskResponse:
             context_text = f"{context_text}\n\n{kg_block}"
         # Prose contexts can be large; reserve token room for the answer and
         # system prompt so the request fits within the vLLM max_model_len window.
-        context_text = _fit_context(context_text, max_tokens=1536)
+        # Account for conversation history before fitting document context so
+        # detailed answers get a larger output budget without overflowing the
+        # model's complete prompt window.
+        history_tokens = (len(history_text) + 2) // 3
+        context_text = _fit_context(
+            context_text,
+            max_model_len=max(1024, 8192 - history_tokens),
+            max_tokens=prose_answer_max_tokens,
+        )
 
     if grounded_block:
         # Synthesizing an answer from an already-executed query result needs very
@@ -272,11 +303,12 @@ async def ask(req: AskRequest) -> AskResponse:
             "return a concise list with each document title, its domain tag, and a one-line summary. "
             "If the question names a domain (e.g. IT, ESG, Finance), only include documents "
             "whose domain_tag matches that domain. If it asks about a specific document, "
-            "answer from that document's summary and cite its title. Do not invent data or SQL "
-            "that is not shown. Keep the answer concise and conversational."
+            "answer from that document's retrieved passages and summary and cite its title. "
+            "Do not invent data or SQL that is not shown. "
+            f"{prose_instruction}"
         )
         answer_system_prompt = SYSTEM_PROMPT
-        answer_max_tokens = 1536
+        answer_max_tokens = prose_answer_max_tokens
         answer_stop = None
 
 

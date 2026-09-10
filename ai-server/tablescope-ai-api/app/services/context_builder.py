@@ -359,9 +359,9 @@ def context_to_prompt_text(context: ContextPackage) -> str:
             if payload.get("source_type") == "reference_library" and title:
                 tier = payload.get("tier", "")
                 label = f"{prefix}reference: {title}" + (f" ({tier})" if tier else "")
-                parts.append(f"  - [{label}] {text[:500]}")
+                parts.append(f"  - [{label}] {text[:1200]}")
             else:
-                parts.append(f"  - {prefix}{title + ': ' if title else ''}{text[:500]}")
+                parts.append(f"  - {prefix}{title + ': ' if title else ''}{text[:1200]}")
 
     # Saved queries
     if context.allowed_context.get("queries"):

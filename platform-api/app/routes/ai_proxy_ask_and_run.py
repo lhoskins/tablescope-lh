@@ -586,13 +586,10 @@ async def _ask_and_run_core(
     grounding_evidence = grounding.model_dump() if grounding else None
     grounding_manifest = grounding.manifest() if grounding else None
 
-    # A question naming a real Reference Library document or Industry KPI
-    # catalog entry by its actual key/title/acronym (e.g. "tell me about
-    # SCOR") is routed straight to a reference answer -- never attempting
-    # SQL generation at all. This is a check against real catalog content,
-    # not a fallback that guesses from evidence after generation fails: a
-    # question that doesn't name anything real still proceeds to normal SQL
-    # generation, and still hard-errors if that fails, exactly as before.
+    # A question naming a real Reference Library document (e.g. "tell me about
+    # SCOR"), or explicitly requesting a governed KPI/tag definition, routes
+    # straight to a reference answer. Ordinary analytical use of a KPI/tag name
+    # must proceed to SQL so it produces live rows and a visualization.
     # Skipped for a card-scoped follow-up or an explicitly chosen source --
     # both mean the user wants this question answered against that specific
     # data, not redirected to a general reference answer.
@@ -900,10 +897,11 @@ async def _attach_analytical_envelope(
 
 
 _CODE_FENCE_RE = re.compile(r"```[a-zA-Z0-9_-]*\n[\s\S]*?(?:```|\Z)")
+_BARE_SQL_RE = re.compile(r"^\s*(?:SELECT|WITH)\b", re.IGNORECASE)
 
 
 def _strip_model_markup(text: str) -> str:
-    """Remove raw model markup (fenced code blocks) from a prose answer.
+    """Remove raw model markup or a bare SQL-only model answer.
 
     Chat surfaces render plain text, so a leaked ``` block (usually SQL the
     model narrated while thinking) shows up verbatim and confuses users. The
@@ -911,6 +909,8 @@ def _strip_model_markup(text: str) -> str:
     must stay prose.
     """
     cleaned = _CODE_FENCE_RE.sub("", text or "").strip()
+    if _BARE_SQL_RE.match(cleaned):
+        return ""
     return re.sub(r"\n{3,}", "\n\n", cleaned)
 
 
