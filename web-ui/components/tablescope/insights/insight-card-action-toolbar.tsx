@@ -121,6 +121,9 @@ function GroundingSourcesDetails({ card }: { card: InsightCard }) {
   const passages = manifest.passages ?? [];
   const kgNodes = manifest.kgNodes ?? [];
   const kpis = manifest.kpis ?? [];
+  const insightSnapshots = manifest.insightSnapshots ?? [];
+  const networkConnections = manifest.networkConnections ?? [];
+  const referenceDocuments = manifest.referenceDocuments ?? [];
   const confidenceBasis = card.confidenceEvaluation?.basis;
 
   return (
@@ -172,6 +175,36 @@ function GroundingSourcesDetails({ card }: { card: InsightCard }) {
             <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
               {kpis.map((k, i) => (
                 <li key={`k-${i}`}>{k.displayName || k.kpiKey}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {referenceDocuments.length > 0 && (
+          <div>
+            <span className="text-[11px] font-medium uppercase text-ink-tertiary">References</span>
+            <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
+              {referenceDocuments.map((d, i) => (
+                <li key={`ref-${i}`}>{d.title || `Document ${d.id ?? "?"}`}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {insightSnapshots.length > 0 && (
+          <div>
+            <span className="text-[11px] font-medium uppercase text-ink-tertiary">Related insights</span>
+            <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
+              {insightSnapshots.map((s, i) => (
+                <li key={`snap-${i}`}>{s.title || `Insight ${s.insightId ?? "?"}`}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {networkConnections.length > 0 && (
+          <div>
+            <span className="text-[11px] font-medium uppercase text-ink-tertiary">Network connections</span>
+            <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
+              {networkConnections.map((c, i) => (
+                <li key={`conn-${i}`}>{c.name || `Connection ${c.id ?? "?"}`}</li>
               ))}
             </ul>
           </div>

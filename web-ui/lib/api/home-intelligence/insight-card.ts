@@ -24,6 +24,9 @@ export interface GroundingManifest {
   passageCount: number;
   kgNodeCount: number;
   kpiCount: number;
+  insightSnapshotCount?: number;
+  networkConnectionCount?: number;
+  referenceDocumentCount?: number;
   retrievedAt: string;
   passages?: Array<{
     documentId?: number | null;
@@ -36,6 +39,9 @@ export interface GroundingManifest {
   }>;
   kgNodes?: Array<{ id?: number | string; nodeType: string; title: string }>;
   kpis?: Array<{ kpiKey: string; displayName?: string }>;
+  insightSnapshots?: Array<{ insightId?: string; title?: string; score?: number }>;
+  networkConnections?: Array<{ id?: number | null; name?: string }>;
+  referenceDocuments?: Array<{ id?: number | null; title?: string; score?: number }>;
 }
 
 export interface InsightCard {

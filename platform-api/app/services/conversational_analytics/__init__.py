@@ -1172,7 +1172,10 @@ async def execute_turn(
         turn.intent_type = ConversationalIntent.DOCUMENT_QA
         turn.result_metadata = {
             "documentQa": {
-                "referenceDocumentCount": len(grounding.reference_documents),
+                "referenceDocuments": [
+                    {"id": d.id, "title": d.title, "sourceUrl": d.source_url}
+                    for d in grounding.reference_documents
+                ],
                 "kgNodeCount": len(grounding.kg_nodes),
             }
         }
@@ -1235,6 +1238,21 @@ async def execute_turn(
             or "The AI service is currently unavailable. Please try again shortly."
         )
         turn.result_metadata = {"error": run.get("error"), "errorDetails": run.get("errorDetails")}
+        return
+
+    if run.get("status") == "reference_library_answer":
+        # The question named a real Reference Library document or Industry
+        # KPI catalog entry -- _ask_and_run_core routed it to a reference
+        # answer before ever attempting SQL generation. Same early-return
+        # shape as the Phase D document-Q&A bypass above.
+        turn.status = "success"
+        turn.assistant_message = run.get("explanation") or ""
+        turn.intent_type = ConversationalIntent.DOCUMENT_QA
+        turn.result_metadata = {
+            "documentQa": {
+                "referenceDocuments": run.get("referenceDocuments") or [],
+            }
+        }
         return
 
     if run.get("status") != "success":

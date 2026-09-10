@@ -253,4 +253,34 @@ describe("InsightCardActionToolbar", () => {
     fireEvent.click(explain);
     expect(onExplain).toHaveBeenCalled();
   });
+
+  it("renders reference documents, related insights, and network connections from the grounding manifest", () => {
+    const cardWithManifest: InsightCard = {
+      ...baseCard,
+      groundingManifest: {
+        question: "What drove the OEE decline?",
+        passageCount: 0,
+        kgNodeCount: 0,
+        kpiCount: 0,
+        retrievedAt: new Date().toISOString(),
+        referenceDocuments: [{ id: 7, title: "SCOR Framework Overview", score: 0.9 }],
+        insightSnapshots: [{ insightId: "ins-2", title: "Related backlog spike", score: 0.5 }],
+        networkConnections: [{ id: 3, name: "Finance SMB share" }],
+      },
+    };
+    render(
+      <InsightCardActionToolbar
+        card={cardWithManifest}
+        canCreateAction={false}
+        onExplain={noop}
+        onChartOptions={noop}
+        onAddToDashboard={noop}
+        onDownloadPng={noop}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Sources/i }));
+    expect(screen.getByText("SCOR Framework Overview")).toBeTruthy();
+    expect(screen.getByText("Related backlog spike")).toBeTruthy();
+    expect(screen.getByText("Finance SMB share")).toBeTruthy();
+  });
 });

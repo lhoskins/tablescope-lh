@@ -19,7 +19,7 @@ from app.database import get_db
 from app.models.file_source_meta import FileSourceMeta
 from app.services import ai_intelligence_client as ai
 from app.services import ask_pipeline, insight_registry
-from app.services.ai_grounding import gather_grounding_evidence
+from app.services.ai_grounding import gather_grounding_evidence, question_names_reference_entry
 from app.services.analytical_method_engine import analyze as analyze_methods
 from app.services.analytical_method_engine import data_profiler
 from app.services.analytical_method_engine.config import EngineMode, get_engine_mode
@@ -585,6 +585,48 @@ async def _ask_and_run_core(
     )
     grounding_evidence = grounding.model_dump() if grounding else None
     grounding_manifest = grounding.manifest() if grounding else None
+
+    # A question naming a real Reference Library document or Industry KPI
+    # catalog entry by its actual key/title/acronym (e.g. "tell me about
+    # SCOR") is routed straight to a reference answer -- never attempting
+    # SQL generation at all. This is a check against real catalog content,
+    # not a fallback that guesses from evidence after generation fails: a
+    # question that doesn't name anything real still proceeds to normal SQL
+    # generation, and still hard-errors if that fails, exactly as before.
+    # Skipped for a card-scoped follow-up or an explicitly chosen source --
+    # both mean the user wants this question answered against that specific
+    # data, not redirected to a general reference answer.
+    if card_context is None and source is None and await question_names_reference_entry(
+        session, tenant_id=context.tenant_id, project_id=project_id, question=question,
+    ):
+        prose = await _forward_prose_answer(
+            session, context,
+            project_id=project_id, question=question,
+            scope="authorized_project",
+            include_query_history=False, include_dashboard_context=False,
+            grounding_evidence=grounding_evidence,
+        )
+        if not prose.get("ai_unavailable") and prose.get("answer"):
+            return {
+                "question": question,
+                "sql": "",
+                "columns": [],
+                "rows": [],
+                "suggestedVisualization": {"type": "table"},
+                "explanation": prose["answer"],
+                "dataSourcesUsed": [],
+                "status": "reference_library_answer",
+                "error": None,
+                "groundingManifest": grounding_manifest,
+                "kgGrounding": prose.get("kgGrounding"),
+                "referenceDocuments": [
+                    {"id": d.id, "title": d.title, "sourceUrl": d.source_url}
+                    for d in grounding.reference_documents
+                ] if grounding else [],
+            }
+        # AI server unreachable: fall through to normal generation rather
+        # than returning a hard error here for a question that might still
+        # be answerable once SQL generation is attempted.
 
     # A question asked *from* a card carries that card with it. Grounding the
     # prompt in the finding — its text, its method and the query it was computed

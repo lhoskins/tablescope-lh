@@ -1626,3 +1626,95 @@ async def test_create_dashboard_requires_editor_access(client, service_headers, 
     turn = created.json()["turns"][0]
     assert turn["status"] == "error"
     assert turn["artifact_proposal"] is None
+
+
+async def test_reference_library_answer_is_a_success_turn_with_no_sql(
+    client, service_headers, monkeypatch
+):
+    # _ask_and_run_core routes a question naming a real Reference Library
+    # document/Industry KPI catalog entry (e.g. "tell me about SCOR")
+    # straight to a reference answer *before* attempting SQL generation --
+    # this is the chat-side turn this produces. Distinct from a data turn:
+    # no SQL, no rows/chart, and the citations survive into result_metadata
+    # instead of being reduced to a bare count.
+    _, _, project, headers = await _setup(client, service_headers, "conv-reflib")
+
+    async def _fake(*args, **kwargs):
+        return {
+            "question": kwargs.get("question", ""),
+            "sql": "",
+            "columns": [],
+            "rows": [],
+            "suggestedVisualization": {"type": "table"},
+            "explanation": "SCOR is the Supply Chain Operations Reference model...",
+            "dataSourcesUsed": [],
+            "status": "reference_library_answer",
+            "error": None,
+            "referenceDocuments": [
+                {"id": 7, "title": "SCOR Framework Overview", "sourceUrl": None}
+            ],
+        }
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core",
+        _fake,
+    )
+
+    r = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={
+            "project_id": project["id"],
+            "initial_message": "Tell me about SCOR",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    turn = r.json()["turns"][0]
+    assert turn["status"] == "success"
+    assert "Supply Chain Operations Reference" in turn["assistant_message"]
+    assert not turn["sql"]
+    assert turn["result"] is None
+
+
+async def test_generation_failure_with_no_reference_match_still_hard_errors(
+    client, service_headers, monkeypatch
+):
+    # A question that names nothing real (no data source, no reference
+    # catalog match) must still hard-error -- no fallback substitutes a
+    # guessed answer. _ask_and_run_core's routing check only ever returns
+    # "reference_library_answer" for a confident catalog/document name
+    # match; anything else that fails generation keeps returning
+    # "generation_error" exactly as before.
+    _, _, project, headers = await _setup(client, service_headers, "conv-nomatch")
+
+    async def _fake(*args, **kwargs):
+        return {
+            "question": kwargs.get("question", ""),
+            "sql": "",
+            "columns": [],
+            "rows": [],
+            "suggestedVisualization": {"type": "table"},
+            "explanation": "",
+            "dataSourcesUsed": [],
+            "status": "generation_error",
+            "error": "Could not match part of your request to an authorized project source.",
+            "errorDetails": {"validationError": "Model could not find a matching authorized source."},
+        }
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core",
+        _fake,
+    )
+
+    r = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={
+            "project_id": project["id"],
+            "initial_message": "Tell me about a thing that does not exist anywhere",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    turn = r.json()["turns"][0]
+    assert turn["status"] == "error"
+    assert "Could not match" in turn["assistant_message"]
