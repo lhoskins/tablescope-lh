@@ -46,11 +46,6 @@ type QueryDraft = {
   id: number;
   name: string;
   request: string;
-  aggregate: string;
-  groupBy: string;
-  caseLogic: string;
-  filter: string;
-  sort: string;
   output: (typeof OUTPUTS)[number][0];
   format: (typeof FORMATS)[number][0];
 };
@@ -71,60 +66,15 @@ type BatchSave = {
 const EMPTY_DRAFT: Omit<QueryDraft, "id"> = {
   name: "",
   request: "",
-  aggregate: "",
-  groupBy: "",
-  caseLogic: "",
-  filter: "",
-  sort: "",
   output: "table_chart",
   format: "auto",
 };
-
-const INSTRUCTION_FIELDS: Array<{
-  key: "aggregate" | "groupBy" | "caseLogic" | "filter" | "sort";
-  label: string;
-  placeholder: string;
-}> = [
-  {
-    key: "aggregate",
-    label: "SUM / aggregate",
-    placeholder:
-      "Example: Sum backlog_amount and recognized_revenue. Show both totals for each month.",
-  },
-  {
-    key: "groupBy",
-    label: "GROUP BY",
-    placeholder: "Example: Group results by order month and customer region.",
-  },
-  {
-    key: "caseLogic",
-    label: "CASE",
-    placeholder:
-      "Example: Label orders over 30 days late as Critical, 1–30 days as At Risk, otherwise On Track.",
-  },
-  {
-    key: "filter",
-    label: "FILTER",
-    placeholder:
-      "Example: Only include Open or Backordered orders from the last 24 months. Exclude cancelled orders.",
-  },
-  {
-    key: "sort",
-    label: "SORT",
-    placeholder:
-      "Example: Sort by month oldest to newest, then backlog amount highest to lowest.",
-  },
-];
 
 const STEP_LABELS: Array<[DesignerStep, string]> = [
   ["describe", "1. Describe queries"],
   ["review", "2. Review AI plan"],
   ["create", "3. Validate & create"],
 ];
-
-function instructionCount(draft: QueryDraft) {
-  return INSTRUCTION_FIELDS.filter(({ key }) => draft[key].trim()).length;
-}
 
 /** Fold one query card into the existing governed generation contract. */
 export function buildBatchQueryPrompt(
@@ -138,16 +88,6 @@ export function buildBatchQueryPrompt(
   const formatLabel =
     FORMATS.find(([value]) => value === draft.format)?.[1] ?? draft.format;
   const parts = [draft.request.trim()];
-  const directives: Array<[string, string]> = [
-    ["SUM / aggregate", draft.aggregate],
-    ["GROUP BY", draft.groupBy],
-    ["CASE", draft.caseLogic],
-    ["FILTER", draft.filter],
-    ["SORT", draft.sort],
-  ];
-  for (const [label, value] of directives) {
-    if (value.trim()) parts.push(`${label}: ${value.trim()}`);
-  }
   parts.push(`Default period: ${periodLabel}.`);
   if (dimensionLabel.trim()) parts.push(`Primary dimension: ${dimensionLabel.trim()}.`);
   parts.push(`Preferred output: ${outputLabel}.`);
@@ -158,36 +98,6 @@ export function buildBatchQueryPrompt(
     );
   }
   return parts.filter(Boolean).join(" ");
-}
-
-function InstructionCard({
-  draft,
-  field,
-  onChange,
-}: {
-  draft: QueryDraft;
-  field: (typeof INSTRUCTION_FIELDS)[number];
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="rounded-lg border border-line-tertiary bg-bg-primary p-2.5">
-      <span className="flex items-center justify-between gap-2 text-[11px] font-semibold text-ink-primary">
-        <span className="flex items-center gap-1.5">
-          <IconSparkles size={13} className="text-ai" />
-          {field.label}
-        </span>
-        <span className="font-normal text-ink-tertiary">Optional</span>
-      </span>
-      <textarea
-        value={draft[field.key]}
-        onChange={(event) => onChange(event.target.value)}
-        rows={3}
-        aria-label={`${field.label} instructions`}
-        placeholder={field.placeholder}
-        className="mt-2 w-full resize-y rounded-md border border-line-secondary bg-bg-primary p-2 text-[12px] leading-4 text-ink-primary placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
-      />
-    </label>
-  );
 }
 
 function StatusBadge({ preview }: { preview: BatchPreview }) {
@@ -426,14 +336,12 @@ export function AIQueryDesigner({
               <Card className="p-4">
                 <div className="text-h3 text-ink-primary">Queries to generate</div>
                 <p className="mt-1 text-small text-ink-tertiary">
-                  Describe each outcome, then optionally add calculations,
-                  grouping, filters, and sorting in plain language.
+                  Describe each outcome in plain language.
                 </p>
 
                 <div className="mt-3 space-y-2.5">
                   {drafts.map((draft, index) => {
                     const expanded = expandedId === draft.id;
-                    const count = instructionCount(draft);
                     return (
                       <div key={draft.id} className="rounded-lg border border-line-tertiary bg-bg-primary">
                         <div className="flex items-center gap-2 px-3 py-2.5">
@@ -448,11 +356,6 @@ export function AIQueryDesigner({
                             <span className="truncate text-[13px] font-semibold text-ink-primary">
                               {draft.name.trim() || `Untitled query ${index + 1}`}
                             </span>
-                            {!expanded && count > 0 && (
-                              <span className="rounded bg-bg-secondary px-1.5 py-0.5 text-[10px] text-ink-secondary">
-                                {count} guided {count === 1 ? "instruction" : "instructions"}
-                              </span>
-                            )}
                           </button>
                           {drafts.length > 1 && (
                             <button
@@ -495,22 +398,6 @@ export function AIQueryDesigner({
                                 className="mt-1 w-full resize-y rounded-md border border-line-secondary bg-bg-primary p-2.5 text-[13px] leading-5 text-ink-primary placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
                               />
                             </label>
-
-                            <div className="mt-3 flex flex-wrap items-center gap-2">
-                              <span className="text-[12px] font-semibold text-ink-primary">Optional query instructions</span>
-                              <span className="rounded-full bg-ai/10 px-2 py-0.5 text-[10px] font-medium text-ai">Describe in plain language</span>
-                              <span className="text-[11px] text-ink-tertiary">AI translates these instructions into governed SQL for review.</span>
-                            </div>
-                            <div className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                              {INSTRUCTION_FIELDS.map((field) => (
-                                <InstructionCard
-                                  key={field.key}
-                                  draft={draft}
-                                  field={field}
-                                  onChange={(value) => updateDraft(draft.id, { [field.key]: value })}
-                                />
-                              ))}
-                            </div>
 
                             <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-line-tertiary pt-3">
                               <label className="text-[11px] font-medium text-ink-secondary">

@@ -56,14 +56,15 @@ describe("AIQueryDesigner", () => {
     saveQuery.mockReset();
   });
 
-  it("uses plain-language instruction boxes without currency or folder creation context", () => {
+  it("has no optional guided-instruction boxes, currency, or folder creation context", () => {
     renderDesigner();
 
-    expect(screen.getByLabelText("SUM / aggregate instructions")).toBeInTheDocument();
-    expect(screen.getByLabelText("GROUP BY instructions")).toBeInTheDocument();
-    expect(screen.getByLabelText("CASE instructions")).toBeInTheDocument();
-    expect(screen.getByLabelText("FILTER instructions")).toBeInTheDocument();
-    expect(screen.getByLabelText("SORT instructions")).toBeInTheDocument();
+    expect(screen.queryByLabelText("SUM / aggregate instructions")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("GROUP BY instructions")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("CASE instructions")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("FILTER instructions")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("SORT instructions")).not.toBeInTheDocument();
+    expect(screen.queryByText(/optional query instructions/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/^Currency$/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/save to folder/i)).not.toBeInTheDocument();
   });
@@ -99,21 +100,6 @@ describe("AIQueryDesigner", () => {
     fireEvent.change(screen.getByLabelText("Business request"), {
       target: { value: "Join orders and revenue by sales_order_id" },
     });
-    fireEvent.change(screen.getByLabelText("SUM / aggregate instructions"), {
-      target: { value: "Sum backlog and recognized revenue" },
-    });
-    fireEvent.change(screen.getByLabelText("GROUP BY instructions"), {
-      target: { value: "Group by order month" },
-    });
-    fireEvent.change(screen.getByLabelText("CASE instructions"), {
-      target: { value: "Label backlog over 30 days Critical" },
-    });
-    fireEvent.change(screen.getByLabelText("FILTER instructions"), {
-      target: { value: "Only open orders" },
-    });
-    fireEvent.change(screen.getByLabelText("SORT instructions"), {
-      target: { value: "Sort month ascending" },
-    });
     fireEvent.change(screen.getByPlaceholderText("Example: Site, Region, Team"), {
       target: { value: "Region" },
     });
@@ -135,11 +121,6 @@ describe("AIQueryDesigner", () => {
     expect(await screen.findByText("Review query batch")).toBeInTheDocument();
     expect(generateQueryPreview).toHaveBeenCalledTimes(2);
     const firstQuestion = String(generateQueryPreview.mock.calls[0][1]);
-    expect(firstQuestion).toContain("SUM / aggregate: Sum backlog and recognized revenue");
-    expect(firstQuestion).toContain("GROUP BY: Group by order month");
-    expect(firstQuestion).toContain("CASE: Label backlog over 30 days Critical");
-    expect(firstQuestion).toContain("FILTER: Only open orders");
-    expect(firstQuestion).toContain("SORT: Sort month ascending");
     expect(firstQuestion).toContain("Primary dimension: Region");
     expect(firstQuestion).toContain("Validate join keys and cardinality");
 
