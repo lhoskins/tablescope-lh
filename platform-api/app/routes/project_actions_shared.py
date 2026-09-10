@@ -25,8 +25,8 @@ from app.models.project import Project, ProjectMember
 from app.models.project_action import ProjectAction, ProjectActionSubtask
 from app.models.project_context.goals import ProjectGoal
 from app.models.project_context.metrics import ProjectMetric
-from app.services.project_ai_context import invalidate_project_ai_context
 from app.services.business_insight_cache import mark_results_stale
+from app.services.project_ai_context import invalidate_project_ai_context
 from app.services.project_insight_service import mark_project_insight_stale
 
 logger = logging.getLogger(__name__)

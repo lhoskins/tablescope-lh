@@ -219,12 +219,12 @@ def _property_conflicts(
     for key, kept_value in kept_props.items():
         if key in _CONFLICT_IGNORED_PROPERTY_KEYS:
             continue
-        if isinstance(kept_value, (list, dict)) or kept_value is None:
+        if isinstance(kept_value, list | dict) or kept_value is None:
             continue
         if key not in dropped_props:
             continue
         dropped_value = dropped_props[key]
-        if isinstance(dropped_value, (list, dict)) or dropped_value is None:
+        if isinstance(dropped_value, list | dict) or dropped_value is None:
             continue
         if kept_value == dropped_value:
             continue
