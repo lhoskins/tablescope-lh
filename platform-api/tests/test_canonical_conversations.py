@@ -465,9 +465,16 @@ async def test_project_workspace_never_widens_insight_cards_to_another_project(
     assert other_project["id"] not in [pid for call in calls for pid in call]
 
 
-async def test_project_workspace_grounds_on_active_table(
+async def test_project_workspace_active_resource_does_not_reach_sql_question(
     client, db_session, service_headers, monkeypatch
 ):
+    """Live incident: prepending the active-resource block ahead of the
+    user's question changed what the SQL generator/source resolver saw and
+    produced wrong-project source matches and spurious clarification
+    responses on questions that resolved cleanly before workspace-context
+    grounding existed. The active resource is still resolved (authorization
+    and cross-project checks still apply, see the tests below) but must no
+    longer be folded into the question sent for SQL generation."""
     _, _, project, headers = await _setup(client, service_headers, "pw-grounding")
 
     from app.models import SavedQuery
@@ -515,11 +522,11 @@ async def test_project_workspace_grounds_on_active_table(
         headers=headers,
     )
     assert r.status_code == 200, r.text
-    assert "Monthly Revenue" in captured["question"]
-    assert "Active workspace item" in captured["question"]
+    assert "Monthly Revenue" not in captured["question"]
+    assert "Active workspace item" not in captured["question"]
 
 
-async def test_project_workspace_grounds_on_multiple_active_resources(
+async def test_project_workspace_multiple_active_resources_do_not_reach_sql_question(
     client, db_session, service_headers, monkeypatch
 ):
     tenant, _, project, headers = await _setup(client, service_headers, "pw-multi")
@@ -578,20 +585,17 @@ async def test_project_workspace_grounds_on_multiple_active_resources(
         headers=headers,
     )
     assert r.status_code == 200, r.text
-    assert "Monthly Revenue" in captured["question"]
-    assert "Exec Overview" in captured["question"]
+    assert "Monthly Revenue" not in captured["question"]
+    assert "Exec Overview" not in captured["question"]
 
 
-async def test_project_workspace_names_the_focused_resource_without_dropping_the_rest(
+async def test_project_workspace_focused_resource_does_not_reach_sql_question(
     client, db_session, service_headers, monkeypatch
 ):
-    """The workspace pane the user is reading from is additive context.
-
-    Sending only the focused card would hide the rest of the workspace from the
-    model, and sending only the list leaves it unable to tell which item a
-    question like "what should I fix first?" is about. Both must reach the
-    prompt.
-    """
+    """The focused-resource block used to be prepended to the question the
+    same way the active-resource list is -- and is subject to the same live
+    incident (see test_project_workspace_active_resource_does_not_reach_sql_question
+    above). It must not reach the SQL-generation question either."""
     tenant, _, project, headers = await _setup(client, service_headers, "pw-focus")
 
     from app.models import Dashboard, SavedQuery
@@ -655,11 +659,9 @@ async def test_project_workspace_names_the_focused_resource_without_dropping_the
     )
     assert r.status_code == 200, r.text
     question = captured["question"]
-    # The whole workspace is still listed...
-    assert "Monthly Revenue" in question
-    assert "Exec Overview" in question
-    # ...and the model is told which one the user is actually reading.
-    assert "the user is currently looking at Exec Overview" in question
+    assert "Monthly Revenue" not in question
+    assert "Exec Overview" not in question
+    assert "the user is currently looking at" not in question
 
 
 async def test_second_turn_sends_conversation_history_to_answer_synthesis(
@@ -734,12 +736,9 @@ async def test_second_turn_sends_conversation_history_to_answer_synthesis(
 async def test_project_workspace_focus_outside_the_active_set_is_ignored(
     client, db_session, service_headers, monkeypatch
 ):
-    """A focus that isn't among the resolved cards must not invent a claim.
-
-    The focus line names an item the model was given; pointing it at something
-    unresolved (deleted, or from another project) would assert the user is
-    reading something the prompt never described.
-    """
+    """An unresolvable focused_resource (deleted, or from another project)
+    must not error the turn out -- resolution silently drops it, same as an
+    unresolvable active_resources entry."""
     tenant, _, project, headers = await _setup(client, service_headers, "pw-focus-bad")
 
     from app.models import SavedQuery
@@ -782,8 +781,7 @@ async def test_project_workspace_focus_outside_the_active_set_is_ignored(
         headers=headers,
     )
     assert r.status_code == 200, r.text
-    # Guard against a vacuous pass: the hook must actually have run.
-    assert "Monthly Revenue" in captured["question"]
+    assert "Monthly Revenue" not in captured["question"]
     assert "currently looking at" not in captured["question"]
 
 
