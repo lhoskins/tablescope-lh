@@ -2,8 +2,10 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 
+const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
+
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => ({ push: pushMock, replace: vi.fn() }),
   usePathname: () => "/projects/7/data-sources",
 }));
 
@@ -26,10 +28,19 @@ vi.mock("./project/project-topbar", () => ({
   ProjectTitleBreadcrumb: ({ screenLabel }: { screenLabel?: string }) => (
     <div data-testid="project-title">Boeing › {screenLabel}</div>
   ),
-  ProjectTopBarControls: ({ actions }: { actions?: ReactNode }) => (
+  ProjectTopBarControls: ({
+    actions,
+    onProjectDeleted,
+  }: {
+    actions?: ReactNode;
+    onProjectDeleted?: () => void;
+  }) => (
     <div data-testid="project-controls">
       {actions}
       Private Members
+      <button type="button" onClick={onProjectDeleted}>
+        Delete project
+      </button>
     </div>
   ),
 }));
@@ -64,6 +75,17 @@ vi.mock("./app-shell", () => ({
 import { ProjectShell } from "./project-shell";
 
 describe("ProjectShell", () => {
+  it("navigates to /projects once the current project is deleted", () => {
+    pushMock.mockClear();
+    render(
+      <ProjectShell projectId="7" activeNav="overview">
+        <div>body</div>
+      </ProjectShell>,
+    );
+    screen.getByRole("button", { name: "Delete project" }).click();
+    expect(pushMock).toHaveBeenCalledWith("/projects");
+  });
+
   it("puts the project title, screen name and project controls in the top bar", () => {
     render(
       <ProjectShell projectId="7" activeNav="project-data-sources" breadcrumbLabel="Data Sources">

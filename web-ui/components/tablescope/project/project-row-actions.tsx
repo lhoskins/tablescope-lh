@@ -13,6 +13,104 @@ import type { ToastTone } from "@/components/ui/toast";
 const DELETE_BODY =
   "This will permanently delete the project and remove its project membership, dashboards, queries, scopes, documents, and project-specific data source assignments. This action cannot be undone.";
 
+/** Shared by every delete-project entry point (list-row menu, project top
+ *  bar) so the confirmation copy, error handling, and cache invalidation
+ *  never drift between them. `onDeleted` runs after the toast/refetch --
+ *  the top bar uses it to navigate away from a project that no longer
+ *  exists; a list row has nothing extra to do, since the row just
+ *  disappears once the list refetches. */
+function useDeleteProjectMutation({
+  project,
+  onToast,
+  onDeleted,
+  onError,
+}: {
+  project: { id: string; name: string };
+  onToast: (message: string, tone: ToastTone) => void;
+  onDeleted?: () => void;
+  /** Called after a failed attempt too (as well as onDeleted after success)
+   *  so the caller can close its confirm dialog either way -- a failed
+   *  delete still gets a toast explaining why, no need to keep the dialog
+   *  open for it. */
+  onError?: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const refetchProjects = () =>
+    queryClient.invalidateQueries({ queryKey: ["projects", "summaries"] });
+
+  return useMutation({
+    mutationFn: () => deleteProject(project.id),
+    onSuccess: async () => {
+      onToast("Project deleted.", "success");
+      await refetchProjects();
+      onDeleted?.();
+    },
+    onError: (err: unknown) => {
+      const status = err instanceof ApiError ? err.status : 0;
+      if (status === 403) {
+        onToast("Only the project owner or an admin can delete this project.", "error");
+      } else if (status === 404) {
+        onToast("Project not found or already deleted.", "error");
+        void refetchProjects();
+      } else {
+        onToast("Could not delete project. Please try again.", "error");
+      }
+      onError?.();
+    },
+  });
+}
+
+/** A trash icon button visible on every screen of a project (next to
+ *  Members/Share, following the pattern of GitHub/Linear/Notion putting a
+ *  resource's delete action on the resource itself, not only in a list
+ *  row) -- clicking it opens the same type-to-confirm dialog the project
+ *  list uses. The backend enforces owner-or-admin (403 otherwise); the
+ *  button itself stays visible to everyone, same as the list-row menu
+ *  already does, so authorization is one source of truth. */
+export function DeleteProjectButton({
+  project,
+  onToast,
+  onDeleted,
+}: {
+  project: { id: string; name: string };
+  onToast: (message: string, tone: ToastTone) => void;
+  onDeleted?: () => void;
+}) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const deleteMutation = useDeleteProjectMutation({
+    project,
+    onToast,
+    onDeleted: () => {
+      setConfirmDelete(false);
+      onDeleted?.();
+    },
+    onError: () => setConfirmDelete(false),
+  });
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label="Delete project"
+        title="Delete project"
+        onClick={() => setConfirmDelete(true)}
+        className="hover:bg-danger/10 hover:text-danger"
+      >
+        <IconTrash size={15} />
+      </Button>
+      {confirmDelete && (
+        <DeleteProjectDialog
+          name={project.name}
+          pending={deleteMutation.isPending}
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={() => deleteMutation.mutate()}
+        />
+      )}
+    </>
+  );
+}
+
 export function ProjectRowActions({
   project,
   onToast,
@@ -72,25 +170,11 @@ export function ProjectRowActions({
   const refetchProjects = () =>
     queryClient.invalidateQueries({ queryKey: ["projects", "summaries"] });
 
-  const deleteMutation = useMutation({
-    mutationFn: () => deleteProject(project.id),
-    onSuccess: async () => {
-      setConfirmDelete(false);
-      onToast("Project deleted.", "success");
-      await refetchProjects();
-    },
-    onError: (err: unknown) => {
-      const status = err instanceof ApiError ? err.status : 0;
-      if (status === 403) {
-        onToast("Only the project owner or an admin can delete this project.", "error");
-      } else if (status === 404) {
-        onToast("Project not found or already deleted.", "error");
-        void refetchProjects();
-      } else {
-        onToast("Could not delete project. Please try again.", "error");
-      }
-      setConfirmDelete(false);
-    },
+  const deleteMutation = useDeleteProjectMutation({
+    project,
+    onToast,
+    onDeleted: () => setConfirmDelete(false),
+    onError: () => setConfirmDelete(false),
   });
 
   return (

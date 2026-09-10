@@ -109,6 +109,7 @@ export function ProjectShell({
           project={project}
           actions={actions}
           onMembers={() => setShowMembers(true)}
+          onProjectDeleted={() => router.push("/projects")}
           onToast={push}
         />
       }
