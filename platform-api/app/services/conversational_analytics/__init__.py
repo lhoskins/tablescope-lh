@@ -1136,23 +1136,29 @@ async def execute_turn(
     # Phase D: Reference Library / document Q&A bypasses SQL generation.
     # These questions are answered directly from grounded documents and KG context.
     if intent == ConversationalIntent.DOCUMENT_QA or _is_document_question(question):
-        grounding_question = question
-        if (
-            intent == ConversationalIntent.DOCUMENT_QA
-            and not _is_document_question(question)
-            and prior_turn is not None
-            and prior_turn.intent_type == ConversationalIntent.DOCUMENT_QA
-        ):
-            # Bare follow-up ("give me more detail") needs the prior document
-            # to find the same reference source again.
-            grounding_question = prior_turn.user_message or question
         grounding = await gather_grounding_evidence(
             session,
             tenant_id=context.tenant_id,
             user_id=context.user_id,
             project_id=project_id,
-            question=grounding_question,
+            question=question,
         )
+        if (
+            grounding is not None
+            and not grounding.reference_documents
+            and prior_turn is not None
+            and prior_turn.intent_type == ConversationalIntent.DOCUMENT_QA
+            and prior_turn.user_message
+        ):
+            # Bare follow-up ("give me more detail") needs the prior document
+            # to find the same reference source again.
+            grounding = await gather_grounding_evidence(
+                session,
+                tenant_id=context.tenant_id,
+                user_id=context.user_id,
+                project_id=project_id,
+                question=prior_turn.user_message,
+            )
         if grounding is None:
             from app.schemas.ai_grounding import GroundingEvidence
             grounding = GroundingEvidence()
