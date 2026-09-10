@@ -30,6 +30,19 @@ export function isNumeric(value: unknown): boolean {
   return toNumber(value) !== null;
 }
 
+/** Round a non-integer numeric value to 2 decimal places for display;
+ *  integers and non-numeric values pass through unchanged. Live report:
+ *  a SuccessRate/FailureRate column echoed raw floating-point division
+ *  straight from SQL (0.9166666666666666), which reads as noise in a
+ *  chat result -- 2 decimal places is what a user scanning a rate needs,
+ *  not the full precision behind it. */
+function formatCellValue(value: unknown): string {
+  if (value == null) return "";
+  const n = toNumber(value);
+  if (n === null || Number.isInteger(n)) return String(value);
+  return n.toFixed(2);
+}
+
 /** Build a renderable chart from result rows + the suggested visualization. */
 export function buildChart(
   columns: string[],
@@ -45,7 +58,7 @@ export function buildChart(
     if (value == null) return null;
     return {
       type: "kpi_grid",
-      data: { kpis: [{ value: String(value), label: field }] },
+      data: { kpis: [{ value: formatCellValue(value), label: field }] },
     };
   }
 
@@ -244,7 +257,7 @@ export function ResultTable({
                     key={c}
                     className="border-b border-line-tertiary/60 px-2 py-1.5 text-ink-primary"
                   >
-                    {row[c] == null ? "" : String(row[c])}
+                    {formatCellValue(row[c])}
                   </td>
                 ))}
               </tr>
