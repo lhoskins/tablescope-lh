@@ -8,6 +8,7 @@ import {
   IconUsers,
   IconX,
 } from "@tabler/icons-react";
+import { DeleteProjectButton } from "@/components/tablescope/project/project-row-actions";
 import { ShareToggle } from "@/components/tablescope/project/share-toggle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -156,18 +157,25 @@ export function ProjectTitleBreadcrumb({
 
 /**
  * Right side of the project top bar: whatever actions the current screen
- * contributes, then the two project-wide controls (Private/Shared and
- * Members) that sit in the same place on every screen.
+ * contributes, then the project-wide controls (Private/Shared, Members,
+ * and Delete) that sit in the same place on every screen. Delete lives here
+ * -- not only in the `/projects` list-row menu -- so the owner viewing the
+ * project itself has an obvious way to delete it, the way GitHub/Linear/
+ * Notion put a resource's delete action on the resource itself.
  */
 export function ProjectTopBarControls({
   project,
   actions,
   onMembers,
+  onProjectDeleted,
   onToast,
 }: {
   project: ProjectSummary | null;
   actions?: ReactNode;
   onMembers: () => void;
+  /** Called after the project is successfully deleted -- the caller should
+   *  navigate away, since this project no longer exists. */
+  onProjectDeleted?: () => void;
   onToast: (message: string, tone?: ToastTone) => void;
 }) {
   return (
@@ -182,6 +190,13 @@ export function ProjectTopBarControls({
         <IconUsers size={14} />
         Members
       </Button>
+      {project && (
+        <DeleteProjectButton
+          project={{ id: String(project.id), name: project.name }}
+          onToast={onToast}
+          onDeleted={onProjectDeleted}
+        />
+      )}
     </div>
   );
 }
