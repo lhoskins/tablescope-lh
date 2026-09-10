@@ -1,13 +1,9 @@
 """Tests for the upfront reference-catalog routing check.
 
-A question naming a real Reference Library document or Industry KPI/tag
-catalog entry by its actual key/name/acronym (e.g. "tell me about SCOR")
-should route straight to a reference answer -- *before* SQL generation is
-ever attempted, not as a fallback after generation fails. This is a
-deliberately exact/deterministic match against real catalog content, never
-a fuzzy relevance score: a question that doesn't name anything real must
-still fall through to normal SQL generation and hard-error if that fails,
-with no guessing either way.
+A question naming a real Reference Library document by acronym, or explicitly
+asking for a governed KPI/tag definition, routes straight to a reference
+answer. Ordinary questions that merely contain the same metric/tag words must
+still reach SQL generation.
 
 Run from ``platform-api``: ``pytest -q tests/test_question_names_reference_entry.py``.
 """
@@ -17,7 +13,11 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
-from app.models.ai_reference_catalog import AIReferenceCatalog, AIReferenceKPI
+from app.models.ai_reference_catalog import (
+    AIReferenceCatalog,
+    AIReferenceKPI,
+    AIReferenceTag,
+)
 from app.models.reference_library import TIER_INDUSTRY, ReferenceDocument
 from app.models.tenant import Tenant
 from app.services.ai_grounding import question_names_reference_entry
@@ -54,10 +54,62 @@ async def _seed_reference_document(db_session, *, title: str, tenant_id: int) ->
     await db_session.commit()
 
 
+async def _seed_catalog_tag(db_session, *, tag_key: str, display_name: str) -> None:
+    catalog = AIReferenceCatalog(
+        catalog_key="test_operations",
+        name="Test Operations",
+        industry="operations",
+        is_system=True,
+        is_active=True,
+    )
+    db_session.add(catalog)
+    await db_session.flush()
+    db_session.add(
+        AIReferenceTag(
+            catalog_id=catalog.id,
+            tag_key=tag_key,
+            display_name=display_name,
+            industry="operations",
+            is_active=True,
+        )
+    )
+    await db_session.commit()
+
+
 async def test_matches_a_kpi_by_its_key(db_session):
     await _seed_catalog_kpi(db_session, kpi_key="scor", display_name="SCOR Model")
     assert await question_names_reference_entry(
-        db_session, tenant_id=1, project_id=1, question="Tell me about SCOR"
+        db_session, tenant_id=1, project_id=1, question="Define the SCOR KPI"
+    )
+
+
+async def test_operational_kpi_question_does_not_preempt_sql(db_session):
+    await _seed_catalog_kpi(
+        db_session,
+        kpi_key="backup_success_rate",
+        display_name="Backup Success Rate",
+    )
+    assert not await question_names_reference_entry(
+        db_session,
+        tenant_id=1,
+        project_id=1,
+        question="Show me the backup success rate",
+    )
+    assert await question_names_reference_entry(
+        db_session,
+        tenant_id=1,
+        project_id=1,
+        question="Define the Backup Success Rate KPI and its formula",
+    )
+
+
+async def test_operational_tag_question_does_not_preempt_sql(db_session):
+    await _seed_catalog_tag(db_session, tag_key="incidents", display_name="Incidents")
+    assert not await question_names_reference_entry(
+        db_session,
+        tenant_id=1,
+        project_id=1,
+        question="Give me the details of Q2 incidents",
     )
 
 
@@ -82,6 +134,22 @@ async def test_does_not_match_when_nothing_real_is_named(db_session):
         tenant_id=1,
         project_id=1,
         question="What were IT vendor renewals last month?",
+    )
+
+
+async def test_matches_a_document_title_by_acronym_typed_lowercase(db_session):
+    """Live regression: "Tell me about scor" (lowercase) fell through to SQL
+    generation and matched an unrelated "Score" data source instead of the
+    real SCOR reference document, because the acronym check only looked for
+    an all-caps run already present in the question -- a user rarely types
+    an acronym in caps. The match still has to land on a real document's
+    title acronym below, so this only widens which question words get
+    checked, not what counts as a match."""
+    await _seed_reference_document(
+        db_session, title="SCOR Framework Overview", tenant_id=1
+    )
+    assert await question_names_reference_entry(
+        db_session, tenant_id=1, project_id=1, question="Tell me about scor"
     )
 
 
@@ -118,7 +186,9 @@ async def test_ask_and_run_core_routes_to_reference_answer_before_generation(
     from app.auth.jwt import TokenClaims
     from app.routes import ai_proxy_ask_and_run as core_module
 
-    await _seed_catalog_kpi(db_session, kpi_key="scor", display_name="SCOR Model")
+    await _seed_reference_document(
+        db_session, title="SCOR Framework Overview", tenant_id=1
+    )
 
     tenant = Tenant(slug="reflib-routing", name="Reflib Routing")
     db_session.add(tenant)
@@ -139,9 +209,13 @@ async def test_ask_and_run_core_routes_to_reference_answer_before_generation(
     async def _fake_prose(*args, **kwargs):
         return {"answer": "SCOR is the Supply Chain Operations Reference model."}
 
+    async def _fake_grounding(*args, **kwargs):
+        return None
+
     monkeypatch.setattr(core_module, "_generate_sql_for_question", _fail_if_called)
     monkeypatch.setattr(core_module, "_resolve_action_sources", _fake_resolver)
     monkeypatch.setattr(core_module, "_forward_prose_answer", _fake_prose)
+    monkeypatch.setattr(core_module, "gather_grounding_evidence", _fake_grounding)
 
     context = RequestContext(
         claims=TokenClaims(sub="u", tenant_id=tenant.id, user_id=1, role="editor")
@@ -155,6 +229,59 @@ async def test_ask_and_run_core_routes_to_reference_answer_before_generation(
     assert result["sql"] == ""
 
 
+async def test_ask_and_run_core_passes_conversation_history_to_reference_answer(
+    db_session, monkeypatch
+):
+    """Live regression: a chat follow-up like "give me a detail summary of
+    the SCOR model" was answered from scratch every time, with no memory of
+    the prior exchange, because _ask_and_run_core had no way to receive the
+    conversation's history at all -- unlike the older Phase D document-Q&A
+    bypass in conversational_analytics, which always passed it. Callers that
+    have a conversation (conversational_analytics._run_analytical_turn) must
+    thread ``history`` through to the reference-answer path."""
+    from app.auth.context import RequestContext
+    from app.auth.jwt import TokenClaims
+    from app.routes import ai_proxy_ask_and_run as core_module
+
+    await _seed_catalog_kpi(db_session, kpi_key="scor", display_name="SCOR Model")
+
+    tenant = Tenant(slug="reflib-history", name="Reflib History")
+    db_session.add(tenant)
+    await db_session.flush()
+    await db_session.commit()
+
+    captured: dict = {}
+
+    async def _fake_resolver(*args, **kwargs):
+        from app.services.project_source_resolver.types import ResolverResult
+
+        return ResolverResult(status="no_match")
+
+    async def _fake_prose(*args, **kwargs):
+        captured["history"] = kwargs.get("history")
+        return {"answer": "More detail on the SCOR model."}
+
+    monkeypatch.setattr(core_module, "_resolve_action_sources", _fake_resolver)
+    monkeypatch.setattr(core_module, "_forward_prose_answer", _fake_prose)
+
+    context = RequestContext(
+        claims=TokenClaims(sub="u", tenant_id=tenant.id, user_id=1, role="editor")
+    )
+    conversation_history = [
+        {"role": "user", "content": "Tell me about SCOR"},
+        {"role": "assistant", "content": "SCOR is a supply-chain framework."},
+    ]
+    result = await core_module._ask_and_run_core(
+        db_session, context,
+        project_id=1,
+        question="Give me a detail summary of the SCOR model",
+        max_rows=100,
+        history=conversation_history,
+    )
+    assert result["status"] == "reference_library_answer"
+    assert captured["history"] == conversation_history
+
+
 async def test_ask_and_run_core_generation_proceeds_normally_without_a_match(
     db_session, monkeypatch
 ):
@@ -164,6 +291,12 @@ async def test_ask_and_run_core_generation_proceeds_normally_without_a_match(
     from app.auth.context import RequestContext
     from app.auth.jwt import TokenClaims
     from app.routes import ai_proxy_ask_and_run as core_module
+
+    await _seed_catalog_kpi(
+        db_session,
+        kpi_key="backup_success_rate",
+        display_name="Backup Success Rate",
+    )
 
     tenant = Tenant(slug="reflib-nomatch", name="Reflib No Match")
     db_session.add(tenant)
@@ -184,8 +317,12 @@ async def test_ask_and_run_core_generation_proceeds_normally_without_a_match(
 
         return ResolverResult(status="no_match")
 
+    async def _fake_grounding(*args, **kwargs):
+        return None
+
     monkeypatch.setattr(core_module, "_generate_sql_for_question", _fake_generate)
     monkeypatch.setattr(core_module, "_resolve_action_sources", _fake_resolver)
+    monkeypatch.setattr(core_module, "gather_grounding_evidence", _fake_grounding)
 
     context = RequestContext(
         claims=TokenClaims(sub="u", tenant_id=tenant.id, user_id=1, role="editor")
@@ -193,7 +330,7 @@ async def test_ask_and_run_core_generation_proceeds_normally_without_a_match(
     result = await core_module._ask_and_run_core(
         db_session, context,
         project_id=1,
-        question="What were the deployment metrics for a thing that does not exist?",
+        question="Show me the backup success rate",
         max_rows=100,
     )
     assert result["status"] == "generation_error"

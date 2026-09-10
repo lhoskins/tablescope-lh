@@ -12,7 +12,12 @@ from app.auth.context import RequestContext
 from app.auth.rbac import Role, has_role
 from app.models.analytics_conversation import AnalyticsConversation, AnalyticsConversationTurn
 from app.models.chat_attachment import ChatAttachment
-from app.routes.ai_proxy import _ask_and_run_core, _build_source_catalog, _forward_prose_answer
+from app.routes.ai_proxy import (
+    _ask_and_run_core,
+    _build_source_catalog,
+    _forward_prose_answer,
+    _strip_model_markup,
+)
 from app.routes.ai_proxy_dashboard_designer import (
     DashboardDesignRequest,
     review_dashboard_design,
@@ -411,6 +416,7 @@ async def _run_analytical_turn(
     project_context: dict[str, Any] | None = None,
     conversation_id: int | None = None,
     turn_id: int | None = None,
+    history: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Run a data-changing turn by delegating to the existing ask-and-run core."""
     context_block = _format_context_prompt(project_context)
@@ -437,6 +443,7 @@ async def _run_analytical_turn(
         source=None,  # source override can be added once the route exposes it
         conversation_id=conversation_id,
         turn_id=turn_id,
+        history=history,
     )
     return run
 
@@ -816,7 +823,8 @@ async def _synthesize_answer(
             history=history or [],
         )
         if response and response.get("answer"):
-            return str(response["answer"]).strip()
+            answer = _strip_model_markup(str(response["answer"]))
+            return answer or None
     except AIUnavailableError:
         logger.warning("AI answer synthesis unavailable; using deterministic fallback")
     except Exception as exc:
@@ -1218,6 +1226,7 @@ async def execute_turn(
             project_context=project_context,
             conversation_id=conversation.id,
             turn_id=turn.id,
+            history=history,
         )
         investigation_steps = []
 
@@ -1241,10 +1250,10 @@ async def execute_turn(
         return
 
     if run.get("status") == "reference_library_answer":
-        # The question named a real Reference Library document or Industry
-        # KPI catalog entry -- _ask_and_run_core routed it to a reference
-        # answer before ever attempting SQL generation. Same early-return
-        # shape as the Phase D document-Q&A bypass above.
+        # The question named a Reference Library document or explicitly asked
+        # for a governed KPI/tag definition. _ask_and_run_core routed it to a
+        # reference answer before SQL generation. Same early-return shape as
+        # the Phase D document-Q&A bypass above.
         turn.status = "success"
         turn.assistant_message = run.get("explanation") or ""
         turn.intent_type = ConversationalIntent.DOCUMENT_QA
@@ -1414,8 +1423,7 @@ async def execute_turn(
         turn_id=turn.id,
         history=history,
     )
-    turn.assistant_message = (
-        synthesized
-        or run.get("explanation")
-        or _answer_text(columns, bounded_rows)
+    generated_explanation = _strip_model_markup(str(run.get("explanation") or ""))
+    turn.assistant_message = synthesized or generated_explanation or _answer_text(
+        columns, bounded_rows
     )
