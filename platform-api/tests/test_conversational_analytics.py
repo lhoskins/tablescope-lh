@@ -435,14 +435,21 @@ async def test_plain_question_never_triggers_the_investigation_agent(
     assert r.json()["turns"][0]["status"] == "success"
 
 
-async def test_generation_error_reports_the_real_reason_not_a_matched_card(
+async def test_generation_error_falls_back_to_a_matching_insight_card(
     client, db_session, service_headers, monkeypatch
 ):
-    """A question the fresh SQL path can't answer must surface *why* --
-    not stand in an unrelated but topically-similar Insight Card and mark
-    the turn a success. Matching a card here made a failed live query look
-    like a working answer, and hid the real reason the user asked for."""
+    """Restored at the user's explicit request: a chat question closely
+    naming an existing, verified Insight Card ("Budget vs Actual Variance
+    Swings From Over to Under Performance") hard-errored instead of
+    surfacing that card, even though the direct ask-and-run REST action
+    already had this exact fallback (see ai_proxy_ask_and_run.py's
+    ai_ask_and_run/_matched_insight_message). This had briefly been removed
+    after a live report of an unrelated-but-topically-similar card
+    standing in for a real failure; asked directly, the user chose to
+    restore the original fuzzy-matching fallback rather than a narrower
+    exact-title-only version, accepting that tradeoff."""
     from app.models.business_insight_result import BusinessInsightResult
+    from app.services.insight_card_match import InsightCardMatch
 
     tenant, _, project, headers = await _setup(client, service_headers, "conv-insight-match")
 
@@ -475,23 +482,27 @@ async def test_generation_error_reports_the_real_reason_not_a_matched_card(
             "errorDetails": {"validationError": "empty completion"},
         }
 
-    async def _fail_if_called(*args, **kwargs):
-        raise AssertionError(
-            "insight-card and prose fallback must not run for a generation_error -- "
-            "the real reason must be reported instead of a substitute answer"
-        )
+    async def _fake_matches(*args, **kwargs):
+        return [
+            InsightCardMatch(
+                insight_id="mat-cost-001",
+                project_id=project["id"],
+                project_name="Conv Project",
+                title="Material cost on the rise",
+                summary="Weekly material cost has increased steadily since January 2026.",
+                chart={"type": "line", "data": {"rows": []}},
+                severity="warning",
+                score=0.9,
+            )
+        ]
 
     monkeypatch.setattr(
         "app.services.conversational_analytics._ask_and_run_core",
         _fake_generation_error,
     )
     monkeypatch.setattr(
-        "app.services.conversational_analytics._forward_prose_answer",
-        _fail_if_called,
-    )
-    monkeypatch.setattr(
         "app.services.conversational_analytics.find_matching_insight_cards",
-        _fail_if_called,
+        _fake_matches,
     )
 
     r = await client.post(
@@ -504,13 +515,66 @@ async def test_generation_error_reports_the_real_reason_not_a_matched_card(
     )
     assert r.status_code == 200, r.text
     turn = r.json()["turns"][0]
+    assert turn["status"] == "success"
+    assert turn["matched_insight"]["insightId"] == "mat-cost-001"
+    assert turn["matched_insight"]["title"] == "Material cost on the rise"
+    assert turn["matched_insight"]["chart"] == {"type": "line", "data": {"rows": []}}
+    assert "Material cost on the rise" in turn["assistant_message"]
+    assert turn["sql"] is None
+    assert turn["chart_config"] is None
+    assert turn["error_code"] == "live_query_fallback_generation_error"
+
+
+async def test_generation_error_still_hard_errors_when_nothing_matches(
+    client, db_session, service_headers, monkeypatch
+):
+    """Regression guard for the other direction: a generation failure with
+    no matching Insight Card and no KG prose answer either must still
+    surface the real failure reason -- the restored fallback only ever
+    substitutes a real find, never invents a success."""
+    tenant, _, project, headers = await _setup(client, service_headers, "conv-insight-nomatch")
+
+    async def _fake_generation_error(*args, **kwargs):
+        return {
+            "status": "generation_error",
+            "sql": "",
+            "error": "Model did not return a runnable SQL query.",
+            "errorDetails": {"validationError": "empty completion"},
+        }
+
+    async def _no_matches(*args, **kwargs):
+        return []
+
+    async def _no_prose(*args, **kwargs):
+        return {"answer": ""}
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core",
+        _fake_generation_error,
+    )
+    monkeypatch.setattr(
+        "app.services.conversational_analytics.find_matching_insight_cards",
+        _no_matches,
+    )
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._forward_prose_answer",
+        _no_prose,
+    )
+
+    r = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={
+            "project_id": project["id"],
+            "initial_message": "What were the deployment metrics for a thing that does not exist?",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    turn = r.json()["turns"][0]
     assert turn["status"] == "error"
     assert turn["matched_insight"] is None
     assert turn["assistant_message"] == "Model did not return a runnable SQL query."
-    assert turn["sql"] is None
-    assert turn["chart_config"] is None
     assert turn["error_code"] == "generation_error"
-    assert turn["result_metadata"]["errorDetails"] == {"validationError": "empty completion"}
 
 
 async def test_ai_unavailable_hard_errors_instead_of_matching_an_insight_card(
