@@ -411,6 +411,7 @@ async def _run_analytical_turn(
     project_context: dict[str, Any] | None = None,
     conversation_id: int | None = None,
     turn_id: int | None = None,
+    history: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Run a data-changing turn by delegating to the existing ask-and-run core."""
     context_block = _format_context_prompt(project_context)
@@ -437,6 +438,7 @@ async def _run_analytical_turn(
         source=None,  # source override can be added once the route exposes it
         conversation_id=conversation_id,
         turn_id=turn_id,
+        history=history,
     )
     return run
 
@@ -1218,6 +1220,7 @@ async def execute_turn(
             project_context=project_context,
             conversation_id=conversation.id,
             turn_id=turn.id,
+            history=history,
         )
         investigation_steps = []
 
