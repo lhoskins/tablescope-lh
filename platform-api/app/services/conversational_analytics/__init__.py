@@ -1083,6 +1083,7 @@ async def execute_turn(
         and intent not in (ConversationalIntent.CREATE_QUERY, ConversationalIntent.CREATE_DASHBOARD)
     )
     if intent == ConversationalIntent.CREATE_DASHBOARD or is_dashboard_refinement:
+        assert preceding_proposal is not None
         design_prompt = (
             f"{preceding_proposal['prompt']}\n\nAdditional instruction: {raw_question}"
             if is_dashboard_refinement
