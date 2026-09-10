@@ -47,14 +47,19 @@ from .intent_classification import _FALLBACK_CHART_CONTEXT as _FALLBACK_CHART_CO
 from .intent_classification import _FALLBACK_CHART_WORDS as _FALLBACK_CHART_WORDS
 from .intent_classification import _FALLBACK_EXPLAIN as _FALLBACK_EXPLAIN
 from .intent_classification import _MAX_PREVIEW_BYTES as _MAX_PREVIEW_BYTES
-from .intent_classification import _MAX_PREVIEW_ROWS, ConversationalIntent, classify_turn, logger
+from .intent_classification import (
+    _MAX_PREVIEW_ROWS,
+    ConversationalIntent,
+    classify_turn,
+    is_save_existing_query_request,
+    logger,
+)
 from .intent_classification import _fallback_classify as _fallback_classify
 from .intent_classification import _grounded_data_question as _grounded_data_question
 from .intent_classification import _is_document_question as _is_document_question
 from .intent_classification import _is_investigative_question as _is_investigative_question
 from .intent_classification import _normalize_question as _normalize_question
 from .intent_classification import _prior_turn_state as _prior_turn_state
-from .intent_classification import is_save_existing_query_request
 from .result_profiling import _answer_text, _bound_result, _profile_result, _sql_fingerprint
 from .result_profiling import _column_data_profile as _column_data_profile
 from .result_profiling import _is_period_values as _is_period_values
