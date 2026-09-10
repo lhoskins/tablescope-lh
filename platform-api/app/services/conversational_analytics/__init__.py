@@ -1083,12 +1083,16 @@ async def execute_turn(
         and intent not in (ConversationalIntent.CREATE_QUERY, ConversationalIntent.CREATE_DASHBOARD)
     )
     if intent == ConversationalIntent.CREATE_DASHBOARD or is_dashboard_refinement:
-        assert preceding_proposal is not None
-        design_prompt = (
-            f"{preceding_proposal['prompt']}\n\nAdditional instruction: {raw_question}"
-            if is_dashboard_refinement
-            else raw_question
-        )
+        # preceding_proposal is only required -- and only read below -- on
+        # the refinement path. A fresh CREATE_DASHBOARD command (the common
+        # case: the first dashboard request in a conversation) legitimately
+        # has no preceding turn, so asserting it unconditionally here made
+        # every first-time "create a dashboard" chat command crash.
+        if is_dashboard_refinement:
+            assert preceding_proposal is not None
+            design_prompt = f"{preceding_proposal['prompt']}\n\nAdditional instruction: {raw_question}"
+        else:
+            design_prompt = raw_question
         await _propose_dashboard(
             session,
             context,
