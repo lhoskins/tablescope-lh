@@ -168,6 +168,7 @@ async def test_returns_the_llm_chosen_card(
     assert match.title == "Material cost on the rise"
     assert match.project_id == project["id"]
     assert match.chart == {"type": "line", "data": {"rows": []}}
+    assert match.confidence == 0.9
 
     # Both candidates in the resolved project were offered -- the model
     # judges relevance, this module never pre-filters by its own guess.
@@ -367,6 +368,54 @@ async def test_llm_decline_returns_no_match(
     )
 
     assert match is None
+
+
+async def test_pick_below_strict_fallback_confidence_returns_no_match(
+    client, db_session, service_headers, monkeypatch
+) -> None:
+    project, tenant, user = await _project(client, service_headers)
+    db_session.add(
+        BusinessInsightResult(
+            tenant_id=tenant["id"],
+            project_id=project["id"],
+            granularity=3,
+            payload={"insights": [_card("abc123", "Backup Jobs by System", "...")]},
+        )
+    )
+    await db_session.commit()
+
+    async def _fake_select(**kwargs):
+        return {"insight_id": "abc123", "confidence": 0.74, "reason": "uncertain"}
+
+    _mock_select(monkeypatch, _fake_select)
+    match = await icm.find_matching_insight_card(
+        db_session,
+        context=_context(tenant["id"], user["id"]),
+        tenant_id=tenant["id"],
+        project_id=project["id"],
+        question="Show backup jobs by system",
+    )
+
+    assert match is None
+
+
+@pytest.mark.parametrize(
+    ("confidence", "accepted"),
+    [(None, False), ("invalid", False), ("NaN", False), ("Infinity", False), (1.1, False), (0.75, True)],
+)
+async def test_selector_requires_valid_explicit_confidence(monkeypatch, confidence, accepted):
+    async def select(**kwargs):
+        return {"insight_id": "backup", "confidence": confidence}
+
+    _mock_select(monkeypatch, select)
+    matches = await icm._select_from_candidates(
+        context=_context(1, 1),
+        tenant_id=1,
+        project_id=1,
+        question="Show backup jobs by system",
+        pairs=[(1, _card("backup", "Backup Jobs by System", "Backup job counts"))],
+    )
+    assert bool(matches) is accepted
 
 
 async def test_rejects_an_id_the_model_was_not_offered(

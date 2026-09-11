@@ -17,6 +17,8 @@ def test_hint_lists_preferred_sources_and_columns():
     assert "DefectRate" in hint
     # Must allow fallback to another authorized source, never force a bad match.
     assert "cannot answer" in hint.lower()
+    assert "requested business subject" in hint
+    assert "never invent a column" in hint
 
 
 def test_hint_with_sources_only():

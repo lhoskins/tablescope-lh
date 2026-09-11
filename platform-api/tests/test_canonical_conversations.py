@@ -405,26 +405,8 @@ async def test_project_workspace_never_re_resolves_to_another_project(
 async def test_project_workspace_never_widens_insight_cards_to_another_project(
     client, service_headers, monkeypatch
 ):
-    """Same guarantee as test_project_insights_never_widens_to_another_project,
-    for project_workspace -- "Workspace — Sales" must never even look at
-    another project's (e.g. IT's) cached Insight Cards as candidates, even
-    though AI Assistant and Business Insights would happily widen the
-    search.
-
-    Spies on `_cards_for_projects` (the function `allow_cross_project`
-    actually gates a second call to) rather than the LLM selector: this test
-    suite never enables `ai_intelligence_client`, so the LLM selector path
-    this file's sibling project_insights test explicitly mocks in is never
-    reached here regardless of widening. Also deliberately does NOT mock
-    `_ask_and_run_core` into a
-    "generation_error" the way that sibling test does -- `execute_turn`
-    returns early on any non-"success" status (before ever reaching the
-    insight-matching block at all), which would make an assertion here pass
-    vacuously the same way the LLM-mock one did. The autouse `_fake_ask`'s
-    successful "month"/"amount"/"sales" result has zero term overlap with
-    this question, which is what actually drops the live-result score below
-    the 0.95 threshold that gates whether insight-card matching runs.
-    """
+    """A successful workspace SQL result is final and must never start an
+    Insight Card search, whether the card is local or cross-project."""
     _, _, project, headers = await _setup(client, service_headers, "pw-no-widen")
 
     other_r = await client.post(
@@ -459,9 +441,9 @@ async def test_project_workspace_never_widens_insight_cards_to_another_project(
         headers=headers,
     )
     assert r.status_code == 200, r.text
-    # Candidate gathering must only ever be called for this workspace's own
-    # project -- never for `other_project`, which is what widening would do.
-    assert calls == [[project["id"]]]
+    # Insight Cards are fallback-only after SQL exhaustion, so a successful
+    # live result does not gather any candidates at all.
+    assert calls == []
     assert other_project["id"] not in [pid for call in calls for pid in call]
 
 

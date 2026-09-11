@@ -215,7 +215,7 @@ def _prior_turn_state(prior_turn: AnalyticsConversationTurn | None) -> dict[str,
         return {"has_prior_result": False}
     profile = prior_turn.result_metadata or {}
     cache = prior_turn.result_cache or {}
-    state = {
+    state: dict[str, object] = {
         "has_prior_result": bool(cache),
         "prior_intent": prior_turn.intent_type,
         "prior_assistant_message": (prior_turn.assistant_message or "")[:500],

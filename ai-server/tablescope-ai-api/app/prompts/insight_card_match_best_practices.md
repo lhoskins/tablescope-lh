@@ -37,6 +37,9 @@ is still a decline if none of them are actually on-topic.
 6. Give a one-sentence reason either way, grounded in the specific
 `series`/`trend` you compared against the question — never a generic
 restatement like "this card is relevant."
+7. Return a card only when confidence is at least `0.75`. Below that threshold,
+return `insightId: null` and explain which required subject, metric, grouping,
+or trend evidence was missing.
 
 ## Examples (fictional data — never copy their wording into your output)
 

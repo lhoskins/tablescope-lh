@@ -65,7 +65,8 @@ _MAX_CANDIDATES = 20
 # (the doc's own worked examples score 0.85-0.9), and it is what lets a
 # resolved project's tangential candidate fall through to the cross-project
 # widen instead of silently winning just because it was offered first.
-_MIN_CONFIDENCE = 0.6
+INSIGHT_FALLBACK_MIN_CONFIDENCE = 0.75
+_MIN_CONFIDENCE = INSIGHT_FALLBACK_MIN_CONFIDENCE
 
 
 @dataclass
@@ -80,9 +81,15 @@ class InsightCardMatch:
     diagnostics: list[dict[str, Any]] | None = None
     proposed_actions: list[dict[str, Any]] | None = None
     score: float = 0.0
+    confidence: float = 0.0
 
 
-def _to_match(project_id: int, card: dict[str, Any], score: float = 0.0) -> InsightCardMatch:
+def _to_match(
+    project_id: int,
+    card: dict[str, Any],
+    score: float = 0.0,
+    confidence: float = 0.0,
+) -> InsightCardMatch:
     return InsightCardMatch(
         insight_id=str(card.get("insightId") or ""),
         project_id=project_id,
@@ -94,6 +101,7 @@ def _to_match(project_id: int, card: dict[str, Any], score: float = 0.0) -> Insi
         diagnostics=card.get("diagnostics") if isinstance(card.get("diagnostics"), list) else None,
         proposed_actions=card.get("proposedActions") if isinstance(card.get("proposedActions"), list) else None,
         score=score,
+        confidence=confidence,
     )
 
 
@@ -423,11 +431,11 @@ async def _select_from_candidates(
     """Return the best matching insight card(s) for ``question``.
 
     When ``use_llm`` is true, the primary match is chosen by the LLM selector
-    from the top data-shape candidates. Secondary matches are added from the same
-    ranked list when their score is close to the primary's score. When
-    ``use_llm`` is false, the function returns the top data-shape matches
-    directly without an LLM call (used to cheaply suggest related cards
-    alongside a successful live query result).
+    from the top data-shape candidates and must clear the configured confidence
+    floor. A decline, unavailable selector, unknown id, or low-confidence pick
+    returns no match; deterministic overlap must never silently substitute for
+    model-confirmed relevance. ``use_llm=False`` remains available only for
+    explicit diagnostic/ranking callers.
     """
     matches: list[InsightCardMatch] = []
     if not pairs:
@@ -441,7 +449,10 @@ async def _select_from_candidates(
 
     primary: InsightCardMatch | None = None
     decision: dict[str, Any] | None = None
-    if use_llm and ai_intelligence_client.is_enabled():
+    if use_llm and not ai_intelligence_client.is_enabled():
+        return []
+
+    if use_llm:
         bounded = scored[:_MAX_CANDIDATES]
         candidates = [_enriched_candidate(card) for _score, _pid, card in bounded]
 
@@ -455,7 +466,7 @@ async def _select_from_candidates(
             )
         except AIUnavailableError as exc:
             logger.warning("Insight-card match selector unavailable: %s", exc)
-            decision = None
+            return []
 
     chosen_id = (decision or {}).get("insight_id") if decision else None
     if chosen_id:
@@ -463,10 +474,10 @@ async def _select_from_candidates(
             confidence = float((decision or {}).get("confidence", 0.0))
         except (TypeError, ValueError):
             confidence = 0.0
-        if confidence < _MIN_CONFIDENCE:
+        if not _MIN_CONFIDENCE <= confidence <= 1.0:
             logger.info(
-                "Insight-card selector picked %s below the confidence floor "
-                "(%.2f < %.2f); treating as a decline",
+                "Insight-card selector picked %s with invalid confidence "
+                "%.2f (required %.2f-1.0); treating as a decline",
                 chosen_id, confidence, _MIN_CONFIDENCE,
             )
             chosen_id = None
@@ -474,7 +485,9 @@ async def _select_from_candidates(
     if chosen_id:
         for score, pid, card in scored:
             if str(card.get("insightId")) == chosen_id:
-                primary = _to_match(pid, card, score=score)
+                primary = _to_match(
+                    pid, card, score=score, confidence=confidence
+                )
                 break
         if primary is None:
             logger.warning(
@@ -482,13 +495,19 @@ async def _select_from_candidates(
                 chosen_id,
             )
 
-    # If the LLM selector declined or returned an unknown id, fall back to the
-    # deterministic top data-shape matches.
     if primary is None:
+        if use_llm:
+            return []
         top = scored[:max_cards]
         return [_to_match(pid, card, score=score) for score, pid, card in top if score > 0]
 
     matches.append(primary)
+
+    # Only the selected card has an explicit model confidence. Do not attach
+    # deterministic secondary cards to a fallback response as though they had
+    # passed the same relevance gate.
+    if use_llm:
+        return matches
 
     # Add closely-related secondary cards: same data shape, within a fraction of
     # the primary score, and above a modest floor. This supports questions like

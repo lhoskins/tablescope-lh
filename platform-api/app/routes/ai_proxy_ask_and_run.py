@@ -27,6 +27,7 @@ from app.services.insight_card_match import find_matching_insight_card
 from app.services.intent_engine import IntentDecision, classify_intent
 from app.services.presentation_engine import PresentationMode, mode_for_ask_and_run
 from app.services.presentation_engine import describe as describe_presentation
+from app.services.project_source_resolver import SOURCE_RESOLUTION_MIN_SCORE
 from app.services.response_envelope import ResponseEnvelope
 from app.services.sql_repair_agent import is_read_only_select as _is_read_only_select
 from app.services.sql_repair_agent import run_repair_loop
@@ -536,7 +537,7 @@ async def _resolve_action_sources(
     )
 
 
-async def _ask_and_run_core(
+async def _ask_and_run_single_source(
     session: AsyncSession,
     context: RequestContext,
     *,
@@ -548,8 +549,9 @@ async def _ask_and_run_core(
     conversation_id: int | None = None,
     turn_id: int | None = None,
     history: list[dict[str, str]] | None = None,
+    routing_question: str | None = None,
 ) -> dict[str, Any]:
-    """Resolve a source, generate SQL, execute it, and return the result dict.
+    """Run one source-resolved SQL generation and execution attempt.
 
     Shared by the ask-and-run action endpoint and the AI Assistant chat so both
     ground answers on real executed data. Never raises on a generation/execution
@@ -564,8 +566,9 @@ async def _ask_and_run_core(
     # A question that asks to SEE an insight's query is a RETRIEVAL, not a
     # generation. Generating SQL here is exactly how an invented query got
     # presented as the card's query; the card stores the real one.
+    user_question = routing_question or question
     retrieved = await _retrieve_stored_insight_query(
-        session, context, project_id, question
+        session, context, project_id, user_question
     )
     if retrieved is not None:
         return retrieved
@@ -573,7 +576,7 @@ async def _ask_and_run_core(
     resolver = await _resolve_action_sources(
         session, context,
         project_id=project_id,
-        question=question,
+        question=user_question,
         intent="question_answer",
         source=source,
         card_context=card_context,
@@ -587,7 +590,7 @@ async def _ask_and_run_core(
         tenant_id=context.tenant_id,
         user_id=context.user_id,
         project_id=project_id,
-        question=question,
+        question=user_question,
         relevant_columns=resolver.relevant_columns,
     )
     grounding_evidence = grounding.model_dump() if grounding else None
@@ -601,11 +604,11 @@ async def _ask_and_run_core(
     # both mean the user wants this question answered against that specific
     # data, not redirected to a general reference answer.
     if card_context is None and source is None and await question_names_reference_entry(
-        session, tenant_id=context.tenant_id, project_id=project_id, question=question,
+        session, tenant_id=context.tenant_id, project_id=project_id, question=user_question,
     ):
         prose = await _forward_prose_answer(
             session, context,
-            project_id=project_id, question=question,
+            project_id=project_id, question=user_question,
             history=history,
             scope="authorized_project",
             include_query_history=False, include_dashboard_context=False,
@@ -613,7 +616,7 @@ async def _ask_and_run_core(
         )
         if not prose.get("ai_unavailable") and prose.get("answer"):
             return {
-                "question": question,
+                "question": user_question,
                 "sql": "",
                 "columns": [],
                 "rows": [],
@@ -661,7 +664,7 @@ async def _ask_and_run_core(
             # of a false "the AI service is unavailable".
             friendly, details = _ai_generation_error(exc.detail)
             return {
-                "question": question,
+                "question": user_question,
                 "sql": "",
                 "columns": [],
                 "rows": [],
@@ -680,7 +683,7 @@ async def _ask_and_run_core(
         # an AI-server outage look like a working (if irrelevant) answer.
         # Callers must surface this as a hard error, not fall further back.
         return {
-            "question": question,
+            "question": user_question,
             "sql": "",
             "columns": [],
             "rows": [],
@@ -696,7 +699,7 @@ async def _ask_and_run_core(
     except HTTPException as exc:
         friendly, details = _ai_generation_error(exc.detail)
         return {
-            "question": question,
+            "question": user_question,
             "sql": "",
             "columns": [],
             "rows": [],
@@ -715,7 +718,7 @@ async def _ask_and_run_core(
     sql = (ai_result.get("sql") or "").strip().rstrip(";")
     if not sql or not _is_read_only_select(sql):
         return {
-            "question": question,
+            "question": user_question,
             "sql": sql if sql else "",
             "columns": [],
             "rows": [],
@@ -742,7 +745,7 @@ async def _ask_and_run_core(
     )
     if result is None:
         return {
-            "question": question,
+            "question": user_question,
             "sql": sql,
             "columns": [],
             "rows": [],
@@ -763,7 +766,7 @@ async def _ask_and_run_core(
     rows = result.get("rows", [])[:max_rows]
     used = _detect_datasource(sql, allowed_tables)
     response: dict[str, Any] = {
-        "question": question,
+        "question": user_question,
         "sql": sql,
         "columns": columns,
         "rows": rows,
@@ -793,6 +796,109 @@ async def _ask_and_run_core(
         response["insightContext"] = insight_ctx
     _attach_presentation(response)
     return response
+
+
+_MAX_SOURCE_ATTEMPTS = 3
+
+
+async def _ask_and_run_core(
+    session: AsyncSession,
+    context: RequestContext,
+    *,
+    project_id: int,
+    question: str,
+    max_rows: int,
+    source: str | None = None,
+    card_context: Any | None = None,
+    conversation_id: int | None = None,
+    turn_id: int | None = None,
+    history: list[dict[str, str]] | None = None,
+    routing_question: str | None = None,
+) -> dict[str, Any]:
+    """Exhaust qualified SQL sources before returning a query failure.
+
+    The raw user question is used to rank authorized sources; prompt context
+    may still be passed in ``question`` for SQL generation without changing
+    that ranking. Each candidate above the resolver confidence threshold gets
+    one bounded generation/execution attempt. A successful query is final --
+    Insight Card fallback belongs to the caller and runs only after every
+    qualified SQL source has failed.
+    """
+    user_question = routing_question or question
+
+    # Explicit source/card selections are already authoritative and must not
+    # silently widen to other project sources.
+    if source is not None or card_context is not None:
+        return await _ask_and_run_single_source(
+            session,
+            context,
+            project_id=project_id,
+            question=question,
+            max_rows=max_rows,
+            source=source,
+            card_context=card_context,
+            conversation_id=conversation_id,
+            turn_id=turn_id,
+            history=history,
+            routing_question=user_question,
+        )
+
+    resolver = await _resolve_action_sources(
+        session,
+        context,
+        project_id=project_id,
+        question=user_question,
+        intent="question_answer",
+    )
+    qualified_sources = [
+        candidate.source
+        for candidate in resolver.candidates
+        if candidate.score >= SOURCE_RESOLUTION_MIN_SCORE
+    ][:_MAX_SOURCE_ATTEMPTS]
+
+    # Preserve the catalog-wide generation behavior when no source clears the
+    # deterministic threshold. It gets one attempt, then the caller may try a
+    # high-confidence existing Insight Card.
+    attempts: list[str | None] = qualified_sources or [None]
+    failures: list[dict[str, Any]] = []
+    last_result: dict[str, Any] | None = None
+
+    for candidate_source in attempts:
+        result = await _ask_and_run_single_source(
+            session,
+            context,
+            project_id=project_id,
+            question=question,
+            max_rows=max_rows,
+            source=candidate_source,
+            card_context=None,
+            conversation_id=conversation_id,
+            turn_id=turn_id,
+            history=history,
+            routing_question=user_question,
+        )
+        last_result = result
+        status = result.get("status")
+        if status not in ("generation_error", "execution_error"):
+            result["sourceAttempts"] = [
+                *failures,
+                {"source": candidate_source, "status": status},
+            ]
+            return result
+        failures.append(
+            {
+                "source": candidate_source,
+                "status": status,
+                "error": result.get("error"),
+            }
+        )
+
+    assert last_result is not None  # attempts is never empty
+    details = dict(last_result.get("errorDetails") or {})
+    details["sourceAttempts"] = failures
+    last_result["errorDetails"] = details
+    last_result["sourceAttempts"] = failures
+    return last_result
 
 
 def _attach_presentation(response: dict[str, Any]) -> None:
@@ -1059,6 +1165,7 @@ async def ai_ask_and_run(
                     "severity": card_match.severity,
                     "diagnostics": card_match.diagnostics,
                     "proposedActions": card_match.proposed_actions,
+                    "confidence": card_match.confidence,
                 },
                 "groundingManifest": grounding_manifest,
                 # Matched from an existing Insight Card, not fresh KG context.
