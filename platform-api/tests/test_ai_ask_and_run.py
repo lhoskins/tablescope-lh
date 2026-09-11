@@ -14,13 +14,14 @@ from fastapi import HTTPException
 
 import app.services.ai_intelligence_client as aic
 from app.auth.jwt import create_access_token
-from app.routes import ai_proxy
+from app.routes import ai_proxy, ai_proxy_ask_and_run
 from app.routes.ai_proxy import (
     _ai_generation_error,
     _apply_row_limit,
     _is_read_only_select,
     _suggest_visualization,
 )
+from app.services.project_source_resolver import ResolverCandidate, ResolverResult
 from app.services.supabase_auth_service import SupabaseAuthService, SupabaseUser
 
 
@@ -290,6 +291,7 @@ async def test_ask_and_run_surfaces_matching_insight_card_over_prose(
     assert body["matchedInsight"]["insightId"] == "backup-001"
     assert body["matchedInsight"]["title"] == "Backup Jobs by System"
     assert body["matchedInsight"]["chart"] == {"type": "bar", "data": {"rows": []}}
+    assert body["matchedInsight"]["confidence"] == 0.9
     assert "unreachable" in body["explanation"]
     assert "I found an existing analysis that answers this" in body["explanation"]
     assert body["rows"] == []
@@ -871,6 +873,103 @@ async def test_ask_and_run_passes_preferred_sources_to_generator(
     assert r.status_code == 200
     assert seen["preferred_sources"] == ["SUP_Quality_Inspections_CSV"]
     assert seen["relevant_columns"] == ["SupplierID", "DefectRate"]
+
+
+async def test_core_exhausts_qualified_sources_and_uses_raw_routing_question(
+    monkeypatch,
+):
+    """Prompt context cannot reroute the question, and retries are bounded to
+    authorized candidates that clear the resolver confidence threshold."""
+    from app.routes import ai_proxy_ask_and_run as ask_run
+    from app.services.project_source_resolver import ResolverCandidate, ResolverResult
+
+    resolved_questions: list[str] = []
+    attempted_sources: list[str | None] = []
+
+    async def fake_resolve(*args, **kwargs):
+        resolved_questions.append(kwargs["question"])
+        return ResolverResult(
+            status="resolved",
+            preferred_sources=["subject_a"],
+            candidates=[
+                ResolverCandidate("subject_a", 72.0, ["Metric"], "subject"),
+                ResolverCandidate("subject_b", 51.0, ["Metric"], "subject"),
+                ResolverCandidate("unrelated", 30.0, ["SiteID"], "dimension"),
+            ],
+        )
+
+    async def fake_single(*args, **kwargs):
+        attempted_sources.append(kwargs.get("source"))
+        if kwargs.get("source") == "subject_b":
+            return {"status": "success", "errorDetails": None}
+        return {
+            "status": "generation_error",
+            "error": "could not generate",
+            "errorDetails": {},
+        }
+
+    monkeypatch.setattr(ask_run, "_resolve_action_sources", fake_resolve)
+    monkeypatch.setattr(ask_run, "_ask_and_run_single_source", fake_single)
+
+    result = await ask_run._ask_and_run_core(
+        object(),
+        object(),
+        project_id=1,
+        question="Project context about incidents\nUser question: backup jobs",
+        routing_question="backup jobs",
+        max_rows=100,
+    )
+
+    assert result["status"] == "success"
+    assert resolved_questions == ["backup jobs"]
+    assert attempted_sources == ["subject_a", "subject_b"]
+    assert result["sourceAttempts"] == [
+        {
+            "source": "subject_a",
+            "status": "generation_error",
+            "error": "could not generate",
+        },
+        {"source": "subject_b", "status": "success"},
+    ]
+
+
+@pytest.mark.parametrize("success_source", ["first", None])
+async def test_source_attempts_stop_on_success_or_at_three(monkeypatch, success_source):
+    attempts = []
+    history = [{"role": "user", "content": "Earlier question"}]
+
+    async def resolve(*args, **kwargs):
+        return ResolverResult(
+            status="resolved",
+            candidates=[
+                ResolverCandidate(name, score, ["Metric"], "subject")
+                for name, score in [
+                    ("first", 80), ("second", 60), ("third", 40), ("fourth", 40), ("low", 39)
+                ]
+            ],
+        )
+
+    async def run(*args, **kwargs):
+        assert kwargs["history"] == history
+        source = kwargs["source"]
+        attempts.append(source)
+        if source == success_source:
+            return {"status": "success"}
+        return {"status": "execution_error", "error": source, "errorDetails": {"code": "invalid_sql"}}
+
+    monkeypatch.setattr(ai_proxy_ask_and_run, "_resolve_action_sources", resolve)
+    monkeypatch.setattr(ai_proxy_ask_and_run, "_ask_and_run_single_source", run)
+    result = await ai_proxy_ask_and_run._ask_and_run_core(
+        object(), object(), project_id=1, question="backup jobs", max_rows=100, history=history,
+    )
+
+    assert attempts == (["first"] if success_source else ["first", "second", "third"])
+    assert [attempt["source"] for attempt in result["sourceAttempts"]] == attempts
+    if success_source is None:
+        assert result["status"] == "execution_error"
+        assert result["error"] == "third"
+        assert result["errorDetails"]["code"] == "invalid_sql"
+        assert result["errorDetails"]["sourceAttempts"] == result["sourceAttempts"]
 
 
 def test_is_read_only_select_accepts_select_with_and_comments():

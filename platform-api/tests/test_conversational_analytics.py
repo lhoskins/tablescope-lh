@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.auth.jwt import create_access_token
+from app.services import conversational_analytics
 from app.services.supabase_auth_service import SupabaseAuthService, SupabaseUser
 
 pytestmark = pytest.mark.anyio
@@ -435,21 +436,94 @@ async def test_plain_question_never_triggers_the_investigation_agent(
     assert r.json()["turns"][0]["status"] == "success"
 
 
-async def test_generation_error_falls_back_to_a_matching_insight_card(
+async def test_successful_live_query_never_appends_insight_cards(
+    client, service_headers, monkeypatch
+):
+    _, _, project, headers = await _setup(client, service_headers, "conv-live-first")
+
+    async def _fake_ask_and_run(*args, **kwargs):
+        return _fake_ask_and_run_core_result(kwargs.get("question", ""))
+
+    async def _fail_if_called(*args, **kwargs):
+        raise AssertionError("Insight Cards are fallback-only after SQL exhaustion")
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core",
+        _fake_ask_and_run,
+    )
+    monkeypatch.setattr(
+        "app.services.conversational_analytics.find_matching_insight_cards",
+        _fail_if_called,
+    )
+
+    r = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={
+            "project_id": project["id"],
+            "initial_message": "Show backup jobs by system",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    turn = r.json()["turns"][0]
+    assert turn["status"] == "success"
+    assert turn["matched_insight"] is None
+
+
+@pytest.mark.parametrize("status", ["success", "generation_error", "execution_error"])
+async def test_turn_routes_raw_question_and_preserves_source_attempts(
+    client, service_headers, monkeypatch, status,
+):
+    _, _, project, headers = await _setup(client, service_headers, f"conv-routing-{status.replace('_', '-')}")
+    raw_question = "Show backup jobs by system as a bar chart"
+    rewritten_question = "Count backup jobs grouped by system"
+    source_attempts = [{"source": "backup_jobs", "status": status}]
+
+    async def classify(*args, **kwargs):
+        return conversational_analytics.ConversationalIntent.NEW_ANALYSIS, {}, rewritten_question
+
+    async def attachment(*args, **kwargs):
+        return "Attachment context about incidents and SiteID"
+
+    async def run(*args, **kwargs):
+        assert kwargs["routing_question"] == raw_question
+        assert rewritten_question in kwargs["question"]
+        assert "Attachment context" in kwargs["question"]
+        result = _fake_ask_and_run_core_result(raw_question)
+        result.update(status=status, sourceAttempts=source_attempts, error="Real query error")
+        return result
+
+    async def find_cards(*args, **kwargs):
+        assert status != "success"
+        assert kwargs["question"] == raw_question
+        return []
+
+    async def prose(*args, **kwargs):
+        raise AssertionError("SQL failure must not call the prose fallback")
+
+    monkeypatch.setattr(conversational_analytics, "classify_turn", classify)
+    monkeypatch.setattr(conversational_analytics, "build_attachment_context", attachment)
+    monkeypatch.setattr(conversational_analytics, "_ask_and_run_core", run)
+    monkeypatch.setattr(conversational_analytics, "find_matching_insight_cards", find_cards)
+    monkeypatch.setattr(conversational_analytics, "_forward_prose_answer", prose)
+    response = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={"project_id": project["id"], "initial_message": raw_question},
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+    turn = response.json()["turns"][0]
+    assert turn["result_metadata"]["sourceAttempts"] == source_attempts
+    assert turn["status"] == ("success" if status == "success" else "error")
+    if status != "success":
+        assert turn["assistant_message"] == "Real query error"
+
+
+async def test_generation_error_reports_real_reason_when_card_selector_declines(
     client, db_session, service_headers, monkeypatch
 ):
-    """Restored at the user's explicit request: a chat question closely
-    naming an existing, verified Insight Card ("Budget vs Actual Variance
-    Swings From Over to Under Performance") hard-errored instead of
-    surfacing that card, even though the direct ask-and-run REST action
-    already had this exact fallback (see ai_proxy_ask_and_run.py's
-    ai_ask_and_run/_matched_insight_message). This had briefly been removed
-    after a live report of an unrelated-but-topically-similar card
-    standing in for a real failure; asked directly, the user chose to
-    restore the original fuzzy-matching fallback rather than a narrower
-    exact-title-only version, accepting that tradeoff."""
     from app.models.business_insight_result import BusinessInsightResult
-    from app.services.insight_card_match import InsightCardMatch
 
     tenant, _, project, headers = await _setup(client, service_headers, "conv-insight-match")
 
@@ -482,19 +556,11 @@ async def test_generation_error_falls_back_to_a_matching_insight_card(
             "errorDetails": {"validationError": "empty completion"},
         }
 
-    async def _fake_matches(*args, **kwargs):
-        return [
-            InsightCardMatch(
-                insight_id="mat-cost-001",
-                project_id=project["id"],
-                project_name="Conv Project",
-                title="Material cost on the rise",
-                summary="Weekly material cost has increased steadily since January 2026.",
-                chart={"type": "line", "data": {"rows": []}},
-                severity="warning",
-                score=0.9,
-            )
-        ]
+    async def _no_insight_match(*args, **kwargs):
+        return []
+
+    async def _fail_if_called(*args, **kwargs):
+        raise AssertionError("prose fallback must not replace a query failure")
 
     monkeypatch.setattr(
         "app.services.conversational_analytics._ask_and_run_core",
@@ -502,7 +568,11 @@ async def test_generation_error_falls_back_to_a_matching_insight_card(
     )
     monkeypatch.setattr(
         "app.services.conversational_analytics.find_matching_insight_cards",
-        _fake_matches,
+        _no_insight_match,
+    )
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._forward_prose_answer",
+        _fail_if_called,
     )
 
     r = await client.post(
@@ -515,23 +585,17 @@ async def test_generation_error_falls_back_to_a_matching_insight_card(
     )
     assert r.status_code == 200, r.text
     turn = r.json()["turns"][0]
-    assert turn["status"] == "success"
-    assert turn["matched_insight"]["insightId"] == "mat-cost-001"
-    assert turn["matched_insight"]["title"] == "Material cost on the rise"
-    assert turn["matched_insight"]["chart"] == {"type": "line", "data": {"rows": []}}
-    assert "Material cost on the rise" in turn["assistant_message"]
+    assert turn["status"] == "error"
+    assert turn["matched_insight"] is None
+    assert turn["assistant_message"] == "Model did not return a runnable SQL query."
     assert turn["sql"] is None
     assert turn["chart_config"] is None
-    assert turn["error_code"] == "live_query_fallback_generation_error"
+    assert turn["error_code"] == "generation_error"
 
 
 async def test_generation_error_still_hard_errors_when_nothing_matches(
     client, db_session, service_headers, monkeypatch
 ):
-    """Regression guard for the other direction: a generation failure with
-    no matching Insight Card and no KG prose answer either must still
-    surface the real failure reason -- the restored fallback only ever
-    substitutes a real find, never invents a success."""
     tenant, _, project, headers = await _setup(client, service_headers, "conv-insight-nomatch")
 
     async def _fake_generation_error(*args, **kwargs):
@@ -575,6 +639,69 @@ async def test_generation_error_still_hard_errors_when_nothing_matches(
     assert turn["matched_insight"] is None
     assert turn["assistant_message"] == "Model did not return a runnable SQL query."
     assert turn["error_code"] == "generation_error"
+
+
+async def test_generation_error_uses_only_high_confidence_insight_fallback(
+    client, service_headers, monkeypatch
+):
+    from app.services.insight_card_match import InsightCardMatch
+
+    _, _, project, headers = await _setup(client, service_headers, "conv-card-fallback")
+
+    async def _fake_generation_error(*args, **kwargs):
+        return {
+            "status": "execution_error",
+            "sql": "SELECT bad",
+            "error": "Query execution failed.",
+            "errorDetails": {
+                "sourceAttempts": [
+                    {"source": "backup_jobs", "status": "execution_error"}
+                ]
+            },
+        }
+
+    async def _high_confidence_match(*args, **kwargs):
+        return [
+            InsightCardMatch(
+                insight_id="backup-001",
+                project_id=project["id"],
+                project_name="Conv Project",
+                title="Backup Jobs by System",
+                summary="Backup success and failure rates grouped by system.",
+                chart={"type": "bar"},
+                severity="info",
+                confidence=0.91,
+            )
+        ]
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core",
+        _fake_generation_error,
+    )
+    monkeypatch.setattr(
+        "app.services.conversational_analytics.find_matching_insight_cards",
+        _high_confidence_match,
+    )
+
+    r = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={
+            "project_id": project["id"],
+            "initial_message": "Show backup jobs by system",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    turn = r.json()["turns"][0]
+    assert turn["status"] == "success"
+    assert turn["sql"] is None
+    assert turn["matched_insight"]["insightId"] == "backup-001"
+    assert turn["matched_insight"]["confidence"] == 0.91
+    assert turn["result_metadata"]["insightFallback"] == {
+        "confidence": 0.91,
+        "threshold": 0.75,
+        "reason": "qualified_sql_sources_exhausted",
+    }
 
 
 async def test_ai_unavailable_hard_errors_instead_of_matching_an_insight_card(

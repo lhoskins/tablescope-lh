@@ -132,6 +132,55 @@ async def test_resolves_logistics_delay(db_session) -> None:
     assert result.preferred_sources == ["LOG_Shipments_CSV"]
 
 
+async def test_subject_source_outranks_unrelated_dimension_source(db_session) -> None:
+    """A requested dimension must not pull the query into another subject.
+
+    This reproduces the reported failure generically: the subject source is
+    clearly named in the question but lacks the requested grouping column,
+    while an unrelated source happens to contain it.
+    """
+    await _add_file_source(
+        db_session,
+        view_name="IT_Backup_Jobs_CSV",
+        columns=["System", "Result", "DurationMin", "CompletedAt"],
+    )
+    await _add_file_source(
+        db_session,
+        view_name="IT_Incidents_CSV",
+        columns=["IncidentID", "SiteID", "ResolutionHours"],
+    )
+
+    result = await resolve_project_source(
+        db_session,
+        tenant_id=TENANT,
+        project_id=PROJECT,
+        question="Show IT backup jobs by site",
+    )
+
+    assert result.status == "resolved"
+    assert result.preferred_sources == ["IT_Backup_Jobs_CSV"]
+    assert "System" in result.relevant_columns
+    scores = {candidate.source: candidate.score for candidate in result.candidates}
+    assert scores["IT_Backup_Jobs_CSV"] > scores["IT_Incidents_CSV"]
+
+
+async def test_generic_source_prefix_is_not_subject_evidence(db_session) -> None:
+    await _add_file_source(
+        db_session,
+        view_name="IT_Incidents_CSV",
+        columns=["IncidentID", "SiteID"],
+    )
+    result = await resolve_project_source(
+        db_session,
+        tenant_id=TENANT,
+        project_id=PROJECT,
+        question="Show IT backup jobs",
+    )
+
+    assert result.status == "no_match"
+    assert result.preferred_sources == []
+
+
 async def test_close_scores_auto_pick_top_source(db_session) -> None:
     # Two sources with equally strong evidence (supplier entity + spend metric):
     # the resolver never asks the user to choose — it always auto-selects the

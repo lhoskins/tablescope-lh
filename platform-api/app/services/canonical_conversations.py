@@ -276,6 +276,11 @@ async def append_canonical_turn(
         conversation.last_successful_turn_id = turn.id
     conversation.updated_at = datetime.now(UTC)
     await session.flush()
+    # Fallback candidate lookups can trigger an autoflush before the final
+    # turn state is assigned. Refresh server-maintained timestamps so the
+    # canonical route can serialize the completed turn without an async lazy
+    # load (MissingGreenlet).
+    await session.refresh(turn)
 
     return CanonicalTurnResult(
         conversation_id=conversation.id,

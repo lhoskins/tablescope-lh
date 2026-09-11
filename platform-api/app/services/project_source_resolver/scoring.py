@@ -15,15 +15,27 @@ _MIN_CANDIDATE_SCORE = 25.0
 # The top candidate is accepted outright when it clears this score. When
 # several sources clear it, the highest-scoring one is always chosen (the user
 # is never asked to disambiguate).
-_RESOLVE_SCORE = 40.0
+SOURCE_RESOLUTION_MIN_SCORE = 40.0
+_RESOLVE_SCORE = SOURCE_RESOLUTION_MIN_SCORE
 
 # Weighted evidence contributions (see plan scoring model).
 _W_METRIC_COLUMN = 40.0
 _W_ENTITY_COLUMN = 30.0
 _W_METADATA = 25.0
 _W_SOURCE_NAME = 20.0
+_W_STRONG_SOURCE_NAME = 55.0
 _W_CARD_EVIDENCE = 55.0
 _W_NO_COLUMNS = -30.0
+
+# Technical/domain labels occur in many source names and cannot identify the
+# subject by themselves. For example, every table in an IT project may start
+# with ``IT_``; counting that token made an incidents table look relevant to a
+# backup-jobs question merely because it also had the requested ``SiteID``
+# grouping column.
+_GENERIC_SOURCE_NAME_TERMS = {
+    "it", "data", "dataset", "source", "table", "file", "csv", "tsv",
+    "xls", "xlsx", "json", "parquet",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -43,7 +55,26 @@ def _score_source(
     reasons: list[str] = []
     matched_columns: list[str] = []
 
-    # Column evidence — the strongest signal.
+    # Source-name evidence. A distinctive subject named by the user is strong
+    # evidence even when the requested grouping field/filter column is absent.
+    # This keeps source selection topic-first: a dimension-only match in an
+    # unrelated table must not outrank a source explicitly named by subject.
+    src_tokens = set(_tokens(source.name)) - _GENERIC_SOURCE_NAME_TERMS
+    request_name_tokens = name_tokens - _GENERIC_SOURCE_NAME_TERMS
+    source_name_overlap = request_name_tokens & src_tokens
+    strong_source_name = bool(
+        len(source_name_overlap) >= 2
+        or any(len(term) >= 6 for term in source_name_overlap)
+    )
+    if strong_source_name:
+        score += _W_STRONG_SOURCE_NAME
+        reasons.append("strong source-name subject match")
+    elif source_name_overlap:
+        score += _W_SOURCE_NAME
+        reasons.append("source-name match")
+
+    # Column evidence — normally the strongest signal, but a requested
+    # grouping dimension alone cannot override a strong subject-name match.
     metric_hit = False
     entity_hit = False
     for col in source.columns:
@@ -60,7 +91,7 @@ def _score_source(
     if entity_hit:
         score += _W_ENTITY_COLUMN
         reasons.append("entity column")
-    if not matched_columns:
+    if not matched_columns and not strong_source_name:
         score += _W_NO_COLUMNS
 
     # KPI / metadata evidence.
@@ -73,12 +104,6 @@ def _score_source(
     ):
         score += _W_METADATA * 0.6
         reasons.append("description match")
-
-    # Source-name evidence.
-    src_tokens = set(_tokens(source.name))
-    if name_tokens and (name_tokens & src_tokens):
-        score += _W_SOURCE_NAME
-        reasons.append("source-name match")
 
     # Business Insight / Project Insight card evidence (a card already knows the
     # exact authorized table its finding came from).

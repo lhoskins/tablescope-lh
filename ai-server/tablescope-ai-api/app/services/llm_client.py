@@ -428,6 +428,13 @@ def _resolver_hint(
         "- Only fall back to another authorized source if the preferred "
         "source genuinely cannot answer the request."
     )
+    lines.append(
+        "- Keep source selection anchored to the requested business subject. "
+        "Never switch to an unrelated source solely because it contains a "
+        "requested grouping or filter column. If the preferred source covers "
+        "the subject but lacks that dimension, use the closest valid dimension "
+        "from its listed columns; never invent a column."
+    )
     return "\n".join(lines) + "\n\n"
 
 

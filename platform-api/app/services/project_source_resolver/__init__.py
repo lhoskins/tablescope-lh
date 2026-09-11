@@ -14,6 +14,7 @@ from .scoring import _W_METADATA as _W_METADATA
 from .scoring import _W_METRIC_COLUMN as _W_METRIC_COLUMN
 from .scoring import _W_NO_COLUMNS as _W_NO_COLUMNS
 from .scoring import _W_SOURCE_NAME as _W_SOURCE_NAME
+from .scoring import SOURCE_RESOLUTION_MIN_SCORE as SOURCE_RESOLUTION_MIN_SCORE
 from .scoring import _best_authorized_match, _classify, _score_source
 from .terms import _ENTITY_HINTS as _ENTITY_HINTS
 from .terms import _STOPWORDS as _STOPWORDS
@@ -145,10 +146,18 @@ async def resolve_project_source(
 
     if status == "resolved":
         top = candidates[0]
+        top_source = next((s for s in sources if s.name == top.source), None)
+        relevant_columns = list(top.matched_columns)
+        if not relevant_columns and top_source is not None:
+            # A direct source-name subject match can legitimately win even
+            # when the requested dimension is unavailable. Show the model the
+            # source's real columns so it can choose the closest valid
+            # dimension instead of abandoning the subject for another table.
+            relevant_columns = list(top_source.columns[:8])
         return ResolverResult(
             status="resolved",
             preferred_sources=[top.source],
-            relevant_columns=top.matched_columns,
+            relevant_columns=relevant_columns,
             intent=intent,
             confidence=confidence,
             reason=f"Best match: {top.reason}.",
